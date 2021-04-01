@@ -22,20 +22,24 @@ Assume we want to use Docker to compare the outputs of the same program compiled
 
     RULE compare() :- test("-O0"), test("-O3") as test_opt
     COPY --from=test_opt /output.txt /output_opt.txt
-    RUN diff /output.txt /output_opt.txt 
+    RUN diff /output.txt /output_opt.txt
 
-The above build can be executed as
+    QUERY compare()
 
-    modus < Modusfile --query 'compare()' | docker build -
+This build can be executed by running 
 
-Modus can also output a proof tree that demonstrate how the target image is constructed from base images:
+    cat Modusfile | modus | docker build -
 
-    $ modus < Modusfile --query 'compare()' --proof
+The default query can be specified in Modusfile using 'QUERY compare()' instruction.
+
+Modus can also output a proof tree that shows how the target image is constructed from base images:
+
+    $ cat Modusfile | modus --proof
     compare()
     ├── test("-O0")
     │   └── build("-O0")
     │       └── image_tag(gcc, 4.9)
-    └── test("-O3")
+    └── test("-O3") as test_opt
         └── build("-O3")
             └── image_tag(gcc, 4.9)
    
