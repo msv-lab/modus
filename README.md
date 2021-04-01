@@ -1,6 +1,6 @@
 # Modus
 
-Modus is a container build system that allows to define parametrized and recursive multi-staged Docker builds. Build rules are defined in a Modusfile, a variant of Dockerfile where `FROM ...` instructions are replaced with more general `RULE ...` instructions that express build stages and their dependencies as Datalog rules. Given a Modusfile (the intentional database) and a target image (a Datalog fact), Modus generates a multi-stage Dockerfile for constructing the target image. The generated multi-stage build corresponds to the shortest proof of the fact (the target image) from the existential database (base images).
+Modus is a container build system that allows to define parametrized and recursive [multi-stage Docker builds](https://docs.docker.com/develop/develop-images/multistage-build/). Build rules are defined in a Modusfile, a variant of Dockerfile where `FROM ...` instructions are replaced with more general `RULE ...` instructions that express build stages and their dependencies as [Datalog](https://en.wikipedia.org/wiki/Datalog) rules. Given a Modusfile (the intentional database) and a target image (a Datalog fact), Modus generates a multi-stage Dockerfile for constructing the target image. The generated multi-stage build corresponds to the shortest proof of the fact (the target image) from the existential database (base images).
 
 The advantages of Modus are the following:
 
@@ -12,10 +12,10 @@ Modus is written in Rust, and can be compiled with `cargo build --release`.
 
 ## Motivating example
 
-Assume we want to use Docker to compare the outputs of the same program compiled with and without optimizations. The Modusfile below accomplishes it by defining three stages. The stage `build`, which is parametrized with the compiler flags `CFLAGS` and which depends on the image `gcc:4.9`, compiles the program `foo.c`. The stage `test`, which depends on the previous stage `build`, executes a test. Finally, the final stage `compare` depends on two instances of `test` with the flags `-O0` and `-O3` respectively. `compare` first copies the output file from the second instance of `test` (aliased as `test_opt`), and then compares it with the output file of the first instance of `test`. 
+Assume we want to use Docker to compare the outputs of the same program compiled with and without optimizations. The Modusfile below accomplishes it by defining three stages. The stage `build`, which is parametrized with the compiler flags `CFLAGS` and which depends on the image `gcc:4.9`, compiles the program `foo.c`. The stage `test`, which depends on the previous stage `build`, executes a test. Finally, the final stage `compare` depends on two instances of `test` with the flags `-O0` and `-O3` respectively. `compare` first copies the output file from the second instance of `test` (aliased as `test_opt` because `test` is ambiguous), and then compares it with the output file of the first instance of `test`. 
 
-    RULE build(CFLAGS) :- image(gcc:4.9)
-    RUN gcc $(CFLAGS) -c foo.c -o foo
+    RULE build(CFLAGS) :- image_tag(gcc, 4.9)
+    RUN gcc ${CFLAGS} -c foo.c -o foo
 
     RULE test(CFLAGS) :- build(CFLAGS)
     RUN ./foo 1 2 3 > /output.txt
@@ -28,8 +28,17 @@ The above build can be executed as
 
     modus < Modusfile --query 'compare()' | docker build -
 
-Note that implementing the same in Dockerfile would require duplicating the stages `build` and `test` for each optimization flag.
+Modus can also output a proof tree that demonstrate how the target image is constructed from base images:
 
+    $ modus < Modusfile --query 'compare()' --proof
+    compare()
+    ├── test("-O0")
+    │   └── build("-O0")
+    │       └── image_tag(gcc, 4.9)
+    └── test("-O3")
+        └── build("-O3")
+            └── image_tag(gcc, 4.9)
+   
 ## Documentation
 
 - Examples
