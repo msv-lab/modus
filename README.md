@@ -1,8 +1,10 @@
 # Modus
 
-Modus is a Datalog-based container build system that extends the capabilities of [multi-stage Docker builds](https://docs.docker.com/develop/develop-images/multistage-build/). Modus allows to express *parametrised* build stages and their dependencies, and schedules build tasks using a Datalog solver. This has several advantages over existing approaches: (1) reduced code duplication, (2) modular build definitions, and (3) automatic, optimal dependency resolution.
+Modus is a Datalog-based container build system that extends the capabilities of [multi-stage Docker builds](https://docs.docker.com/develop/develop-images/multistage-build/). Modus allows to express parametrised build stages, and resolves dependencies using a Datalog solver. This has several advantages over existing approaches: (1) reduced code duplication, (2) modular build definitions, and (3) automatic, optimal dependency resolution.
 
-A Modus build is defined in a Modusfile, a variant of Dockerfile where `FROM ...` instructions are replaced with more general `RULE ...` instructions that express build stages as [Datalog](https://en.wikipedia.org/wiki/Datalog) rules. Modusfiles are intuitive and do not require the knowledge of Datalog. However, if you are familiar with Datalog, then the semantics of the build system can be explained as follows. Datalog facts correspond to container images, Datalog rules are associated with build stages, Datalog constants are strings, and Datalog variables correspond to Dockerfile's `ARG` variables. For a given target image, Modus computes the required build tasks as the minimal proof tree of the target image from the base images. The minimality of the proof tree is defined w.r.t. the number of unique intermediate images. 
+A Modus build is defined in a Modusfile, a variant of Dockerfile where `FROM ...` instructions are replaced with more general `RULE ...` instructions that express build stages as [Datalog](https://en.wikipedia.org/wiki/Datalog) rules. Modusfiles are intuitive and do not require the knowledge of Datalog. However, if you are familiar with Datalog, then the semantics of the build system can be explained as follows. Datalog facts correspond to container images, Datalog rules are associated with build stages, Datalog constants are strings, and Datalog variables correspond to Dockerfile's `ARG` variables. For a given target image, Modus computes the required build tasks as the minimal proof tree of the target image from the parent images. The minimality of the proof tree is defined w.r.t. the number of unique intermediate images.
+
+If you have used Modus in your project, please [share your experience](https://docs.google.com/forms/d/e/1FAIpQLSctraHPE-vx9m6Mc6APfCykSGzP-ShE93BO-R57helgw82_4A/viewform?usp=sf_link) with us. We also welcome bug reports and feature requests submitted through [Issues](https://github.com/mechtaev/modus/issues).
 
 ## Motivating example
 
@@ -25,7 +27,7 @@ Modus provides a source-to-source translator from Modusfiles to Dockerfiles, `mo
 
 where the `--query` option specifies the target image. The default query can be set in Modusfile by adding `QUERY compare()`.
 
-Modus can print the proof tree that shows how the target image is constructed from base images:
+Modus can print the proof tree of a given query that shows how the target image is constructed from parent images:
 
     $ modus-transpile Modusfile --query 'compare()' --proof
     compare()
@@ -36,7 +38,7 @@ Modus can print the proof tree that shows how the target image is constructed fr
         └── build("-O3")
             └── image_tag(gcc, 4.9)
 
-Note that in a Dockerfile the stages `build` and `test` would have to be duplicated for each compiler option. 
+In contrast with Modusfile, in a Dockerfile the stages `build` and `test` would have to be duplicated for each compiler option.
    
 ## Documentation
 
@@ -46,5 +48,6 @@ Note that in a Dockerfile the stages `build` and `test` would have to be duplica
   - [Optimal dependency resolution](doc/example-optimal-dependency-resolution.md)
   - [Recursive build stages](doc/example-recursive-stages.md)
 - Manual
+  - [Installation instructions](doc/manual-installation.md)
   - [Modusfile syntax and semantics](doc/manual-modusfile-syntax-and-semantics.md)
   - [Command-line tool](doc/manual-command-line-tool.md)
