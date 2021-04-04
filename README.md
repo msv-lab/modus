@@ -8,13 +8,13 @@ If you have used Modus in your project, please [share your experience](https://d
 
 ## Motivating example
 
-The Modusfile below is designed to compare the outputs of the program `foo.c` compiled with and without optimizations. The stage `build`, which depends on the image `gcc:4.9` and is parametrized with the compiler flags `CFLAGS`, compiles the program `foo.c`. The stage `test`, which depends on the previous stage `build`, executes a test. Finally, the final stage `compare` depends on two instances of `test` with the flags `-O0` and `-O3` respectively. `compare` first copies the output file from the second instance of `test` (aliased as `test_opt` because of ambiguity), and then compares it with the output of the first instance.
+The Modusfile below is designed to compare the outputs of the program `foo.c` compiled with and without optimizations. The stage `compile`, which depends on the image `gcc:4.9` and is parametrized with the compiler flags `CFLAGS`, compiles the program `foo.c`. The stage `test`, which depends on the previous stage `compile`, executes a test. Finally, the final stage `compare` depends on two instances of `test` with the flags `-O0` and `-O3` respectively. `compare` first copies the output file from the second instance of `test` (aliased as `test_opt` because of ambiguity), and then compares it with the output of the first instance.
 
-    RULE build(CFLAGS) :- image_tag(gcc, 4.9)
+    RULE compile(CFLAGS) :- image("gcc:4.9")
     COPY foo.c .
     RUN gcc ${CFLAGS} -c foo.c -o foo
 
-    RULE test(CFLAGS) :- build(CFLAGS)
+    RULE test(CFLAGS) :- compile(CFLAGS)
     RUN ./foo 1 2 3 > /output.txt
 
     RULE compare() :- test("-O0"), test("-O3") as test_opt
@@ -32,13 +32,13 @@ Modus can print the proof tree of a given query that shows how the target image 
     $ modus-transpile Modusfile --query 'compare()' --proof
     compare()
     ├── test("-O0")
-    │   └── build("-O0")
-    │       └── image_tag(gcc, 4.9)
+    │   └── compile("-O0")
+    │       └── image("gcc:4.9")
     └── test("-O3") as test_opt
-        └── build("-O3")
-            └── image_tag(gcc, 4.9)
+        └── compile("-O3")
+            └── image("gcc:4.9")
 
-In contrast with Modusfile, in a Dockerfile the stages `build` and `test` would have to be duplicated for each compiler option.
+In contrast with the Modusfile, in a Dockerfile the stages `compile` and `test` would have to be duplicated for each compiler option.
    
 ## Documentation
 
@@ -49,5 +49,5 @@ In contrast with Modusfile, in a Dockerfile the stages `build` and `test` would 
   - [Recursive build stages](doc/example-recursive-stages.md)
 - Manual
   - [Installation instructions](doc/manual-installation.md)
-  - [Modusfile syntax and semantics](doc/manual-modusfile-syntax-and-semantics.md)
+  - [Modusfile reference](doc/manual-modusfile-reference.md)
   - [Command-line tool](doc/manual-command-line-tool.md)
