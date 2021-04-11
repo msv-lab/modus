@@ -51,3 +51,5 @@ In contrast with the Modusfile, in a Dockerfile the stages `compile` and `test` 
   - [Installation instructions](doc/manual-installation.md)
   - [Modusfile reference](doc/manual-modusfile-reference.md)
   - [Command-line tool](doc/manual-command-line-tool.md)
+- Development
+  - [Roadmap](doc/development-roadmap.md)
