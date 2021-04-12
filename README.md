@@ -10,34 +10,34 @@ If you have used Modus in your project, please [share your experience](https://d
 
 ## Motivating example
 
-A Modus build is defined in a Modusfile, a variant of Dockerfile where `FROM ...` instructions are replaced with more general `RULE ...` instructions that express build stages as Datalog rules. The Modusfile below is designed to compare the outputs of the program `foo.c` compiled with and without optimizations. The stage `compile`, which depends on the image `gcc:4.9` and is parametrized with the compiler flags `CFLAGS`, compiles the program `foo.c`. The stage `test`, which depends on the previous stage `compile`, executes a test. Finally, the final stage `compare` depends on two instances of `test` with the flags `-O0` and `-O3` respectively. `compare` first copies the output file from the second instance of `test` (aliased as `test_opt` because of ambiguity), and then compares it with the output of the first instance.
+A Modus build is defined in a Modusfile, a variant of Dockerfile where `FROM ...` instructions are replaced with more general `RULE ...` instructions that express build stages as Datalog rules. The Modusfile below is designed to compare the outputs of the program `foo.c` compiled with different compilers. The stage `compile`, parametrized with the gcc version `GCC_VERSION` and the compiler flags `CFLAGS`, compiles the program `foo.c`. The stage `test`, which depends on the previous stage `compile`, executes a test. Finally, the final stage `compare` depends on two instances of `test` that uses GCC versions `V1` and `V2` respectively. `compare` first copies the output file from the second instance of `test` (aliased as `test2` because of ambiguity), and then compares it with the output of the first instance.
 
-    RULE compile(CFLAGS) :- image("gcc:4.9")
+    RULE compile(GCC_VERSION, CFLAGS) :- image("gcc:${GCC_VERSION}")
     COPY foo.c .
     RUN gcc ${CFLAGS} -c foo.c -o foo
 
-    RULE test(CFLAGS) :- compile(CFLAGS)
+    RULE test(GCC_VERSION) :- compile(GCC_VERSION, "-O2")
     RUN ./foo 1 2 3 > /output.txt
 
-    RULE compare() :- test("-O0"), test("-O3") as test_opt
-    COPY --from=test_opt /output.txt /output_opt.txt
-    RUN diff /output.txt /output_opt.txt
+    RULE compare(V1, V2) :- test(V1), test(V2) as test2
+    COPY --from=test2 /output.txt /output2.txt
+    CMD diff /output.txt /output2.txt
 
 Modus provides a source-to-source translator from Modusfiles to Dockerfiles, `modus-transpile`. In Bash shell, the above build can be executed by running 
 
-    docker build . -f <(modus-transpile Modusfile --query 'compare()')
+    docker build . -f <(modus-transpile Modusfile --query 'compare("4.8", "4.9")')
 
-where the `--query` option specifies the target image. The default query can be set in Modusfile by adding `QUERY compare()`.
+where the `--query` option specifies the target image.
 
 Modus can print the proof tree of a given query that shows how the target image is constructed from parent images:
 
-    $ modus-transpile Modusfile --query 'compare()' --proof
-    compare()
-    ├── test("-O0")
-    │   └── compile("-O0")
-    │       └── image("gcc:4.9")
-    └── test("-O3") as test_opt
-        └── compile("-O3")
+    $ modus-transpile Modusfile --query 'compare("4.8", "4.9")' --proof
+    compare("4.8", "4.9")
+    ├── test("4.8")
+    │   └── compile("4.8", "-O2")
+    │       └── image("gcc:4.8")
+    └── test("4.9") as test2
+        └── compile("4.9", "-O2")
             └── image("gcc:4.9")
 
 In contrast with the Modusfile, in a Dockerfile the stages `compile` and `test` would have to be duplicated for each compiler option.
@@ -45,13 +45,15 @@ In contrast with the Modusfile, in a Dockerfile the stages `compile` and `test` 
 ## Documentation
 
 - Examples
-  - [Translating Dockerfile to Modusfile](doc/example-nullary-stages.md)
-  - [Avoiding code duplication](doc/example-avoiding-code-duplication.md)
-  - [Optimal dependency resolution](doc/example-optimal-dependency-resolution.md)
-  - [Recursive build stages](doc/example-recursive-stages.md)
+  - [Avoiding Code Duplication](doc/example-avoiding-code-duplication.md)
+  - [Reusing Build Definitions](doc/example-reusing-build-definitions.md)
+  - [Improving Build Speed](doc/example-improving-build-speed.md)
+  - [Optimising Image Size](doc/example-optimising-image-size.md)
+  - [Managing Versions with SemVer Constaints](doc/example-semver-constraints.md)
 - Manual
   - [Installation instructions](doc/manual-installation.md)
   - [Modusfile reference](doc/manual-modusfile-reference.md)
   - [Command-line tool](doc/manual-command-line-tool.md)
 - Development
+  - [Conceptual Overview](doc/development-conceptual-overview.md)
   - [Roadmap](doc/development-roadmap.md)

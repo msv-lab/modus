@@ -1,5 +1,9 @@
 # Roadmap
 
+## Milestone [0.3](https://github.com/mechtaev/modus/milestone/2)
+
+- Support SemVer constraints [#15](https://github.com/mechtaev/modus/issues/15)
+ 
 ## Milestone [0.2](https://github.com/mechtaev/modus/milestone/2)
 
 - Stateless predicates [#11](https://github.com/mechtaev/modus/issues/11)
@@ -18,3 +22,4 @@
 - Provide BuildKit custom builder [#8](https://github.com/mechtaev/modus/issues/8)
 - Support Semver constraints [#15](https://github.com/mechtaev/modus/issues/15)
 - Support conditional instructions [#16](https://github.com/mechtaev/modus/issues/16)
+- Support Modusfile sourcing [#17](https://github.com/mechtaev/modus/issues/17)
