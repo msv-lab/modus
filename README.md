@@ -50,6 +50,7 @@ In contrast with the Modusfile, in a Dockerfile the stages `compile` and `test` 
   - [Improving Build Speed](doc/example-improving-build-speed.md)
   - [Optimising Image Size](doc/example-optimising-image-size.md)
   - [Managing Versions with SemVer Constaints](doc/example-semver-constraints.md)
+  - [Build Definitions as Libraries](doc/example-modus-libraries.md)
 - Manual
   - [Installation instructions](doc/manual-installation.md)
   - [Modusfile reference](doc/manual-modusfile-reference.md)
