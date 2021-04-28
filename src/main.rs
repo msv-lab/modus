@@ -1,3 +1,5 @@
+// Copyright 2021 Sergey Mechtaev
+
 // This file is part of Modus.
 
 // Modus is free software: you can redistribute it and/or modify
@@ -23,9 +25,11 @@ use clap::{
 };
 use std::fs;
 
-mod dockerfile;
+mod dockerfile_parser;
+mod datalog_parser;
+mod modusfile_parser;
 
-use dockerfile::Dockerfile;
+use dockerfile_parser::Dockerfile;
 
 
 fn main() {

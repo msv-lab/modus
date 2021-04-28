@@ -1,3 +1,5 @@
+// Copyright 2021 Sergey Mechtaev
+
 // This file is part of Modus.
 
 // Modus is free software: you can redistribute it and/or modify
@@ -86,6 +88,7 @@ pub struct Dockerfile {
 }
 
 impl Dockerfile {
+    //FIXME: do I need this?
     fn from_instrs(is: Vec<Instruction>) -> Dockerfile {
         Dockerfile{instructions: is}
     }
@@ -111,7 +114,7 @@ impl fmt::Display for Dockerfile {
                 Instruction::From(image) => write!(f, "FROM {}\n", image),
                 Instruction::Run(s) => write!(f, "RUN {}\n", s),
                 Instruction::Env(s) => write!(f, "ENV {}\n", s),
-                _ => panic!("unsupported instruction")
+                _ => todo!()
             }?;
         }
         Ok(())
