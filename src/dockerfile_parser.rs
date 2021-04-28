@@ -117,7 +117,7 @@ impl fmt::Display for Arg {
 pub enum DockerInstruction {
     From(From),
     Run(Run),
-    Cmd(Copy),
+    //Cmd(String),
     // Label(String),
     // Maintainer(String),
     // Expose(String),
@@ -186,7 +186,7 @@ fn empty_line(i: &str) -> IResult<&str, ()> {
     )(i)
 }
 
-fn ignored_line(i: &str) -> IResult<&str, ()> {
+pub fn ignored_line(i: &str) -> IResult<&str, ()> {
     value(
         (), // Output is thrown away.
         alt((comment_line, empty_line))
@@ -215,7 +215,7 @@ fn optional_space(i: &str) -> IResult<&str, ()> {
     )(i)
 }
 
-fn mandatory_space(i: &str) -> IResult<&str, ()> {
+pub fn mandatory_space(i: &str) -> IResult<&str, ()> {
     value(
         (), // Output is thrown away.
         delimited(many0(continuation_with_comments), space, optional_space)
@@ -278,33 +278,33 @@ fn parent_image(i: &str) -> IResult<&str, ParentImage> {
     (i)
 }
 
-fn multiline_string(i: &str) -> IResult<&str, String> {
+pub fn multiline_string(i: &str) -> IResult<&str, String> {
     let one_line = map(many1(alt((is_not("\\\n\r"), recognize(tuple((char('\\'), many0(space), is_not(" \n\r"))))))), |s| s.join(""));
     let body = map(separated_list1(many1(line_continuation), one_line), |s| s.join(""));
     preceded(many0(line_continuation), body)(i)
 }
 
-fn from_instr(i: &str) -> IResult<&str, From> {
+pub fn from_instr(i: &str) -> IResult<&str, From> {
     let body = map(parent_image, |im| From(im));
     preceded(pair(tag_no_case("FROM"), mandatory_space), body)(i)
 }
 
-fn env_instr(i: &str) -> IResult<&str, Env> {
+pub fn env_instr(i: &str) -> IResult<&str, Env> {
     let body = map(multiline_string, |s| Env(s));
     preceded(pair(tag_no_case("ENV"), mandatory_space), body)(i)
 }
 
-fn copy_instr(i: &str) -> IResult<&str, Copy> {
+pub fn copy_instr(i: &str) -> IResult<&str, Copy> {
     let body = map(multiline_string, |s| Copy(s));
     preceded(pair(tag_no_case("COPY"), mandatory_space), body)(i)
 }
 
-fn arg_instr(i: &str) -> IResult<&str, Arg> {
+pub fn arg_instr(i: &str) -> IResult<&str, Arg> {
     let body = map(multiline_string, |s| Arg(s));
     preceded(pair(tag_no_case("ARG"), mandatory_space), body)(i)
 }
 
-fn run_instr(i: &str) -> IResult<&str, Run> {
+pub fn run_instr(i: &str) -> IResult<&str, Run> {
     let body = map(multiline_string, |s| Run (s));
     preceded(pair(tag_no_case("RUN"), mandatory_space), body)(i)
 }

@@ -30,6 +30,8 @@ mod datalog_parser;
 mod modusfile_parser;
 
 use dockerfile_parser::Dockerfile;
+use modusfile_parser::Modusfile;
+
 
 
 fn main() {
@@ -64,6 +66,6 @@ fn main() {
 
     let input_file = matches.value_of("FILE").unwrap();
     let content = fs::read_to_string(input_file).unwrap();
-    let df: Dockerfile = content.parse().unwrap();
-    println!("{}", df);
+    let df: Modusfile = content.parse().unwrap();
+    println!("{:?}", df);
 }

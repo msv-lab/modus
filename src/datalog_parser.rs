@@ -42,28 +42,28 @@ use nom::{
 
 
 #[derive(Clone, PartialEq, Debug)]
-pub enum Term {
+pub enum DatalogTerm {
     Constant(String),
     Variable(String)
 }
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Literal {
+pub struct DatalogLiteral {
     name: String,
-    args: Vec<Term>
+    args: Vec<DatalogTerm>
 }
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Rule {
-    head: Literal,
-    body: Vec<Literal>
+pub struct DatalogRule {
+    head: DatalogLiteral,
+    body: Vec<DatalogLiteral>
 }
 
-impl fmt::Display for Term {
+impl fmt::Display for DatalogTerm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
-            Term::Constant(s) => write!(f, "\"{}\"", s), //TODO: I need to escape the string
-            Term::Variable(s) => write!(f, "{}", s)
+            DatalogTerm::Constant(s) => write!(f, "\"{}\"", s), //TODO: I need to escape the string
+            DatalogTerm::Variable(s) => write!(f, "{}", s)
         }
     }
 }
@@ -83,20 +83,20 @@ fn display_sep_by_comma<T: fmt::Display>(seq: &[T]) -> String {
     result
 }
 
-impl fmt::Display for Literal {
+impl fmt::Display for DatalogLiteral {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}({})", self.name, display_sep_by_comma(&self.args))
     }
 }
 
-impl fmt::Display for Rule {
+impl fmt::Display for DatalogRule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} :- {}", self.head, display_sep_by_comma(&self.body))
     }
 }
 
 
-impl str::FromStr for Rule {
+impl str::FromStr for DatalogRule {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -157,24 +157,24 @@ pub fn string_content(i: &str) -> IResult<&str, &str> {
     recognize(many0(none_of("\\\"")))(i)
 }
 
-fn term(i: &str) -> IResult<&str, Term> {
+fn term(i: &str) -> IResult<&str, DatalogTerm> {
     alt((
-        map(delimited(tag("\""), string_content, tag("\"")), |s| Term::Constant(s.into())),
-        map(variable_identifier, |s| Term::Variable(s.into()))
+        map(delimited(tag("\""), string_content, tag("\"")), |s| DatalogTerm::Constant(s.into())),
+        map(variable_identifier, |s| DatalogTerm::Variable(s.into()))
     ))(i)
 }
 
-fn literal(i: &str) -> IResult<&str, Literal> {
+fn literal(i: &str) -> IResult<&str, DatalogLiteral> {
     map(pair(literal_identifier,
              delimited(terminated(tag("("), optional_space),
                        separated_list1(ws(tag(",")), term),
                        preceded(optional_space, tag(")")))),
-        |(name, args)| Literal { name: name.into(), args })(i)
+        |(name, args)| DatalogLiteral { name: name.into(), args })(i)
 }
 
-fn rule(i: &str) -> IResult<&str, Rule> {
+pub fn rule(i: &str) -> IResult<&str, DatalogRule> {
     map(separated_pair(literal, ws(tag(":-")), separated_list1(ws(tag(",")), literal)),
-        |(head, body)| Rule { head, body })(i)
+        |(head, body)| DatalogRule { head, body })(i)
 }
 
 #[cfg(test)]
@@ -183,25 +183,25 @@ mod tests {
 
     #[test]
     fn print_simple_rule() {
-        let c = Term::Constant("C".into());
-        let va = Term::Variable("A".into());
-        let vb = Term::Variable("B".into());
-        let l1 = Literal{ name: "l1".into(), args: vec![va.clone(), vb.clone()] };
-        let l2 = Literal{ name: "l2".into(), args: vec![va.clone(), c.clone()] };
-        let l3 = Literal{ name: "l3".into(), args: vec![vb.clone(), c.clone()] };
-        let r = Rule{ head: l1, body: vec![l2, l3] };
+        let c = DatalogTerm::Constant("C".into());
+        let va = DatalogTerm::Variable("A".into());
+        let vb = DatalogTerm::Variable("B".into());
+        let l1 = DatalogLiteral{ name: "l1".into(), args: vec![va.clone(), vb.clone()] };
+        let l2 = DatalogLiteral{ name: "l2".into(), args: vec![va.clone(), c.clone()] };
+        let l3 = DatalogLiteral{ name: "l3".into(), args: vec![vb.clone(), c.clone()] };
+        let r = DatalogRule{ head: l1, body: vec![l2, l3] };
         assert_eq!("l1(A, B) :- l2(A, \"C\"), l3(B, \"C\")", r.to_string());
     }
 
     #[test]
     fn parse_simple_rule() {
-        let c = Term::Constant("C".into());
-        let va = Term::Variable("A".into());
-        let vb = Term::Variable("B".into());
-        let l1 = Literal{ name: "l1".into(), args: vec![va.clone(), vb.clone()] };
-        let l2 = Literal{ name: "l2".into(), args: vec![va.clone(), c.clone()] };
-        let l3 = Literal{ name: "l3".into(), args: vec![vb.clone(), c.clone()] };
-        let r = Rule{ head: l1, body: vec![l2, l3] };
+        let c = DatalogTerm::Constant("C".into());
+        let va = DatalogTerm::Variable("A".into());
+        let vb = DatalogTerm::Variable("B".into());
+        let l1 = DatalogLiteral{ name: "l1".into(), args: vec![va.clone(), vb.clone()] };
+        let l2 = DatalogLiteral{ name: "l2".into(), args: vec![va.clone(), c.clone()] };
+        let l3 = DatalogLiteral{ name: "l3".into(), args: vec![vb.clone(), c.clone()] };
+        let r = DatalogRule{ head: l1, body: vec![l2, l3] };
         assert_eq!(Ok(r), "l1(A, B) :- l2(A, \"C\"), l3(B, \"C\")".parse());
     }
 
