@@ -138,7 +138,7 @@ fn ws<'a, F: 'a, O>(inner: F) -> impl FnMut(&'a str) -> IResult<&'a str, O>
   )
 }
 
-//TODO: I need to thing more carefully how to connect this to stage name
+//TODO: I need to thin more carefully how to connect this to stage name
 pub fn literal_identifier(i: &str) -> IResult<&str, &str> {
     recognize(
       pair(
@@ -148,7 +148,7 @@ pub fn literal_identifier(i: &str) -> IResult<&str, &str> {
     )(i)
 }
 
-//TODO: I need to thing more carefully how to connect this to ARGs
+//TODO: I need to think more carefully how to connect this to ARGs
 pub fn variable_identifier(i: &str) -> IResult<&str, &str> {
     recognize(
       pair(
