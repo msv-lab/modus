@@ -40,10 +40,17 @@ use nom::{
 };
 
 #[derive(Clone, PartialEq, Debug)]
+pub struct DockerTag(Tag);
+
+#[derive(Clone, PartialEq, Debug)]
 pub enum Tag {
     Latest,
     Custom(String)
 }
+
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct DockerParentImage(ParentImage);
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct ParentImage {
@@ -61,36 +68,80 @@ impl fmt::Display for ParentImage {
 }
 
 #[derive(Clone, PartialEq, Debug)]
-pub enum Instruction {
-    From(ParentImage),
-    Run(String),
-    Cmd(String),
-    Label(String),
-    Maintainer(String),
-    Expose(String),
-    Env(String),
-    Add(String),
-    Copy(String),
-    Entrypoint(String),
-    Volume(String),
-    User(String),
-    Workdir(String),
-    Arg(String),
-    Onbuild(String),
-    Stopsignal(String),
-    Healthcheck(String),
-    Shell(String)
+pub struct From(ParentImage);
+
+impl fmt::Display for From {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Dockerfile {
-    instructions: Vec<Instruction>
+pub struct Run(String);
+
+impl fmt::Display for Run {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct Copy(String);
+
+impl fmt::Display for Copy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct Env(String);
+
+impl fmt::Display for Env {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct Arg(String);
+
+
+impl fmt::Display for Arg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum DockerInstruction {
+    From(From),
+    Run(Run),
+    //Cmd(String),
+    // Label(String),
+    // Maintainer(String),
+    // Expose(String),
+    Env(Env),
+    // Add(String),
+    Copy(Copy),
+    // Entrypoint(String),
+    // Volume(String),
+    // User(String),
+    // Workdir(String),
+    Arg(Arg),
+    // Onbuild(String),
+    // Stopsignal(String),
+    // Healthcheck(String),
+    // Shell(String)
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct Dockerfile(Vec<DockerInstruction>);
 
 impl Dockerfile {
     //FIXME: do I need this?
-    fn from_instrs(is: Vec<Instruction>) -> Dockerfile {
-        Dockerfile{instructions: is}
+    fn from_instrs(is: Vec<DockerInstruction>) -> Dockerfile {
+        Dockerfile(is)
     }
 }
 
@@ -107,13 +158,13 @@ impl str::FromStr for Dockerfile {
 
 impl fmt::Display for Dockerfile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for i in self.instructions.iter() {
+        for i in self.0.iter() {
             match i {
-                Instruction::Arg(s) => write!(f, "ARG {}\n", s),
-                Instruction::Copy(s) => write!(f, "COPY {}\n", s),
-                Instruction::From(image) => write!(f, "FROM {}\n", image),
-                Instruction::Run(s) => write!(f, "RUN {}\n", s),
-                Instruction::Env(s) => write!(f, "ENV {}\n", s),
+                DockerInstruction::Arg(s) => write!(f, "ARG {}\n", s),
+                DockerInstruction::Copy(s) => write!(f, "COPY {}\n", s),
+                DockerInstruction::From(image) => write!(f, "FROM {}\n", image),
+                DockerInstruction::Run(s) => write!(f, "RUN {}\n", s),
+                DockerInstruction::Env(s) => write!(f, "ENV {}\n", s),
                 _ => todo!()
             }?;
         }
@@ -135,7 +186,7 @@ fn empty_line(i: &str) -> IResult<&str, ()> {
     )(i)
 }
 
-fn ignored_line(i: &str) -> IResult<&str, ()> {
+pub fn ignored_line(i: &str) -> IResult<&str, ()> {
     value(
         (), // Output is thrown away.
         alt((comment_line, empty_line))
@@ -164,7 +215,7 @@ fn optional_space(i: &str) -> IResult<&str, ()> {
     )(i)
 }
 
-fn mandatory_space(i: &str) -> IResult<&str, ()> {
+pub fn mandatory_space(i: &str) -> IResult<&str, ()> {
     value(
         (), // Output is thrown away.
         delimited(many0(continuation_with_comments), space, optional_space)
@@ -227,49 +278,49 @@ fn parent_image(i: &str) -> IResult<&str, ParentImage> {
     (i)
 }
 
-fn multiline_string(i: &str) -> IResult<&str, String> {
+pub fn multiline_string(i: &str) -> IResult<&str, String> {
     let one_line = map(many1(alt((is_not("\\\n\r"), recognize(tuple((char('\\'), many0(space), is_not(" \n\r"))))))), |s| s.join(""));
     let body = map(separated_list1(many1(line_continuation), one_line), |s| s.join(""));
     preceded(many0(line_continuation), body)(i)
 }
 
-fn from_instr(i: &str) -> IResult<&str, Instruction> {
-    let body = map(parent_image, Instruction::From);
+pub fn from_instr(i: &str) -> IResult<&str, From> {
+    let body = map(parent_image, |im| From(im));
     preceded(pair(tag_no_case("FROM"), mandatory_space), body)(i)
 }
 
-fn env_instr(i: &str) -> IResult<&str, Instruction> {
-    let body = map(multiline_string, Instruction::Env);
+pub fn env_instr(i: &str) -> IResult<&str, Env> {
+    let body = map(multiline_string, |s| Env(s));
     preceded(pair(tag_no_case("ENV"), mandatory_space), body)(i)
 }
 
-fn copy_instr(i: &str) -> IResult<&str, Instruction> {
-    let body = map(multiline_string, Instruction::Copy);
+pub fn copy_instr(i: &str) -> IResult<&str, Copy> {
+    let body = map(multiline_string, |s| Copy(s));
     preceded(pair(tag_no_case("COPY"), mandatory_space), body)(i)
 }
 
-fn arg_instr(i: &str) -> IResult<&str, Instruction> {
-    let body = map(multiline_string, Instruction::Arg);
+pub fn arg_instr(i: &str) -> IResult<&str, Arg> {
+    let body = map(multiline_string, |s| Arg(s));
     preceded(pair(tag_no_case("ARG"), mandatory_space), body)(i)
 }
 
-fn run_instr(i: &str) -> IResult<&str, Instruction> {
-    let body = map(multiline_string, Instruction::Run);
+pub fn run_instr(i: &str) -> IResult<&str, Run> {
+    let body = map(multiline_string, |s| Run (s));
     preceded(pair(tag_no_case("RUN"), mandatory_space), body)(i)
 }
 
-fn instruction(i: &str) -> IResult<&str, Instruction> {
+fn docker_instruction(i: &str) -> IResult<&str, DockerInstruction> {
     alt((
-        terminated(from_instr, alt((line_ending, eof))),
-        terminated(copy_instr, alt((line_ending, eof))),
-        terminated(arg_instr, alt((line_ending, eof))),
-        terminated(run_instr, alt((line_ending, eof))),
-        terminated(env_instr, alt((line_ending, eof)))
+        map(terminated(from_instr, alt((line_ending, eof))), DockerInstruction::From),
+        map(terminated(copy_instr, alt((line_ending, eof))), DockerInstruction::Copy),
+        map(terminated(arg_instr, alt((line_ending, eof))), DockerInstruction::Arg),
+        map(terminated(run_instr, alt((line_ending, eof))), DockerInstruction::Run),
+        map(terminated(env_instr, alt((line_ending, eof))), DockerInstruction::Env)
     ))(i)
 }
 
 fn dockerfile(i: &str) -> IResult<&str, Dockerfile> {
-    map(terminated(many0(preceded(many0(ignored_line), instruction)), many0(ignored_line)), Dockerfile::from_instrs)(i)
+    map(terminated(many0(preceded(many0(ignored_line), docker_instruction)), many0(ignored_line)), Dockerfile::from_instrs)(i)
 }
 
 #[cfg(test)]
@@ -286,75 +337,75 @@ mod tests {
 
     #[test]
     fn only_simple_from() {
-        let f = Instruction::From(ubuntu_latest());
+        let f = DockerInstruction::From(From(ubuntu_latest()));
         let e = Dockerfile::from_instrs(vec![f]);
         assert_eq!(Ok(e), "FROM ubuntu\n".parse());
     }
 
     #[test]
     fn only_from_with_tag() {
-        let f = Instruction::From(ubuntu_20_04());
+        let f = DockerInstruction::From(From(ubuntu_20_04()));
         let e = Dockerfile::from_instrs(vec![f]);
         assert_eq!(Ok(e), "FROM ubuntu:20.04\n".parse());
     }
 
     #[test]
     fn two_instructions() {
-        let f = Instruction::From(ubuntu_latest());
-        let r = Instruction::Run("ls".into());
+        let f = DockerInstruction::From(From(ubuntu_latest()));
+        let r = DockerInstruction::Run(Run("ls".into()));
         let e = Dockerfile::from_instrs(vec![f, r]);
         assert_eq!(Ok(e), "FROM ubuntu\nRUN ls\n".parse());
     }
 
     #[test]
     fn no_newline() {
-        let f = Instruction::From(ubuntu_latest());
-        let r = Instruction::Run("ls".into());
+        let f = DockerInstruction::From(From(ubuntu_latest()));
+        let r = DockerInstruction::Run(Run("ls".into()));
         let e = Dockerfile::from_instrs(vec![f, r]);
         assert_eq!(Ok(e), "FROM ubuntu\nRUN ls".parse());
     }
 
     #[test]
     fn empty_line() {
-        let f = Instruction::From(ubuntu_latest());
-        let r = Instruction::Run("ls".into());
+        let f = DockerInstruction::From(From(ubuntu_latest()));
+        let r = DockerInstruction::Run(Run("ls".into()));
         let e = Dockerfile::from_instrs(vec![f, r]);
         assert_eq!(Ok(e), "\nFROM ubuntu\n  \nRUN ls\n \n".parse());
     }
 
     #[test]
     fn comment() {
-        let f = Instruction::From(ubuntu_latest());
+        let f = DockerInstruction::From(From(ubuntu_latest()));
         let e = Dockerfile::from_instrs(vec![f]);
         assert_eq!(Ok(e), "# hello world\nFROM ubuntu".parse());
     }
 
     #[test]
     fn from_line_continuation_with_comment() {
-        let f = Instruction::From(ubuntu_latest());
+        let f = DockerInstruction::From(From(ubuntu_latest()));
         let e = Dockerfile::from_instrs(vec![f]);
         assert_eq!(Ok(e), "FROM\\\n# hello world\n ubuntu".parse());
     }
 
     #[test]
     fn from_line_continuation() {
-        let f = Instruction::From(ubuntu_latest());
+        let f = DockerInstruction::From(From(ubuntu_latest()));
         let e = Dockerfile::from_instrs(vec![f]);
         assert_eq!(Ok(e), "FROM\\ \n ubuntu".parse());
     }
 
     #[test]
     fn run_line_continuation_beginning() {
-        let f = Instruction::From(ubuntu_latest());
-        let r = Instruction::Run("ls -la".into());
+        let f = DockerInstruction::From(From(ubuntu_latest()));
+        let r = DockerInstruction::Run(Run("ls -la".into()));
         let e = Dockerfile::from_instrs(vec![f, r]);
         assert_eq!(Ok(e), "FROM ubuntu\nRUN\\\n ls -la".parse());
     }
 
     #[test]
     fn run_line_continuation_middle() {
-        let f = Instruction::From(ubuntu_latest());
-        let r = Instruction::Run("ls -la".into());
+        let f = DockerInstruction::From(From(ubuntu_latest()));
+        let r = DockerInstruction::Run(Run("ls -la".into()));
         let e = Dockerfile::from_instrs(vec![f, r]);
         assert_eq!(Ok(e), "FROM ubuntu\nRUN ls \\\n-la".parse());
     }
