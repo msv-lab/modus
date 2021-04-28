@@ -17,7 +17,6 @@
 
 use std::str;
 use std::fmt;
-use fp_core::compose::*;
 
 use nom::{
     bytes::complete::{is_not, tag, tag_no_case},
@@ -28,14 +27,12 @@ use nom::{
         space0,
         space1,
         line_ending,
-        not_line_ending,
         one_of
     },
     branch::alt,
     sequence::{pair, delimited, terminated, preceded, tuple},
     multi::{many0, many1, separated_list1},
     combinator::{value, recognize, map, opt, eof},
-    error::ParseError,
     IResult
 };
 
@@ -50,29 +47,63 @@ pub enum Tag {
 
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct DockerParentImage(ParentImage);
+pub struct DockerParent(Parent);
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct ParentImage {
-    image: String,
+pub struct Image {
+    name: String,
     tag: Tag,
 }
 
-impl fmt::Display for ParentImage {
+impl fmt::Display for Image {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.tag {
-            Tag::Latest => write!(f, "{}", self.image),
-            Tag::Custom(s) => write!(f, "{}:{}", self.image, s)
+            Tag::Latest => write!(f, "{}", self.name),
+            Tag::Custom(s) => write!(f, "{}:{}", self.name, s)
+        }
+    }
+}
+
+impl str::FromStr for Image {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match image(s) {
+            Result::Ok((_, o)) => Ok(o),
+            Result::Err(e) => Result::Err(format!("{}", e)),
         }
     }
 }
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct From(ParentImage);
+pub enum Parent {
+    Image(Image),
+    ImageOrStage(String),
+    Stage(String)
+}
+
+impl fmt::Display for Parent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            Parent::Image(i) => write!(f, "{}", i),
+            Parent::Stage(s) => write!(f, "{}", s),
+            Parent::ImageOrStage(s) => write!(f, "{}", s)
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct From {
+    pub parent: Parent,
+    pub alias: Option<String>
+}
 
 impl fmt::Display for From {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+        match &self.alias {
+            Some(a) => write!(f, "{} AS {}", self.parent, a),
+            None => write!(f, "{}", self.parent)
+        }
     }
 }
 
@@ -136,14 +167,7 @@ pub enum DockerInstruction {
 }
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Dockerfile(Vec<DockerInstruction>);
-
-impl Dockerfile {
-    //FIXME: do I need this?
-    fn from_instrs(is: Vec<DockerInstruction>) -> Dockerfile {
-        Dockerfile(is)
-    }
-}
+pub struct Dockerfile(pub Vec<DockerInstruction>);
 
 impl str::FromStr for Dockerfile {
     type Err = String;
@@ -165,7 +189,6 @@ impl fmt::Display for Dockerfile {
                 DockerInstruction::From(image) => write!(f, "FROM {}\n", image),
                 DockerInstruction::Run(s) => write!(f, "RUN {}\n", s),
                 DockerInstruction::Env(s) => write!(f, "ENV {}\n", s),
-                _ => todo!()
             }?;
         }
         Ok(())
@@ -222,17 +245,6 @@ pub fn mandatory_space(i: &str) -> IResult<&str, ()> {
     )(i)
 }
 
-fn ws<'a, F: 'a, O>(inner: F) -> impl FnMut(&'a str) -> IResult<&'a str, O>
-  where
-  F: FnMut(&'a str) -> IResult<&'a str, O>,
-{
-  delimited(
-    optional_space,
-    inner,
-    optional_space
-  )
-}
-
 fn comment(i: &str) -> IResult<&str, &str> {
     preceded(char('#'), is_not("\n\r"))(i)
 }
@@ -269,13 +281,33 @@ pub fn tag_identifier(i: &str) -> IResult<&str, &str> {
 }
 
 //TODO: ${...} can be inside names
-fn parent_image(i: &str) -> IResult<&str, ParentImage> {
+//TODO: I need to test alias parsing
+
+pub fn parent(i: &str) -> IResult<&str, Parent> {
     map(pair(image_identifier, opt(preceded(tag(":"), tag_identifier))),
-    |r| match r {
-        (n, None) => ParentImage{ image: n.into(), tag: Tag::Latest },
-        (n, Some(t)) => ParentImage{ image: n.into(), tag: Tag::Custom(t.into()) }
-    })
-    (i)
+        |(n, ot)| match ot {
+            None => Parent::ImageOrStage(n.into()),
+            Some(t) => Parent::Image( Image{ name: n.into(), tag: Tag::Custom(t.into()) })
+        }
+    )(i)
+}
+
+pub fn image(i: &str) -> IResult<&str, Image> {
+    map(pair(image_identifier, opt(preceded(tag(":"), tag_identifier))),
+        |(n, ot)| match ot {
+            None => Image{ name: n.into(), tag: Tag::Latest },
+            Some(t) => Image{ name: n.into(), tag: Tag::Custom(t.into()) }
+        }
+    )(i)
+}
+
+fn from_content(i: &str) -> IResult<&str, From> {
+    map(pair(
+        parent,
+        opt(map(preceded(delimited(optional_space, tag("AS"), space), alias_identifier), String::from))
+        ),
+        |(parent, alias)| From{ parent, alias }
+    )(i)
 }
 
 pub fn multiline_string(i: &str) -> IResult<&str, String> {
@@ -285,8 +317,7 @@ pub fn multiline_string(i: &str) -> IResult<&str, String> {
 }
 
 pub fn from_instr(i: &str) -> IResult<&str, From> {
-    let body = map(parent_image, |im| From(im));
-    preceded(pair(tag_no_case("FROM"), mandatory_space), body)(i)
+    preceded(pair(tag_no_case("FROM"), mandatory_space), from_content)(i)
 }
 
 pub fn env_instr(i: &str) -> IResult<&str, Env> {
@@ -320,93 +351,93 @@ fn docker_instruction(i: &str) -> IResult<&str, DockerInstruction> {
 }
 
 fn dockerfile(i: &str) -> IResult<&str, Dockerfile> {
-    map(terminated(many0(preceded(many0(ignored_line), docker_instruction)), many0(ignored_line)), Dockerfile::from_instrs)(i)
+    map(terminated(many0(preceded(many0(ignored_line), docker_instruction)), many0(ignored_line)), Dockerfile)(i)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn ubuntu_latest() -> ParentImage {
-        ParentImage{ image: "ubuntu".into(), tag: Tag::Latest }
+    fn from_ubuntu_latest() -> From {
+        From{ parent: Parent::ImageOrStage("ubuntu".into()), alias: None }
     }
 
-    fn ubuntu_20_04() -> ParentImage {
-        ParentImage{ image: "ubuntu".into(), tag: Tag::Custom("20.04".into()) }
+    fn from_ubuntu_20_04() -> From {
+        From{ parent: Parent::Image( Image { name: "ubuntu".into(), tag: Tag::Custom("20.04".into()) }), alias: None }
     }
 
     #[test]
     fn only_simple_from() {
-        let f = DockerInstruction::From(From(ubuntu_latest()));
-        let e = Dockerfile::from_instrs(vec![f]);
+        let f = DockerInstruction::From(from_ubuntu_latest());
+        let e = Dockerfile(vec![f]);
         assert_eq!(Ok(e), "FROM ubuntu\n".parse());
     }
 
     #[test]
     fn only_from_with_tag() {
-        let f = DockerInstruction::From(From(ubuntu_20_04()));
-        let e = Dockerfile::from_instrs(vec![f]);
+        let f = DockerInstruction::From(from_ubuntu_20_04());
+        let e = Dockerfile(vec![f]);
         assert_eq!(Ok(e), "FROM ubuntu:20.04\n".parse());
     }
 
     #[test]
     fn two_instructions() {
-        let f = DockerInstruction::From(From(ubuntu_latest()));
+        let f = DockerInstruction::From(from_ubuntu_latest());
         let r = DockerInstruction::Run(Run("ls".into()));
-        let e = Dockerfile::from_instrs(vec![f, r]);
+        let e = Dockerfile(vec![f, r]);
         assert_eq!(Ok(e), "FROM ubuntu\nRUN ls\n".parse());
     }
 
     #[test]
     fn no_newline() {
-        let f = DockerInstruction::From(From(ubuntu_latest()));
+        let f = DockerInstruction::From(from_ubuntu_latest());
         let r = DockerInstruction::Run(Run("ls".into()));
-        let e = Dockerfile::from_instrs(vec![f, r]);
+        let e = Dockerfile(vec![f, r]);
         assert_eq!(Ok(e), "FROM ubuntu\nRUN ls".parse());
     }
 
     #[test]
     fn empty_line() {
-        let f = DockerInstruction::From(From(ubuntu_latest()));
+        let f = DockerInstruction::From(from_ubuntu_latest());
         let r = DockerInstruction::Run(Run("ls".into()));
-        let e = Dockerfile::from_instrs(vec![f, r]);
+        let e = Dockerfile(vec![f, r]);
         assert_eq!(Ok(e), "\nFROM ubuntu\n  \nRUN ls\n \n".parse());
     }
 
     #[test]
     fn comment() {
-        let f = DockerInstruction::From(From(ubuntu_latest()));
-        let e = Dockerfile::from_instrs(vec![f]);
+        let f = DockerInstruction::From(from_ubuntu_latest());
+        let e = Dockerfile(vec![f]);
         assert_eq!(Ok(e), "# hello world\nFROM ubuntu".parse());
     }
 
     #[test]
     fn from_line_continuation_with_comment() {
-        let f = DockerInstruction::From(From(ubuntu_latest()));
-        let e = Dockerfile::from_instrs(vec![f]);
+        let f = DockerInstruction::From(from_ubuntu_latest());
+        let e = Dockerfile(vec![f]);
         assert_eq!(Ok(e), "FROM\\\n# hello world\n ubuntu".parse());
     }
 
     #[test]
     fn from_line_continuation() {
-        let f = DockerInstruction::From(From(ubuntu_latest()));
-        let e = Dockerfile::from_instrs(vec![f]);
+        let f = DockerInstruction::From(from_ubuntu_latest());
+        let e = Dockerfile(vec![f]);
         assert_eq!(Ok(e), "FROM\\ \n ubuntu".parse());
     }
 
     #[test]
     fn run_line_continuation_beginning() {
-        let f = DockerInstruction::From(From(ubuntu_latest()));
+        let f = DockerInstruction::From(from_ubuntu_latest());
         let r = DockerInstruction::Run(Run("ls -la".into()));
-        let e = Dockerfile::from_instrs(vec![f, r]);
+        let e = Dockerfile(vec![f, r]);
         assert_eq!(Ok(e), "FROM ubuntu\nRUN\\\n ls -la".parse());
     }
 
     #[test]
     fn run_line_continuation_middle() {
-        let f = DockerInstruction::From(From(ubuntu_latest()));
+        let f = DockerInstruction::From(from_ubuntu_latest());
         let r = DockerInstruction::Run(Run("ls -la".into()));
-        let e = Dockerfile::from_instrs(vec![f, r]);
+        let e = Dockerfile(vec![f, r]);
         assert_eq!(Ok(e), "FROM ubuntu\nRUN ls \\\n-la".parse());
     }
 }

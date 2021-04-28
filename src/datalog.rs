@@ -20,23 +20,17 @@ use std::str;
 use std::fmt;
 
 use nom::{
-    bytes::complete::{is_not, tag, tag_no_case},
+    bytes::complete::{tag},
     character::complete::{
-        char,
         alpha1,
         alphanumeric1,
-        space0,
-        space1,
-        line_ending,
-        not_line_ending,
         one_of,
         none_of
     },
     branch::alt,
-    sequence::{pair, delimited, terminated, preceded, tuple, separated_pair},
-    multi::{many0, many1, separated_list1},
-    combinator::{value, recognize, map, opt, eof},
-    error::ParseError,
+    sequence::{pair, delimited, terminated, preceded, separated_pair},
+    multi::{many0, separated_list0, separated_list1},
+    combinator::{value, recognize, map},
     IResult
 };
 
@@ -49,14 +43,14 @@ pub enum DatalogTerm {
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct DatalogLiteral {
-    name: String,
-    args: Vec<DatalogTerm>
+    pub name: String,
+    pub args: Vec<DatalogTerm>
 }
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct DatalogRule {
-    head: DatalogLiteral,
-    body: Vec<DatalogLiteral>
+    pub head: DatalogLiteral,
+    pub body: Vec<DatalogLiteral>
 }
 
 impl fmt::Display for DatalogTerm {
@@ -100,7 +94,7 @@ impl str::FromStr for DatalogRule {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match rule(s) {
+        match datalog_rule(s) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
@@ -111,7 +105,7 @@ impl str::FromStr for DatalogLiteral {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match literal(s) {
+        match datalog_literal(s) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
@@ -179,13 +173,13 @@ fn datalog_term(i: &str) -> IResult<&str, DatalogTerm> {
 fn datalog_literal(i: &str) -> IResult<&str, DatalogLiteral> {
     map(pair(literal_identifier,
              delimited(terminated(tag("("), optional_space),
-                       separated_list1(ws(tag(",")), datalog_term),
+                       separated_list0(ws(tag(",")), datalog_term),
                        preceded(optional_space, tag(")")))),
         |(name, args)| DatalogLiteral { name: name.into(), args })(i)
 }
 
 pub fn datalog_rule(i: &str) -> IResult<&str, DatalogRule> {
-    map(separated_pair(datalog_literal, ws(tag(":-")), separated_list1(ws(tag(",")), literal)),
+    map(separated_pair(datalog_literal, ws(tag(":-")), separated_list1(ws(tag(",")), datalog_literal)),
         |(head, body)| DatalogRule { head, body })(i)
 }
 
