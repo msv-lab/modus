@@ -17,34 +17,24 @@
 
 use std::str;
 
-use crate::dockerfile_parser;
-use crate::datalog_parser;
-
 use nom::{
-    bytes::complete::{is_not, tag, tag_no_case},
-    character::complete::{
-        char,
-        alpha1,
-        alphanumeric1,
-        space0,
-        space1,
-        line_ending,
-        not_line_ending,
-        one_of
-    },
+    bytes::complete::{tag_no_case},
+    character::complete::{line_ending},
     branch::alt,
-    sequence::{pair, delimited, terminated, preceded, tuple},
-    multi::{many0, many1, separated_list1},
-    combinator::{value, recognize, map, opt, eof},
-    error::ParseError,
+    sequence::{pair, terminated, preceded},
+    multi::{many0},
+    combinator::{map, eof},
     IResult
 };
 
-use dockerfile_parser::{Copy, Run, Env};
-use dockerfile_parser::{copy_instr, run_instr, env_instr, mandatory_space, ignored_line};
-use datalog_parser::{DatalogLiteral, DatalogRule, DatalogTerm};
-use datalog_parser::{rule};
-
+use crate::dockerfile::{
+    Copy, Run, Env,
+    copy_instr, run_instr, env_instr, mandatory_space, ignored_line
+};
+use crate::datalog::{
+    DatalogRule,
+    datalog_rule
+};
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum ModusInstruction {
@@ -55,7 +45,7 @@ pub enum ModusInstruction {
 }
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Modusfile(Vec<ModusInstruction>);
+pub struct Modusfile(pub Vec<ModusInstruction>);
 
 impl str::FromStr for Modusfile {
     type Err = String;
@@ -69,7 +59,7 @@ impl str::FromStr for Modusfile {
 }
 
 pub fn rule_instr(i: &str) -> IResult<&str, DatalogRule> {
-    preceded(pair(tag_no_case("RULE"), mandatory_space), rule)(i)
+    preceded(pair(tag_no_case("RULE"), mandatory_space), datalog_rule)(i)
 }
 
 fn modus_instruction(i: &str) -> IResult<&str, ModusInstruction> {

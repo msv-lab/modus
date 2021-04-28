@@ -25,13 +25,14 @@ use clap::{
 };
 use std::fs;
 
-mod dockerfile_parser;
-mod datalog_parser;
-mod modusfile_parser;
+mod dockerfile;
+mod datalog;
+mod modusfile;
+mod transpiler;
 
-use dockerfile_parser::Dockerfile;
-use modusfile_parser::Modusfile;
-
+use dockerfile::Dockerfile;
+use modusfile::Modusfile;
+use datalog::DatalogLiteral;
 
 
 fn main() {
@@ -60,12 +61,10 @@ fn main() {
             .takes_value(true))
         .get_matches();
 
-    if let Some(q) = matches.value_of("query") {
-        println!("Value for query: {}", q);
-    }
-
-    let input_file = matches.value_of("FILE").unwrap();
+        let input_file = matches.value_of("FILE").unwrap();
     let content = fs::read_to_string(input_file).unwrap();
-    let df: Modusfile = content.parse().unwrap();
-    println!("{:?}", df);
+    let mf: Modusfile = content.parse().unwrap();
+    let query: Option<DatalogLiteral> = matches.value_of("query").map(|s| s.parse().unwrap());
+    let df: Dockerfile = transpiler::transpile(mf, query);
+    println!("{}", df);
 }
