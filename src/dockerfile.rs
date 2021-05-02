@@ -184,11 +184,11 @@ impl fmt::Display for Dockerfile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for i in self.0.iter() {
             match i {
-                DockerInstruction::Arg(s) => write!(f, "ARG {}\n", s),
-                DockerInstruction::Copy(s) => write!(f, "COPY {}\n", s),
-                DockerInstruction::From(image) => write!(f, "FROM {}\n", image),
-                DockerInstruction::Run(s) => write!(f, "RUN {}\n", s),
-                DockerInstruction::Env(s) => write!(f, "ENV {}\n", s),
+                DockerInstruction::Arg(s) => writeln!(f, "ARG {}", s),
+                DockerInstruction::Copy(s) => writeln!(f, "COPY {}", s),
+                DockerInstruction::From(image) => writeln!(f, "FROM {}", image),
+                DockerInstruction::Run(s) => writeln!(f, "RUN {}", s),
+                DockerInstruction::Env(s) => writeln!(f, "ENV {}", s),
             }?;
         }
         Ok(())
@@ -321,22 +321,22 @@ pub fn from_instr(i: &str) -> IResult<&str, From> {
 }
 
 pub fn env_instr(i: &str) -> IResult<&str, Env> {
-    let body = map(multiline_string, |s| Env(s));
+    let body = map(multiline_string, Env);
     preceded(pair(tag_no_case("ENV"), mandatory_space), body)(i)
 }
 
 pub fn copy_instr(i: &str) -> IResult<&str, Copy> {
-    let body = map(multiline_string, |s| Copy(s));
+    let body = map(multiline_string, Copy);
     preceded(pair(tag_no_case("COPY"), mandatory_space), body)(i)
 }
 
 pub fn arg_instr(i: &str) -> IResult<&str, Arg> {
-    let body = map(multiline_string, |s| Arg(s));
+    let body = map(multiline_string, Arg);
     preceded(pair(tag_no_case("ARG"), mandatory_space), body)(i)
 }
 
 pub fn run_instr(i: &str) -> IResult<&str, Run> {
-    let body = map(multiline_string, |s| Run (s));
+    let body = map(multiline_string, Run);
     preceded(pair(tag_no_case("RUN"), mandatory_space), body)(i)
 }
 

@@ -64,15 +64,12 @@ impl fmt::Display for DatalogTerm {
 
 fn display_sep_by_comma<T: fmt::Display>(seq: &[T]) -> String {
     let mut result = String::new();
-    match seq.split_last() {
-        Some((last, elements)) => {
-            for el in elements {
-                result += &el.to_string();
-                result.push_str(", ");
-            }
-            result += &last.to_string();
-        },
-        None => ()
+    if let Some((last, elements)) = seq.split_last() {
+        for el in elements {
+            result += &el.to_string();
+            result.push_str(", ");
+        }
+        result += &last.to_string();
     }
     result
 }
@@ -138,7 +135,7 @@ fn ws<'a, F: 'a, O>(inner: F) -> impl FnMut(&'a str) -> IResult<&'a str, O>
   )
 }
 
-//TODO: I need to thin more carefully how to connect this to stage name
+//TODO: I need to think more carefully how to connect this to stage name
 pub fn literal_identifier(i: &str) -> IResult<&str, &str> {
     recognize(
       pair(

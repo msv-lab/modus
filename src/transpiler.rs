@@ -34,7 +34,7 @@ pub fn transpile(mf: Modusfile, query: Option<DatalogLiteral>) -> Dockerfile {
             ModusInstruction::Run(r) => docker_instrs.push(DockerInstruction::Run(r)),
             ModusInstruction::Env(e) => docker_instrs.push(DockerInstruction::Env(e)),
             ModusInstruction::Rule(DatalogRule{head, body}) => {
-                if head.args.len() > 0 {
+                if head.args.is_empty() {
                     panic!("head literals with parameters are not supported")
                 }
                 let stage_name = head.name;
@@ -42,8 +42,9 @@ pub fn transpile(mf: Modusfile, query: Option<DatalogLiteral>) -> Dockerfile {
                     panic!("bodies with multiple literals are not supported")
                 }
                 let body_literal = &body[0];
-                let from = match body_literal {
-                    DatalogLiteral { name, args } => match (name.as_str(), args.as_slice()) {
+                let from = {
+                    let DatalogLiteral { name, args } = body_literal;
+                    match (name.as_str(), args.as_slice()) {
                         ("image", [DatalogTerm::Constant(s)]) =>
                             From{ parent: Parent::Image(s.parse().unwrap()), alias: Some(stage_name) },
                         (s, []) =>
