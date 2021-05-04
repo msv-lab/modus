@@ -80,17 +80,14 @@ Predicates that do not represent images (logic predicates) in the proof tree are
 
 ## Documentation
 
+- Documentation
+  - [Installation](doc/installation.md)
+  - [Tutorial](doc/tutorial.md)
+  - [Language reference](doc/language-reference.md)
+  - [Command-line tool](doc/command-line-tool.md)
 - Examples
-  - [Avoiding Code Duplication](doc/example-avoiding-code-duplication.md)
-  - [Reusing Build Definitions](doc/example-reusing-build-definitions.md)
-  - [Improving Build Speed](doc/example-improving-build-speed.md)
-  - [Optimising Image Size](doc/example-optimising-image-size.md)
-  - [Managing Versions with SemVer Constaints](doc/example-semver-constraints.md)
-  - [Build Definitions as Libraries](doc/example-modus-libraries.md)
-- Manual
-  - [Installation instructions](doc/manual-installation.md)
-  - [Modusfile reference](doc/manual-modusfile-reference.md)
-  - [Command-line tool](doc/manual-command-line-tool.md)
-- Development
-  - [Conceptual Overview](doc/development-conceptual-overview.md)
-  - [Roadmap](doc/development-roadmap.md)
+  - [Avoiding Code Duplication](doc/example/avoiding-code-duplication.md)
+  - [Reusing Build Definitions](doc/example/reusing-build-definitions.md)
+  - [Improving Build Speed](doc/example/improving-build-speed.md)
+  - [Optimising Image Size](doc/example/optimising-image-size.md)
+  - [Managing Versions with SemVer Constaints](doc/example/semver-constraints.md)
