@@ -36,117 +36,47 @@ use nom::{
     IResult
 };
 
-#[derive(Clone, PartialEq, Debug)]
-pub struct DockerTag(Tag);
-
-#[derive(Clone, PartialEq, Debug)]
-pub enum Tag {
-    Latest,
-    Custom(String)
-}
+use crate::values::{ Image, image };
+use crate::common_parsers::{
+    repo_identifier,
+    tag_identifier,
+    alias_identifier
+};
 
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct DockerParent(Parent);
-
-#[derive(Clone, PartialEq, Debug)]
-pub struct Image {
-    name: String,
-    tag: Tag,
-}
-
-impl fmt::Display for Image {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.tag {
-            Tag::Latest => write!(f, "{}", self.name),
-            Tag::Custom(s) => write!(f, "{}:{}", self.name, s)
-        }
-    }
-}
-
-impl str::FromStr for Image {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match image(s) {
-            Result::Ok((_, o)) => Ok(o),
-            Result::Err(e) => Result::Err(format!("{}", e)),
-        }
-    }
-}
-
-#[derive(Clone, PartialEq, Debug)]
-pub enum Parent {
+pub enum ResolvedParent {
     Image(Image),
-    ImageOrStage(String),
     Stage(String)
 }
 
-impl fmt::Display for Parent {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self {
-            Parent::Image(i) => write!(f, "{}", i),
-            Parent::Stage(s) => write!(f, "{}", s),
-            Parent::ImageOrStage(s) => write!(f, "{}", s)
-        }
-    }
-}
+#[derive(Clone, PartialEq, Debug)]
+pub struct UnresolvedParent(String);
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct From {
-    pub parent: Parent,
+pub struct From<P> {
+    pub parent: P,
     pub alias: Option<String>
-}
-
-impl fmt::Display for From {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.alias {
-            Some(a) => write!(f, "{} AS {}", self.parent, a),
-            None => write!(f, "{}", self.parent)
-        }
-    }
-}
-
-#[derive(Clone, PartialEq, Debug)]
-pub struct Run(String);
-
-impl fmt::Display for Run {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Copy(String);
 
-impl fmt::Display for Copy {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+#[derive(Clone, PartialEq, Debug)]
+pub struct Run(String);
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Env(String);
 
-impl fmt::Display for Env {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
 #[derive(Clone, PartialEq, Debug)]
 pub struct Arg(String);
 
-
-impl fmt::Display for Arg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+#[derive(Clone, PartialEq, Debug)]
+pub struct Workdir(String);
 
 #[derive(Clone, PartialEq, Debug)]
-pub enum DockerInstruction {
-    From(From),
+pub enum DockerInstruction<P> {
+    From(From<P>),
     Run(Run),
     //Cmd(String),
     // Label(String),
@@ -158,7 +88,7 @@ pub enum DockerInstruction {
     // Entrypoint(String),
     // Volume(String),
     // User(String),
-    // Workdir(String),
+    Workdir(Workdir),
     Arg(Arg),
     // Onbuild(String),
     // Stopsignal(String),
@@ -167,9 +97,66 @@ pub enum DockerInstruction {
 }
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Dockerfile(pub Vec<DockerInstruction>);
+pub struct Dockerfile<P>(pub Vec<DockerInstruction<P>>);
 
-impl str::FromStr for Dockerfile {
+impl<P> fmt::Display for From<P> 
+where
+    P: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.alias {
+            Some(a) => write!(f, "{} AS {}", self.parent, a),
+            None => write!(f, "{}", self.parent)
+        }
+    }
+}
+
+impl fmt::Display for ResolvedParent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            ResolvedParent::Image(i) => write!(f, "{}", i),
+            ResolvedParent::Stage(s) => write!(f, "{}", s),
+        }
+    }
+}
+
+impl fmt::Display for UnresolvedParent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl fmt::Display for Run {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl fmt::Display for Copy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl fmt::Display for Env {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl fmt::Display for Arg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl fmt::Display for Workdir {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl str::FromStr for Dockerfile<UnresolvedParent> {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -180,7 +167,10 @@ impl str::FromStr for Dockerfile {
     }
 }
 
-impl fmt::Display for Dockerfile {
+impl<T> fmt::Display for Dockerfile<T> 
+where
+    T: fmt::Display,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for i in self.0.iter() {
             match i {
@@ -189,6 +179,7 @@ impl fmt::Display for Dockerfile {
                 DockerInstruction::From(image) => writeln!(f, "FROM {}", image),
                 DockerInstruction::Run(s) => writeln!(f, "RUN {}", s),
                 DockerInstruction::Env(s) => writeln!(f, "ENV {}", s),
+                DockerInstruction::Workdir(s) => writeln!(f, "ENV {}", s),
             }?;
         }
         Ok(())
@@ -256,52 +247,15 @@ fn comment_line(i: &str) -> IResult<&str, ()> {
     )(i)
 }
 
-pub fn alias_identifier(i: &str) -> IResult<&str, &str> {
-    recognize(
-      pair(
-        alpha1,
-        many0(alt((alphanumeric1, tag("_"), tag("-"))))
-      )
-    )(i)
-}
-
-pub fn image_identifier(i: &str) -> IResult<&str, &str> {
-    recognize(
-      pair(
-        alt((alphanumeric1, tag("_"))),
-        many0(alt((alphanumeric1, tag("_"), tag("-"), tag("/"))))
-      )
-    )(i)
-}
-
-pub fn tag_identifier(i: &str) -> IResult<&str, &str> {
-    recognize(
-        many0(alt((alphanumeric1, tag("_"), tag("-"), tag("."))))
-    )(i)
-}
 
 //TODO: ${...} can be inside names
 //TODO: I need to test alias parsing
 
-pub fn parent(i: &str) -> IResult<&str, Parent> {
-    map(pair(image_identifier, opt(preceded(tag(":"), tag_identifier))),
-        |(n, ot)| match ot {
-            None => Parent::ImageOrStage(n.into()),
-            Some(t) => Parent::Image( Image{ name: n.into(), tag: Tag::Custom(t.into()) })
-        }
-    )(i)
+fn parent(i: &str) -> IResult<&str, UnresolvedParent> {
+    map(recognize(image), |s| UnresolvedParent(s.into()))(i)
 }
 
-pub fn image(i: &str) -> IResult<&str, Image> {
-    map(pair(image_identifier, opt(preceded(tag(":"), tag_identifier))),
-        |(n, ot)| match ot {
-            None => Image{ name: n.into(), tag: Tag::Latest },
-            Some(t) => Image{ name: n.into(), tag: Tag::Custom(t.into()) }
-        }
-    )(i)
-}
-
-fn from_content(i: &str) -> IResult<&str, From> {
+fn from_content(i: &str) -> IResult<&str, From<UnresolvedParent>> {
     map(pair(
         parent,
         opt(map(preceded(delimited(optional_space, tag("AS"), space), alias_identifier), String::from))
@@ -316,7 +270,7 @@ pub fn multiline_string(i: &str) -> IResult<&str, String> {
     preceded(many0(line_continuation), body)(i)
 }
 
-pub fn from_instr(i: &str) -> IResult<&str, From> {
+pub fn from_instr(i: &str) -> IResult<&str, From<UnresolvedParent>> {
     preceded(pair(tag_no_case("FROM"), mandatory_space), from_content)(i)
 }
 
@@ -340,30 +294,38 @@ pub fn run_instr(i: &str) -> IResult<&str, Run> {
     preceded(pair(tag_no_case("RUN"), mandatory_space), body)(i)
 }
 
-fn docker_instruction(i: &str) -> IResult<&str, DockerInstruction> {
+pub fn workdir_instr(i: &str) -> IResult<&str, Workdir> {
+    let body = map(multiline_string, Workdir);
+    preceded(pair(tag_no_case("WORKDIR"), mandatory_space), body)(i)
+}
+
+fn docker_instruction(i: &str) -> IResult<&str, DockerInstruction<UnresolvedParent>> {
     alt((
         map(terminated(from_instr, alt((line_ending, eof))), DockerInstruction::From),
         map(terminated(copy_instr, alt((line_ending, eof))), DockerInstruction::Copy),
         map(terminated(arg_instr, alt((line_ending, eof))), DockerInstruction::Arg),
         map(terminated(run_instr, alt((line_ending, eof))), DockerInstruction::Run),
-        map(terminated(env_instr, alt((line_ending, eof))), DockerInstruction::Env)
+        map(terminated(env_instr, alt((line_ending, eof))), DockerInstruction::Env),
+        map(terminated(workdir_instr, alt((line_ending, eof))), DockerInstruction::Workdir)
     ))(i)
 }
 
-fn dockerfile(i: &str) -> IResult<&str, Dockerfile> {
-    map(terminated(many0(preceded(many0(ignored_line), docker_instruction)), many0(ignored_line)), Dockerfile)(i)
+fn dockerfile(i: &str) -> IResult<&str, Dockerfile<UnresolvedParent>> {
+    map(terminated(many0(preceded(many0(ignored_line), docker_instruction)),
+                   many0(ignored_line)),
+        Dockerfile)(i)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn from_ubuntu_latest() -> From {
-        From{ parent: Parent::ImageOrStage("ubuntu".into()), alias: None }
+    fn from_ubuntu_latest() -> From<UnresolvedParent> {
+        From{ parent: UnresolvedParent("ubuntu".into()), alias: None }
     }
 
-    fn from_ubuntu_20_04() -> From {
-        From{ parent: Parent::Image( Image { name: "ubuntu".into(), tag: Tag::Custom("20.04".into()) }), alias: None }
+    fn from_ubuntu_20_04() -> From<UnresolvedParent> {
+        From{ parent: UnresolvedParent("ubuntu:20.04".into()), alias: None }
     }
 
     #[test]

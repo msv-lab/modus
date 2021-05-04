@@ -15,6 +15,14 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
+mod common_parsers;
+mod values;
+mod dockerfile;
+mod datalog;
+mod modusfile;
+mod transpiler;
+
+
 #[macro_use]
 extern crate fp_core;
 
@@ -25,12 +33,7 @@ use clap::{
 };
 use std::fs;
 
-mod dockerfile;
-mod datalog;
-mod modusfile;
-mod transpiler;
-
-use dockerfile::Dockerfile;
+use dockerfile::{ Dockerfile, ResolvedParent };
 use modusfile::Modusfile;
 use datalog::DatalogLiteral;
 
@@ -65,6 +68,6 @@ fn main() {
     let content = fs::read_to_string(input_file).unwrap();
     let mf: Modusfile = content.parse().unwrap();
     let query: Option<DatalogLiteral> = matches.value_of("query").map(|s| s.parse().unwrap());
-    let df: Dockerfile = transpiler::transpile(mf, query);
+    let df: Dockerfile<ResolvedParent> = transpiler::transpile(mf, query);
     println!("{}", df);
 }

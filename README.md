@@ -31,7 +31,7 @@ RULE build_target("production", "release")
 # 'lib' build stage that downloads and compiles the library. 
 # Python's version and the build target are resolved automatically
 # based on the library version and the build mode:
-RULE lib(VERSION, MODE): i"python:${PYTHON}" & \
+RULE lib(VERSION, MODE): image(i"python:${PYTHON}") & \
                          required_python(VERSION, PYTHON) & \
                          build_target(MODE, TARGET)
 RUN apt-get install make
@@ -48,7 +48,7 @@ RUN pip install pylint
 
 # For the production mode, use Alpine image as parent, 
 # and copy compiled binaries from the 'lib' build stage:
-RULE base(VERSION, "production"): i"python:${PYTHON}-alpine" & \
+RULE base(VERSION, "production"): image(i"python:${PYTHON}-alpine") & \
                                   lib(VERSION) & \
                                   required_python(VERSION, PYTHON)
 COPY --from=lib /my_lib /my_lib
@@ -72,9 +72,11 @@ Modus can print the proof tree of a given query that shows how the target image 
         ├── i"python:3.5-alpine"
         ├── lib(v"1.2.5", "production")
         │   ├── i"python:3.5"
-        │   ├── required_python(v"1.2.5", v"3.5")
-        │   └── build_target("production", "debug")
-        └── required_python(v"1.2.5", v"3.5")
+        │   ├╶╶ required_python(v"1.2.5", v"3.5")
+        │   └╶╶ build_target("production", "debug")
+        └╶╶ required_python(v"1.2.5", v"3.5")
+
+Predicates that do not represent images (logic predicates) in the proof tree are preceded with `╶╶`.
 
 ## Documentation
 

@@ -19,14 +19,14 @@ use crate::modusfile::{
     Modusfile, ModusInstruction
 };
 use crate::dockerfile::{
-    Dockerfile, DockerInstruction, From, Parent
+    Dockerfile, DockerInstruction, From, ResolvedParent
 };
 use crate::datalog::{
     DatalogRule, DatalogLiteral, DatalogTerm
 };
 
 
-pub fn transpile(mf: Modusfile, query: Option<DatalogLiteral>) -> Dockerfile {
+pub fn transpile(mf: Modusfile, query: Option<DatalogLiteral>) -> Dockerfile<ResolvedParent> {
     let mut docker_instrs = vec![];
     for instr in mf.0 {
         match instr {
@@ -46,9 +46,9 @@ pub fn transpile(mf: Modusfile, query: Option<DatalogLiteral>) -> Dockerfile {
                     let DatalogLiteral { name, args } = body_literal;
                     match (name.as_str(), args.as_slice()) {
                         ("image", [DatalogTerm::Constant(s)]) =>
-                            From{ parent: Parent::Image(s.parse().unwrap()), alias: Some(stage_name) },
+                            From{ parent: ResolvedParent::Image(s.parse().unwrap()), alias: Some(stage_name) },
                         (s, []) =>
-                            From{ parent: Parent::Stage(s.into()), alias: Some(stage_name) },
+                            From{ parent: ResolvedParent::Stage(s.into()), alias: Some(stage_name) },
                         _ => panic!("unsuppored body literal {}", body_literal)
                     }
                 };
