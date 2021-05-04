@@ -171,7 +171,7 @@ mod tests {
             repo: "rhel".into(), 
             tag: "7.3-53".into()
         };
-        assert_eq!(Some(i), parse_image_literal("v\"registry.access.redhat.com/rhel7/rhel:7.3-53\""));
+        assert_eq!(Some(i), parse_image_literal("i\"registry.access.redhat.com/rhel7/rhel:7.3-53\""));
     }
 
     #[test]
@@ -182,7 +182,7 @@ mod tests {
             repo: "r".into(), 
             tag: "".into()
         };
-        assert_eq!(Some(i), parse_image_literal("v\"a/b/c/r\""));
+        assert_eq!(Some(i), parse_image_literal("i\"a/b/c/r\""));
     }
 
 }
