@@ -179,7 +179,7 @@ where
                 DockerInstruction::From(image) => writeln!(f, "FROM {}", image),
                 DockerInstruction::Run(s) => writeln!(f, "RUN {}", s),
                 DockerInstruction::Env(s) => writeln!(f, "ENV {}", s),
-                DockerInstruction::Workdir(s) => writeln!(f, "ENV {}", s),
+                DockerInstruction::Workdir(s) => writeln!(f, "WORKDIR {}", s),
             }?;
         }
         Ok(())

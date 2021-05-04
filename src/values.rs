@@ -46,7 +46,7 @@ use crate::common_parsers::{
 pub struct Number(i32); //TODO: use arbitrary-precision arithmetic?
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Text(String);
+pub struct Text(pub String);
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Image {
@@ -90,6 +90,12 @@ impl fmt::Display for Image {
         } else {
             write!(f, ":{}", self.tag)
         }
+    }
+}
+
+impl fmt::Display for Text {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/", self.0)
     }
 }
 
@@ -143,7 +149,7 @@ pub fn image(i: &str) -> IResult<&str, Image> {
 }
 
 pub fn image_literal(i: &str) -> IResult<&str, Image> {
-    delimited(tag("v\""), image, tag("\""))(i)
+    delimited(tag("i\""), image, tag("\""))(i)
 }
 
 

@@ -15,26 +15,30 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::str;
+
 use crate::modusfile::{
-    Modusfile, ModusInstruction
+    Modusfile, ModusInstruction, ModusConstant, ModusRule, ModusLiteral, ModusTerm
 };
 use crate::dockerfile::{
-    Dockerfile, DockerInstruction, From, ResolvedParent
+    Dockerfile, DockerInstruction, From, ResolvedParent,
 };
-use crate::datalog::{
-    DatalogRule, DatalogLiteral, DatalogTerm
+use crate::datalog;
+use datalog::{
+    Rule, Literal, Term
 };
 
 
-pub fn transpile(mf: Modusfile, query: Option<DatalogLiteral>) -> Dockerfile<ResolvedParent> {
+pub fn transpile(mf: Modusfile, query: Option<ModusLiteral>) -> Dockerfile<ResolvedParent> {
     let mut docker_instrs = vec![];
     for instr in mf.0 {
         match instr {
             ModusInstruction::Copy(c) => docker_instrs.push(DockerInstruction::Copy(c)),
             ModusInstruction::Run(r) => docker_instrs.push(DockerInstruction::Run(r)),
             ModusInstruction::Env(e) => docker_instrs.push(DockerInstruction::Env(e)),
-            ModusInstruction::Rule(DatalogRule{head, body}) => {
-                if head.args.is_empty() {
+            ModusInstruction::Workdir(e) => docker_instrs.push(DockerInstruction::Workdir(e)),
+            ModusInstruction::Rule(ModusRule{head, body}) => {
+                if !head.args.is_empty() {
                     panic!("head literals with parameters are not supported")
                 }
                 let stage_name = head.name;
@@ -43,10 +47,10 @@ pub fn transpile(mf: Modusfile, query: Option<DatalogLiteral>) -> Dockerfile<Res
                 }
                 let body_literal = &body[0];
                 let from = {
-                    let DatalogLiteral { name, args } = body_literal;
+                    let ModusLiteral { name, args } = body_literal;
                     match (name.as_str(), args.as_slice()) {
-                        ("image", [DatalogTerm::Constant(s)]) =>
-                            From{ parent: ResolvedParent::Image(s.parse().unwrap()), alias: Some(stage_name) },
+                        ("image", [Term::Constant(ModusConstant::Image(i))]) =>
+                            From{ parent: ResolvedParent::Image(i.clone()), alias: Some(stage_name) },
                         (s, []) =>
                             From{ parent: ResolvedParent::Stage(s.into()), alias: Some(stage_name) },
                         _ => panic!("unsuppored body literal {}", body_literal)

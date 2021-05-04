@@ -80,11 +80,10 @@ Predicates that do not represent images (logic predicates) in the proof tree are
 
 ## Documentation
 
-- Documentation
-  - [Installation](doc/installation.md)
-  - [Tutorial](doc/tutorial.md)
-  - [Language reference](doc/language-reference.md)
-  - [Command-line tool](doc/command-line-tool.md)
+- [Installation](doc/installation.md)
+- [Tutorial](doc/tutorial.md)
+- [Language reference](doc/language-reference.md)
+- [Command-line tool](doc/command-line-tool.md)
 - Examples
   - [Avoiding Code Duplication](doc/example/avoiding-code-duplication.md)
   - [Reusing Build Definitions](doc/example/reusing-build-definitions.md)

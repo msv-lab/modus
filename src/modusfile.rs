@@ -16,32 +16,53 @@
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
 use std::str;
+use std::fmt;
 
 use nom::{
-    bytes::complete::{tag_no_case},
-    character::complete::{line_ending},
+    bytes::complete::{tag_no_case, tag},
+    character::complete::{line_ending, none_of, alpha1, alphanumeric1},
     branch::alt,
-    sequence::{pair, terminated, preceded},
+    sequence::{pair, terminated, preceded, delimited},
     multi::{many0},
-    combinator::{map, eof},
+    combinator::{map, eof, recognize},
     IResult
 };
 
 use crate::dockerfile::{
-    Copy, Run, Env,
-    copy_instr, run_instr, env_instr, mandatory_space, ignored_line
+    Copy, Run, Env, Workdir,
+    copy_instr, run_instr, env_instr, workdir_instr,
+    mandatory_space, ignored_line
 };
-use crate::datalog::{
-    DatalogRule,
-    datalog_rule
+use crate::values::{
+    Text, Image,
+    image_literal
 };
+use crate::datalog;
+use datalog::{
+    Rule, Literal, Term
+};
+
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct ModusVariable(String);
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum ModusConstant {
+    Text(Text),
+    Image(Image)
+}
+
+pub type ModusRule = Rule<ModusConstant, ModusVariable>;
+pub type ModusLiteral = Literal<ModusConstant, ModusVariable>;
+pub type ModusTerm = Term<ModusConstant, ModusVariable>;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum ModusInstruction {
-    Rule(DatalogRule),
+    Rule(ModusRule),
     Run(Run),
     Env(Env),
     Copy(Copy),
+    Workdir(Workdir)
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -58,8 +79,73 @@ impl str::FromStr for Modusfile {
     }
 }
 
-pub fn rule_instr(i: &str) -> IResult<&str, DatalogRule> {
-    preceded(pair(tag_no_case("RULE"), mandatory_space), datalog_rule)(i)
+impl str::FromStr for ModusRule {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match datalog::rule(modus_const, modus_var)(s) {
+            Result::Ok((_, o)) => Ok(o),
+            Result::Err(e) => Result::Err(format!("{}", e)),
+        }
+    }
+}
+
+impl str::FromStr for ModusLiteral {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match datalog::literal(modus_const, modus_var)(s) {
+            Result::Ok((_, o)) => Ok(o),
+            Result::Err(e) => Result::Err(format!("{}", e)),
+        }
+    }
+}
+
+impl fmt::Display for ModusConstant {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ModusConstant::Image(i) => write!(f, "i\"{}\"", i),
+            ModusConstant::Text(s) => write!(f, "\"{}\"", s)
+        }
+    }
+}
+
+impl fmt::Display for ModusVariable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/", self.0)
+    }
+}
+
+//TODO: support proper string literals
+fn string_content(i: &str) -> IResult<&str, &str> {
+    recognize(many0(none_of("\\\"")))(i)
+}
+
+fn modus_const(i: &str) -> IResult<&str, ModusConstant> {
+    alt((
+        map(delimited(tag("\""), string_content, tag("\"")),
+            |s| ModusConstant::Text(Text(s.into()))),
+        map(image_literal,
+            |s| ModusConstant::Image(s))
+    ))(i)
+}
+
+//TODO: I need to think more carefully how to connect this to ARGs
+pub fn variable_identifier(i: &str) -> IResult<&str, &str> {
+    recognize(
+      pair(
+        alpha1,
+        many0(alt((alphanumeric1, tag("_"))))
+      )
+    )(i)
+}
+
+fn modus_var(i: &str) -> IResult<&str, ModusVariable> {
+    map(variable_identifier, |s| ModusVariable(s.into()))(i)
+}
+
+pub fn rule_instr(i: &str) -> IResult<&str, ModusRule> {
+    preceded(pair(tag_no_case("RULE"), mandatory_space), datalog::rule(modus_const, modus_var))(i)
 }
 
 fn modus_instruction(i: &str) -> IResult<&str, ModusInstruction> {
@@ -67,7 +153,8 @@ fn modus_instruction(i: &str) -> IResult<&str, ModusInstruction> {
         map(terminated(rule_instr, alt((line_ending, eof))), ModusInstruction::Rule),
         map(terminated(copy_instr, alt((line_ending, eof))), ModusInstruction::Copy),
         map(terminated(run_instr, alt((line_ending, eof))), ModusInstruction::Run),
-        map(terminated(env_instr, alt((line_ending, eof))), ModusInstruction::Env)
+        map(terminated(env_instr, alt((line_ending, eof))), ModusInstruction::Env),
+        map(terminated(workdir_instr, alt((line_ending, eof))), ModusInstruction::Workdir)
     ))(i)
 }
 

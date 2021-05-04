@@ -34,8 +34,8 @@ use clap::{
 use std::fs;
 
 use dockerfile::{ Dockerfile, ResolvedParent };
-use modusfile::Modusfile;
-use datalog::DatalogLiteral;
+use modusfile::{ Modusfile, ModusLiteral };
+use datalog::Literal;
 
 
 fn main() {
@@ -67,7 +67,7 @@ fn main() {
         let input_file = matches.value_of("FILE").unwrap();
     let content = fs::read_to_string(input_file).unwrap();
     let mf: Modusfile = content.parse().unwrap();
-    let query: Option<DatalogLiteral> = matches.value_of("query").map(|s| s.parse().unwrap());
+    let query: Option<ModusLiteral> = matches.value_of("query").map(|s| s.parse().unwrap());
     let df: Dockerfile<ResolvedParent> = transpiler::transpile(mf, query);
     println!("{}", df);
 }
