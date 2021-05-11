@@ -72,7 +72,6 @@ fn display_sep<T: fmt::Display>(seq: &[T], sep: &str) -> String {
         for el in elements {
             result += &el.to_string();
             result.push_str(sep);
-            result.push_str(" ");
         }
         result += &last.to_string();
     }
@@ -85,7 +84,7 @@ where
     V: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}({})", self.name, display_sep(&self.args, ","))
+        write!(f, "{}({})", self.name, display_sep(&self.args, ", "))
     }
 }
 
@@ -95,7 +94,7 @@ where
     V: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.head, display_sep(&self.body, " &"))
+        write!(f, "{}: {}", self.head, display_sep(&self.body, ", "))
     }
 }
 
@@ -161,7 +160,7 @@ pub fn rule<'a, FC: 'a, FV: 'a, C, V>(constant: FC, variable: FV) -> impl FnMut(
 {
     map(separated_pair(literal(constant.clone(), variable.clone()),
                        ws(tag(":")),
-                       separated_list1(ws(tag("&")), literal(constant, variable))),
+                       separated_list1(ws(tag(",")), literal(constant, variable))),
         |(head, body)| Rule { head, body })
 }
 
@@ -209,7 +208,7 @@ mod tests {
         let l2 = StrLiteral{ name: "l2".into(), args: vec![va.clone(), c.clone()] };
         let l3 = StrLiteral{ name: "l3".into(), args: vec![vb.clone(), c.clone()] };
         let r = StrRule{ head: l1, body: vec![l2, l3] };
-        assert_eq!("l1(A, B): l2(A, \"C\") & l3(B, \"C\")", r.to_string());
+        assert_eq!("l1(A, B): l2(A, \"C\"), l3(B, \"C\")", r.to_string());
     }
 
     #[test]
@@ -221,7 +220,7 @@ mod tests {
         let l2 = StrLiteral{ name: "l2".into(), args: vec![va.clone(), c.clone()] };
         let l3 = StrLiteral{ name: "l3".into(), args: vec![vb.clone(), c.clone()] };
         let r = StrRule{ head: l1, body: vec![l2, l3] };
-        assert_eq!(Ok(r), "l1(A, B): l2(A, \"C\") & l3(B, \"C\")".parse());
+        assert_eq!(Ok(r), "l1(A, B): l2(A, \"C\"), l3(B, \"C\")".parse());
     }
 
 }
