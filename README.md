@@ -97,7 +97,7 @@ RUN pip install pylint
 RULE install_deps(VERSION, "production") :- \
        image(i"python:${PYTHON}-alpine"), \
        lib(VERSION), \
-       lib_python(VERSION, PYTHON),
+       lib_python(VERSION, PYTHON)
 COPY --from=lib /my_lib /my_lib
 
 # Copy app's source code to the appropriate parent image:
