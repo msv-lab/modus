@@ -107,7 +107,7 @@ COPY . /my_app
 
 Modus provides a source-to-source translator from Modusfiles to Dockerfiles, `modus-transpile`. In Bash shell, the above build can be executed by running 
 
-    docker build . -f <(modus-transpile Modusfile --query 'app(v"1.2.5", production)')
+    docker build . -f <(modus-transpile Modusfile --query 'app(v"1.2.5", "production")')
 
 where the `--query` option specifies the target image.
 
