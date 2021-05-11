@@ -1,14 +1,14 @@
 # Modus
 
-Modus is a non-Turing-complete logic programming language for building Docker images. Modus extends [Dockerfile](https://docs.docker.com/engine/reference/builder/)'s syntax with [Horn clauses](https://en.wikipedia.org/wiki/Horn_clause) for representing build dependencies. Modus has the following advantages:
+Modus is a Datalog-based language for building Docker images. Modus extends [Dockerfile](https://docs.docker.com/engine/reference/builder/)'s syntax with [Horn clauses](https://en.wikipedia.org/wiki/Horn_clause) for representing build dependencies. Modus has the following advantages:
 
-- __Modularity:__ Modus allows splitting build definitions into independent reusable parts called _parameterised build stages_. Parametrised build stages are [build stages](https://docs.docker.com/develop/develop-images/multistage-build/) with arguments whose values are resolved automatically using a Horn clause solver. This makes build stages feel closer to functions, and addresses longstanding usability issues (e.g. [#32100](https://github.com/moby/moby/issues/32100), [#37345](https://github.com/moby/moby/issues/32100)).
+- __Modularity:__ Modus allows splitting build definitions into independent reusable parts called _parameterised build stages_. Parametrised build stages are [build stages](https://docs.docker.com/develop/develop-images/multistage-build/) with arguments whose values are resolved automatically using a Datalog solver. This makes build stages feel closer to functions, and addresses longstanding usability issues (e.g. [#32100](https://github.com/moby/moby/issues/32100), [#37345](https://github.com/moby/moby/issues/32100)).
 
 - __Dependency resolution:__ Modus allows automatically resolving build dependencies such as versions, base images, compilations flags, etc. Modus provides first-class support for [SemVer](https://semver.org/) constraints.
 
 - __Efficiency:__ For a given target, Modus computes a build tree that minimises the number of executed build steps. Combined with [BuildKit](https://github.com/moby/buildkit), Modus enables efficient parallel builds of groups of related images. Parametrised build stages provide fine-grained control of the resulting image size.
 
-- __Ease of use:__ Modus is a backwards-compatible extension: a Dockerfile is also a valid _Modusfile_, Modus input format. Modus extends Dockerfile's syntax with a new instruction `RULE`, which can be used instead of Docker's `FROM` instruction to describe a build stage and its dependencies in the form of a Horn clause. 
+- __Ease of use:__ Modus is a backwards-compatible extension: a Dockerfile is also a valid _Modusfile_, Modus input format. Modus extends Dockerfile's syntax with a new instruction `RULE`, which can be used instead of Docker's `FROM` instruction to describe a build stage and its dependencies in the form of a Horn clause. Modus is declarative and non-Turing-complete.
 
 We welcome bug reports and feature requests submitted through [GitHub Issues](https://github.com/mechtaev/modus/issues).
 
@@ -21,11 +21,11 @@ Compared to functions/procedures in general-purpose programming languages, build
 ```Dockerfile
 FROM alpine AS a
 ARG X
-RUN ... # use ${X}
+RUN ...   # use ${X}
 
 FROM ubuntu AS b
 ARG Y
-RUN ... # use ${Y}
+RUN ...   # use ${Y}
 
 FROM a AS c
 COPY --from=b ...
@@ -40,20 +40,20 @@ In this example, the stage `c` depends on the stages `a` and `b`, which are para
 Modus addresses these issues by replacing the instruction `FROM` with the instruction `RULE` that explicitly describes dependencies between build stages and their parameters:
 
 ```Dockerfile
-RULE a(X) :- i"alpine"
-RUN ... # use ${X}
+RULE a(X) :- image(i"alpine")
+RUN ...   # use ${X}
 
-RULE b(Y) :- i"ubuntu"
-RUN ... # use ${Y}
+RULE b(Y) :- image(i"ubuntu")
+RUN ...   # use ${Y}
 
 RULE c(X) :- a(X), b(2)
 COPY --from=b ...
 RUN ...
 ```
 
-where `i"alpine"` and `i"ubuntu"` are special literals for images.
+where `i"alpine"` and `i"ubuntu"` are special literals for image objects.
 
-Note that `c(X) :- a(X), b(2)` is a Horn clause. The use of Horn clauses enables Modus to take advantage of the power of logic programming languages such as Prolog and Datalog. For example, Modus can automatic resolve SemVer versions, build multiple images, and parametrise build stages with other build stages.
+Note that `c(X) :- a(X), b(2)` is a Horn clause. The use of Horn clauses enables Modus to take advantage of the power of logic programming languages such as Datalog/Prolog. For example, Modus can automatic resolve SemVer versions, and build multiple images at the same time.
 
 
 ## Motivating example
@@ -64,20 +64,22 @@ The example below uses special literals for Docker images, e.g. `i"python:3.8"`,
 
 ```Dockerfile
 # Python versions required by different versions of the library:
-RULE required_python(VER, v"3.4") :- VER < v"1.1.0"
-RULE required_python(VER, v"3.5") :- VER >= v"1.1.0", VER < v"1.3.0-alpha"
-RULE required_python(VER, v"3.8") :- VER >= v"1.3.0-alpha"
+RULE lib_python(VERSION, v"3.4") :- VERSION < v"1.1.0"
+RULE lib_python(VERSION, v"3.5") :- \
+       VERSION >= v"1.1.0", VERSION < v"1.3.0-alpha"
+RULE lib_python(VERSION, v"3.8") :- VERSION >= v"1.3.0-alpha"
 
 # Library build targets (debug/release) for different build modes (dev/production):
-RULE build_target(dev, "debug")
-RULE build_target(production, "release")
+RULE mode_target("dev", "debug")
+RULE mode_target("production", "release")
 
 # 'lib' build stage that downloads and compiles the library. 
-# Python's version and the build target are resolved automatically
+# Python's version and the build target are resolved
 # based on the library version and the build mode:
-RULE lib(VERSION, MODE) :- i"python:${PYTHON}", \
-                           required_python(VERSION, PYTHON), \
-                           build_target(MODE, TARGET)
+RULE lib(VERSION, MODE) :- \
+       image(i"python:${PYTHON}"), \
+       lib_python(VERSION, PYTHON), \
+       mode_target(MODE, TARGET)
 RUN apt-get install make
 RUN wget https://example.com/releases/example-v${VERSION}.tar.gz && \
     tar xf example-v${VERSION}.tar.gz && \
@@ -85,20 +87,21 @@ RUN wget https://example.com/releases/example-v${VERSION}.tar.gz && \
 WORKDIR /my_lib
 RUN make ${TARGET}
 
-# For the dev mode, use the "lib" build stage as the parent image
+# For the dev mode, use the "lib" build stage as the parent
 # and additionally install development tools (Pylint):
-RULE base(VERSION, dev) :- lib(VERSION)
+RULE install_deps(VERSION, "dev") :- lib(VERSION)
 RUN pip install pylint
 
 # For the production mode, use Alpine as the parent image, 
 # and copy compiled binaries from the "lib" build stage:
-RULE base(VERSION, production) :- i"python:${PYTHON}-alpine", \
-                                  lib(VERSION), \
-                                  required_python(VERSION, PYTHON)
+RULE install_deps(VERSION, "production") :- \
+       image(i"python:${PYTHON}-alpine"), \
+       lib(VERSION), \
+       lib_python(VERSION, PYTHON),
 COPY --from=lib /my_lib /my_lib
 
-# Copy app's source code to the appropriate base image:
-RULE app(LIB_VERSION, MODE) :- base(LIB_VERSION, MODE)
+# Copy app's source code to the appropriate parent image:
+RULE app(VERSION, MODE) :- install_deps(VERSION, MODE)
 COPY . /my_app
 ```
 
@@ -111,14 +114,14 @@ where the `--query` option specifies the target image.
 Modus can print the proof tree of a given query that shows how the target image is constructed from parent images:
 
     $ modus-transpile Modusfile --query 'app(v"1.2.5", "release")' --proof
-    app(v"1.2.5", production)
-    └── base(v"1.2.5", production)
-        ├── i"python:3.5-alpine"
-        ├── lib(v"1.2.5", production)
-        │   ├── i"python:3.5"
-        │   ├╶╶ required_python(v"1.2.5", v"3.5")
-        │   └╶╶ build_target(production, "debug")
-        └╶╶ required_python(v"1.2.5", v"3.5")
+    app(v"1.2.5", "production")
+    └── base(v"1.2.5", "production")
+        ├── image(i"python:3.5-alpine")
+        ├── lib(v"1.2.5", "production")
+        │   ├── image(i"python:3.5")
+        │   ├╶╶ lib_python(v"1.2.5", v"3.5")
+        │   └╶╶ mode_target("production", "debug")
+        └╶╶ lib_python(v"1.2.5", v"3.5")
 
 Predicates that do not represent images (_imageless_ predicates) in the proof tree are preceded with `╶╶`.
 
@@ -129,8 +132,4 @@ Predicates that do not represent images (_imageless_ predicates) in the proof tr
 - [Language reference](doc/language-reference.md)
 - [Command-line tool](doc/command-line-tool.md)
 - Examples
-  - [Avoiding Code Duplication](doc/example/avoiding-code-duplication.md)
-  - [Reusing Build Definitions](doc/example/reusing-build-definitions.md)
-  - [Improving Build Speed](doc/example/improving-build-speed.md)
-  - [Optimising Image Size](doc/example/optimising-image-size.md)
-  - [Managing Versions with SemVer Constaints](doc/example/semver-constraints.md)
+  - [Optimising image size](doc/example/optimising-image-size.md)
