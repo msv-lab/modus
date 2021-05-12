@@ -133,7 +133,7 @@ Imageless predicates are those that do not represent any image, and therefore do
 
 Modus provides special syntax for parameter expansion that allows to use variables inside strings via the shell-style `${X}` syntax.
 
-First, parameter expansion can used as a generic approach to convert values into strings. For example, the literal `f("${X}")` is equivalent to 
+First, parameter expansion can be used as a generic approach to convert values into strings. For example, the literal `f("${X}")` is equivalent to 
 
 ```
 (string(X), X = _1;
