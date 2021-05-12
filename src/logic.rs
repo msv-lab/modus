@@ -30,20 +30,25 @@ use nom::{
     branch::alt,
     sequence::{pair, delimited, terminated, preceded, separated_pair},
     multi::{many0, separated_list0, separated_list1},
-    combinator::{value, recognize, map},
+    combinator::{value, recognize, map, opt},
     IResult
 };
+use fp_core::compose::*;
 
+#[derive(Clone, PartialEq, Debug)]
+pub struct Atom(pub String);
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Term<C, V> {
     Constant(C),
-    Variable(V)
+    Atom(Atom),
+    Variable(V),
+    Compound(Atom, Vec<Term<C, V>>),
 }
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Literal<C, V> {
-    pub name: String,
+    pub atom: Atom,
     pub args: Vec<Term<C,V>>
 }
 
@@ -53,6 +58,12 @@ pub struct Rule<C,V> {
     pub body: Vec<Literal<C,V>>
 }
 
+impl fmt::Display for Atom {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl<C, V> fmt::Display for Term<C, V> 
 where
     C: fmt::Display,
@@ -60,8 +71,10 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
-            Term::Constant(s) => write!(f, "\"{}\"", s), //TODO: I need to escape the string
-            Term::Variable(s) => write!(f, "{}", s)
+            Term::Constant(s)    => write!(f, "{}", s),
+            Term::Variable(s)    => write!(f, "{}", s),
+            Term::Atom(s)        => write!(f, "{}", s),
+            Term::Compound(a, l) => write!(f, "{}({})", a, display_sep(l, ", ")),
         }
     }
 }
@@ -84,7 +97,10 @@ where
     V: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}({})", self.name, display_sep(&self.args, ", "))
+        match &*self.args {
+            [] => write!(f, "{}", self.atom),
+            _ => write!(f, "{}({})", self.atom, display_sep(&self.args, ", "))
+        }
     }
 }
 
@@ -94,7 +110,7 @@ where
     V: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.head, display_sep(&self.body, ", "))
+        write!(f, "{} :- {}", self.head, display_sep(&self.body, ", "))
     }
 }
 
@@ -147,10 +163,11 @@ pub fn literal<'a, FC: 'a, FV: 'a, C, V>(constant: FC, variable: FV) -> impl FnM
     FV: FnMut(&'a str) -> IResult<&'a str, V>,
 {
     map(pair(literal_identifier,
-        delimited(terminated(tag("("), optional_space),
-                  separated_list0(ws(tag(",")), term(constant, variable)),
-                  preceded(optional_space, tag(")")))),
-   |(name, args)| Literal { name: name.into(), args })
+             opt(delimited(terminated(tag("("), optional_space),
+                       separated_list1(ws(tag(",")), term(constant, variable)),
+                       preceded(optional_space, tag(")"))))),
+   |(name, args)| match args { Some(args) => Literal { atom: Atom(name.into()), args },
+                               None => Literal { atom: Atom(name.into()), args: Vec::new() } })
 }
 
 pub fn rule<'a, FC: 'a, FV: 'a, C, V>(constant: FC, variable: FV) -> impl FnMut(&'a str) -> IResult<&'a str, Rule<C, V>>
@@ -159,7 +176,7 @@ pub fn rule<'a, FC: 'a, FV: 'a, C, V>(constant: FC, variable: FV) -> impl FnMut(
     FV: FnMut(&'a str) -> IResult<&'a str, V> + Clone,
 {
     map(separated_pair(literal(constant.clone(), variable.clone()),
-                       ws(tag(":")),
+                       ws(tag(":-")),
                        separated_list1(ws(tag(",")), literal(constant, variable))),
         |(head, body)| Rule { head, body })
 }
@@ -168,14 +185,23 @@ pub fn rule<'a, FC: 'a, FV: 'a, C, V>(constant: FC, variable: FV) -> impl FnMut(
 mod tests {
     use super::*;
 
-    // define a toy language StrDatalog for testing
+    // define a toy language for testing
 
-    type StrTerm = Term<String, String>;
-    type StrLiteral = Literal<String, String>;
-    type StrRule = Rule<String, String>;
+    #[derive(Clone, PartialEq, Debug)]
+    struct StringConst(String);
 
-    fn str_const(i: &str) -> IResult<&str, String> {
-        map(delimited(tag("\""), recognize(many0(none_of("\\\""))), tag("\"")), String::from)(i)
+    impl fmt::Display for StringConst {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "\"{}\"", self.0)
+        }
+    }
+    
+    type TestTerm = Term<StringConst, String>;
+    type TestRule = Rule<StringConst, String>;
+
+    fn str_const(i: &str) -> IResult<&str, StringConst> {
+        map(delimited(tag("\""), recognize(many0(none_of("\\\""))), tag("\"")),
+            compose!(String::from, StringConst))(i)
     }
 
     fn str_var(i: &str) -> IResult<&str, String> {
@@ -187,8 +213,7 @@ mod tests {
             String::from)(i)
     }
 
-
-    impl str::FromStr for StrRule {
+    impl str::FromStr for TestRule {
         type Err = String;
     
         fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -200,27 +225,26 @@ mod tests {
     }
     
     #[test]
-    fn print_simple_rule() {
-        let c = StrTerm::Constant("C".into());
-        let va = StrTerm::Variable("A".into());
-        let vb = StrTerm::Variable("B".into());
-        let l1 = StrLiteral{ name: "l1".into(), args: vec![va.clone(), vb.clone()] };
-        let l2 = StrLiteral{ name: "l2".into(), args: vec![va.clone(), c.clone()] };
-        let l3 = StrLiteral{ name: "l3".into(), args: vec![vb.clone(), c.clone()] };
-        let r = StrRule{ head: l1, body: vec![l2, l3] };
-        assert_eq!("l1(A, B): l2(A, \"C\"), l3(B, \"C\")", r.to_string());
+    fn simple_rule() {
+        let c = TestTerm::Constant(StringConst("C".into()));
+        let va = Term::Variable("A".into());
+        let vb = Term::Variable("B".into());
+        let l1 = Literal{ atom: Atom("l1".into()), args: vec![va.clone(), vb.clone()] };
+        let l2 = Literal{ atom: Atom("l2".into()), args: vec![va.clone(), c.clone()] };
+        let l3 = Literal{ atom: Atom("l3".into()), args: vec![vb.clone(), c.clone()] };
+        let r = Rule{ head: l1, body: vec![l2, l3] };
+        assert_eq!("l1(A, B) :- l2(A, \"C\"), l3(B, \"C\")", r.to_string());
+        assert_eq!(Ok(r), "l1(A, B) :- l2(A, \"C\"), l3(B, \"C\")".parse());
     }
 
     #[test]
-    fn parse_simple_rule() {
-        let c = StrTerm::Constant("C".into());
-        let va = StrTerm::Variable("A".into());
-        let vb = StrTerm::Variable("B".into());
-        let l1 = StrLiteral{ name: "l1".into(), args: vec![va.clone(), vb.clone()] };
-        let l2 = StrLiteral{ name: "l2".into(), args: vec![va.clone(), c.clone()] };
-        let l3 = StrLiteral{ name: "l3".into(), args: vec![vb.clone(), c.clone()] };
-        let r = StrRule{ head: l1, body: vec![l2, l3] };
-        assert_eq!(Ok(r), "l1(A, B): l2(A, \"C\"), l3(B, \"C\")".parse());
+    fn nullary_predicate() {
+        let va = TestTerm::Variable("A".into());
+        let l1 = Literal{ atom: Atom("l1".into()), args: Vec::new() };
+        let l2 = Literal{ atom: Atom("l2".into()), args: vec![va.clone()] };
+        let r = Rule{ head: l1, body: vec![l2] };
+        assert_eq!("l1 :- l2(A)", r.to_string());
+        assert_eq!(Ok(r), "l1 :- l2(A)".parse());
     }
 
 }

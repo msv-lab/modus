@@ -18,7 +18,8 @@
 mod common_parsers;
 mod values;
 mod dockerfile;
-mod datalog;
+mod logic;
+mod wellformed;
 mod modusfile;
 mod transpiler;
 
@@ -35,7 +36,7 @@ use std::fs;
 
 use dockerfile::{ Dockerfile, ResolvedParent };
 use modusfile::{ Modusfile, ModusLiteral };
-use datalog::Literal;
+use logic::Literal;
 
 
 fn main() {

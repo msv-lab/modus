@@ -19,13 +19,13 @@ use std::str;
 use std::fmt;
 
 use nom::{
+    IResult,
+    branch::alt,
     bytes::complete::{tag_no_case, tag},
     character::complete::{line_ending, none_of, alpha1, alphanumeric1},
-    branch::alt,
-    sequence::{pair, terminated, preceded, delimited},
+    combinator::{eof, map, peek, recognize},
     multi::{many0},
-    combinator::{map, eof, recognize},
-    IResult
+    sequence::{pair, terminated, preceded, delimited}
 };
 
 use crate::dockerfile::{
@@ -37,8 +37,8 @@ use crate::values::{
     Text, Image,
     image_literal
 };
-use crate::datalog;
-use datalog::{
+use crate::logic;
+use logic::{
     Rule, Literal, Term
 };
 
@@ -83,7 +83,7 @@ impl str::FromStr for ModusRule {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match datalog::rule(modus_const, modus_var)(s) {
+        match logic::rule(modus_const, modus_var)(s) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
@@ -94,7 +94,7 @@ impl str::FromStr for ModusLiteral {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match datalog::literal(modus_const, modus_var)(s) {
+        match logic::literal(modus_const, modus_var)(s) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
@@ -145,21 +145,23 @@ fn modus_var(i: &str) -> IResult<&str, ModusVariable> {
 }
 
 pub fn rule_instr(i: &str) -> IResult<&str, ModusRule> {
-    preceded(pair(tag_no_case("RULE"), mandatory_space), datalog::rule(modus_const, modus_var))(i)
+    preceded(pair(tag_no_case("RULE"), mandatory_space), logic::rule(modus_const, modus_var))(i)
 }
 
+//TODO: a parsing rule for an instruction should be extracted into a combinator
 fn modus_instruction(i: &str) -> IResult<&str, ModusInstruction> {
     alt((
-        map(terminated(rule_instr, alt((line_ending, eof))), ModusInstruction::Rule),
-        map(terminated(copy_instr, alt((line_ending, eof))), ModusInstruction::Copy),
-        map(terminated(run_instr, alt((line_ending, eof))), ModusInstruction::Run),
-        map(terminated(env_instr, alt((line_ending, eof))), ModusInstruction::Env),
-        map(terminated(workdir_instr, alt((line_ending, eof))), ModusInstruction::Workdir)
+        map(terminated(rule_instr, alt((line_ending, peek(eof)))), ModusInstruction::Rule),
+        map(terminated(copy_instr, alt((line_ending, peek(eof)))), ModusInstruction::Copy),
+        map(terminated(run_instr, alt((line_ending, peek(eof)))), ModusInstruction::Run),
+        map(terminated(env_instr, alt((line_ending, peek(eof)))), ModusInstruction::Env),
+        map(terminated(workdir_instr, alt((line_ending, peek(eof)))), ModusInstruction::Workdir)
     ))(i)
 }
 
 fn modusfile(i: &str) -> IResult<&str, Modusfile> {
-    map(terminated(many0(preceded(many0(ignored_line), modus_instruction)), many0(ignored_line)), Modusfile)(i)
+    map(terminated(many0(preceded(many0(ignored_line), modus_instruction)),
+                   terminated(many0(ignored_line), eof)), Modusfile)(i)
 }
 
 

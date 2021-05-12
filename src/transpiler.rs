@@ -23,8 +23,8 @@ use crate::modusfile::{
 use crate::dockerfile::{
     Dockerfile, DockerInstruction, From, ResolvedParent,
 };
-use crate::datalog;
-use datalog::{
+use crate::logic;
+use logic::{
     Rule, Literal, Term
 };
 
@@ -41,14 +41,14 @@ pub fn transpile(mf: Modusfile, query: Option<ModusLiteral>) -> Dockerfile<Resol
                 if !head.args.is_empty() {
                     panic!("head literals with parameters are not supported")
                 }
-                let stage_name = head.name;
+                let stage_name = head.atom.0;
                 if body.len() > 1 {
                     panic!("bodies with multiple literals are not supported")
                 }
                 let body_literal = &body[0];
                 let from = {
-                    let ModusLiteral { name, args } = body_literal;
-                    match (name.as_str(), args.as_slice()) {
+                    let ModusLiteral { atom, args } = body_literal;
+                    match (atom.0.as_str(), args.as_slice()) {
                         ("image", [Term::Constant(ModusConstant::Image(i))]) =>
                             From{ parent: ResolvedParent::Image(i.clone()), alias: Some(stage_name) },
                         (s, []) =>

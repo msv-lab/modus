@@ -19,6 +19,8 @@ use std::str;
 use std::fmt;
 
 use nom::{
+    IResult,
+    branch::alt,
     bytes::complete::{is_not, tag, tag_no_case},
     character::complete::{
         char,
@@ -29,11 +31,9 @@ use nom::{
         line_ending,
         one_of
     },
-    branch::alt,
-    sequence::{pair, delimited, terminated, preceded, tuple},
+    combinator::{eof, map, opt, peek, recognize, value},
     multi::{many0, many1, separated_list1},
-    combinator::{value, recognize, map, opt, eof},
-    IResult
+    sequence::{pair, delimited, terminated, preceded, tuple}
 };
 
 use crate::values::{ Image, image };
@@ -196,7 +196,7 @@ fn line_continuation(i: &str) -> IResult<&str, ()> {
 fn empty_line(i: &str) -> IResult<&str, ()> {
     value(
         (), // Output is thrown away.
-        alt((preceded(space0, line_ending), preceded(space1, eof)))
+        alt((preceded(space0, line_ending), preceded(space1, peek(eof))))
     )(i)
 }
 
@@ -243,12 +243,11 @@ fn comment(i: &str) -> IResult<&str, &str> {
 fn comment_line(i: &str) -> IResult<&str, ()> {
     value(
         (), // Output is thrown away.
-        delimited(space0, comment, alt((line_ending, eof)))
+        delimited(space0, comment, alt((line_ending, peek(eof))))
     )(i)
 }
 
 
-//TODO: ${...} can be inside names
 //TODO: I need to test alias parsing
 
 fn parent(i: &str) -> IResult<&str, UnresolvedParent> {
@@ -301,18 +300,18 @@ pub fn workdir_instr(i: &str) -> IResult<&str, Workdir> {
 
 fn docker_instruction(i: &str) -> IResult<&str, DockerInstruction<UnresolvedParent>> {
     alt((
-        map(terminated(from_instr, alt((line_ending, eof))), DockerInstruction::From),
-        map(terminated(copy_instr, alt((line_ending, eof))), DockerInstruction::Copy),
-        map(terminated(arg_instr, alt((line_ending, eof))), DockerInstruction::Arg),
-        map(terminated(run_instr, alt((line_ending, eof))), DockerInstruction::Run),
-        map(terminated(env_instr, alt((line_ending, eof))), DockerInstruction::Env),
-        map(terminated(workdir_instr, alt((line_ending, eof))), DockerInstruction::Workdir)
+        map(terminated(from_instr, alt((line_ending, peek(eof)))), DockerInstruction::From),
+        map(terminated(copy_instr, alt((line_ending, peek(eof)))), DockerInstruction::Copy),
+        map(terminated(arg_instr, alt((line_ending, peek(eof)))), DockerInstruction::Arg),
+        map(terminated(run_instr, alt((line_ending, peek(eof)))), DockerInstruction::Run),
+        map(terminated(env_instr, alt((line_ending, peek(eof)))), DockerInstruction::Env),
+        map(terminated(workdir_instr, alt((line_ending, peek(eof)))), DockerInstruction::Workdir)
     ))(i)
 }
 
 fn dockerfile(i: &str) -> IResult<&str, Dockerfile<UnresolvedParent>> {
     map(terminated(many0(preceded(many0(ignored_line), docker_instruction)),
-                   many0(ignored_line)),
+                   terminated(many0(ignored_line), eof)),
         Dockerfile)(i)
 }
 
