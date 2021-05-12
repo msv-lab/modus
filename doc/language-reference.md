@@ -2,46 +2,63 @@
 
 The Modusfile language is a superset of the Dockerfile language. The main difference between Modusfile and Dockerfile is the instruction `RULE` that defines logical rules (Horn clauses). Modus also introduces minor changes: (1) an interpretation of the `FROM` instruction for backward-compatibility, (2) an interpretation of `COPY --from` for parametrised stages, (3) the `QUERY` instruction for specifying default queries.
 
+## Table of Contents
+
+* [Syntax of RULE](#syntax-of-rule)
+* [Semantics of RULE](#semantics-of-rule)
+* [Parameter Expansion](#parameter-expansion)
+* [FROM](#from)
+* [COPY \-\-from](#copy---from)
+* [QUERY](#query)
+
 ## Syntax of `RULE`
 
-The syntax of Modus rules is similar to Datalog with Prolog-like extensions. Modus supports integers and strings as primitive types:
+The syntax of Modus rules is similar to Datalog with Prolog-like extensions.
 
+In Modus, terms are variables, atoms, or values of primitive types (integers and strings):
+
+- `X` is a variable;
+- `bar` is an atom;
 - `1` is integer;
 - `"foo"` is string.
 
-In Modus, terms are variables, or atoms, or values of primitive types:
+Variable names begin with a capital letter or the underscore character `_`. Atom names begin with a small letter.
 
-- `X` is a variable;
-- `bar` is nullary predicate;
-- `bar(1, "foo")` is a predication;
+Modus also supports compound terms (objects) built by applying functors `version` and `image`:
 
-Modus also supports compound terms built by applying functors `version` and `image`:
+- `version(1, 2, 3, "alpha", "")` is the SemVer version "1.2.3-alpha";
+- `image("registry.redhat.io", "rhel7", "rhel-atomic", "7.9")` is the image "registry.redhat.io/rhel7/rhel-atomic:7.9"
+- `image("", "", "ubuntu", "latest")` is the image "ubuntu:latest"
 
-- `bar(version(1, 2, 3, "", ""))` is a predication over a SemVer version. 
+Modus provides special syntax for images and versions:
 
-Variable names begin with a capital letter or the underscore character `_`.
+- `i"ubuntu"` is equivalent to `image("", "", "ubuntu", "latest")`;
+- `v"1.2.3-alpha"` is equivalent to `version(1, 2, 3, "alpha", "")`.
 
-A rule consists of a head and a body:
+For convenience, the version syntax also supports incomplete SemVer versions:
 
-```
-RULE head :- body
-```
+- `v"1.2"` is equivalent to `version(1, 2, 0, "", "")`.
 
-A head is an atom or a compound term; a body is a list of atoms or predications:
+Literals are predicates applied to terms:
+
+- `bar(1, "foo")` is a literal;
+- `bar` is nullary predicate.
+
+A rule consists of a head and a body; a head is a literal; a body is a list of literals:
 
 - `RULE f :- b`
 - `RULE f(g, "foo") :- b(t), c`
 - `RULE f(X) :- b`
 - `RULE f(X, g) :- b(X)`
 
+Modus supports logical disjunction with `;`:
+
+- `RULE f :- a; b`
+- `RULE f(X) :- a, (b; c)`
+
 Rules without bodies are called facts:
 
 - `RULE f(a, b)`
-
-Modus provides special literals for images and versions:
-
-- `i"ubuntu"` is equivalent to `image("", "", "ubuntu", "latest")`;
-- `v"1.2.3-alpha"` is equivalent to `version(1, 2, 3, "alpha", "")`.
 
 Modus also provides Prolog-like builtin predicates:
 
@@ -49,48 +66,29 @@ Modus also provides Prolog-like builtin predicates:
     - ['='/2](https://www.swi-prolog.org/pldoc/doc_for?object=(%3D)/2) is true if the unification succeeds;
     - ['\\='/2](https://www.swi-prolog.org/pldoc/doc_for?object=(%5C%3D)/2) is true if the unification fails.
 - Comparison of integers and versions:
-    - ['<'/2](https://www.swi-prolog.org/pldoc/doc_for?object=(%3E)/2)
-    - ['>'/2](https://www.swi-prolog.org/pldoc/doc_for?object=(%3C)/2)
-    - ['=<'/2](https://www.swi-prolog.org/pldoc/doc_for?object=(%3D%3C)/2)
-    - ['>='/2](https://www.swi-prolog.org/pldoc/doc_for?object=(%3E%3D)/2)
-- Meta-programming
+    - ['<'/2](https://www.swi-prolog.org/pldoc/doc_for?object=(%3E)/2), extended for versions according to [SemVer 2.0.0](https://semver.org/);
+    - ['>'/2](https://www.swi-prolog.org/pldoc/doc_for?object=(%3C)/2), extended for versions according to [SemVer 2.0.0](https://semver.org/);
+    - ['=<'/2](https://www.swi-prolog.org/pldoc/doc_for?object=(%3D%3C)/2), extended for versions according to [SemVer 2.0.0](https://semver.org/);
+    - ['>='/2](https://www.swi-prolog.org/pldoc/doc_for?object=(%3E%3D)/2), extended for versions according to [SemVer 2.0.0](https://semver.org/).
+- Structure inspection:
     - [functor/3](https://www.swi-prolog.org/pldoc/doc_for?object=functor/3)
-- Type predicates:
     - [integer/1](https://www.swi-prolog.org/pldoc/doc_for?object=integer/1)
     - [string/1](https://www.swi-prolog.org/pldoc/doc_for?object=string/1)
 - Type conversions:
     - [number_string/2](https://www.swi-prolog.org/pldoc/doc_for?object=number_string/2)
     - [atom_string/2](https://www.swi-prolog.org/pldoc/doc_for?object=atom_string/2)
-    - `version_string/2`
-    - `image_string/2`
+    - `version_string/2` is a bi-directional conversion between a version and a string. At least one of the two arguments must be instantiated;
+    - `image_string/2` is a bi-directional conversion between an image and a string. At least one of the two arguments must be instantiated.
 - String operators:
     - [string_concat/3](https://www.swi-prolog.org/pldoc/man?predicate=string_concat/3)
 - Image predicate
-    - `image/1`: is true for any input, but all the input has to be instantiated.
-
-Modus also provides special syntax for string conversion and substitution:
-
-* a predication `f("${X}")` is transformed into 
-```
-(string(X), X = _1;
-   integer(X), number_string(X, _1);
-   atom(X), atom_string(X, _1);
-   functor(X, version, 5), version_string(X, _1);
-   functor(X, image, 4), image_string(X, _1)),
-f(_1)
-```
-* a predication `f("a${X}b")` is transformed into 
-```
-string_concat("a", "${X}", _1), 
-string_concat(_1, "b", _2), 
-f(_2)
-```
+    - `image/1`: is true for any image object, but the argument has to be instantiated.
 
 Currently, Modus forbids recursive rules.
 
 ## Semantics of `RULE`
 
-For a given query, Modus solver computes the minimum proof tree in terms of the number of required build actions. This proof tree corresponds to the build tree of the target image. For example, for the following rules
+For a given query, the Modus solver computes the minimum proof tree in terms of the number of required build actions. This proof tree corresponds to the build tree of the target image. For example, for the following rules
 
 ```
 RULE base1 :- image(i"ubuntu")
@@ -107,7 +105,7 @@ RULE c :- a, b
 
 Modus guarantees that although the dependencies of `a` and `b` will be chosen arbitrarily (because of the disjunction `;`), it will use the same dependency for both of these rules (either both `base1`, or both `base2`) to avoid an extra operation.
 
-Modus solves Horn clauses using SLD resolution, a top-down approach. Compared to Prolog, the semantics of Modus is declarative, i.e. the result does not depend on the order of predicates in the rules.
+Modus solves Horn clauses using SLD resolution, a top-down approach. Compared to Prolog, the semantics of Modus is declarative, i.e. success does not depend on the order of predicates in the rules.
 
 In Modus, predicates are divided into two categories: image predicates and imageless predicates.
 
@@ -118,11 +116,50 @@ RULE a :- image(i"alpine")
 RUN ...
 ```
 
+If there are several image predicates in the body of a rule, the first one is used as the parent image. In the following example, `a` uses `b` as the parent image, because `b` precedes `c` and `f` is an imageless predicate:
+
+```
+RULE f(V) :- V > v"1.2"
+
+RULE b :- image(i"alpine")
+RULE c :- image(i"ubuntu")
+
+RULE a(V) :- f(V), b, c
+```
+
 Imageless predicates are those that do not represent any image, and therefore do not depend on `image/1`. Rules defining imageless predicates are not accompanied with build actions. Therefore, imageless predicates are also not used in calculating the cost of the proof tree.
+
+## Parameter Expansion
+
+Modus provides special syntax for parameter expansion that allows to use variables inside strings via the shell-style `${X}` syntax.
+
+First, parameter expansion can used as a generic approach to convert values into strings. For example, the literal `f("${X}")` is equivalent to 
+
+```
+(string(X), X = _1;
+   integer(X), number_string(X, _1);
+   atom(X), atom_string(X, _1);
+   functor(X, version, 5), version_string(X, _1);
+   functor(X, image, 4), image_string(X, _1)),
+f(_1)
+```
+
+Parameter expansion can also be used to express string concatenation. For example, the literal `f("a${X}b")` is equivalent to
+
+```
+string_concat("a", "${X}", _1), 
+string_concat(_1, "b", _2), 
+f(_2)
+```
+
+Parameter expansion can also be used with special syntax for versions and images:
+
+- `v"0.${MINOR}.${MAJOR}"` 
+- `i"ubuntu:${TAG}"`
 
 ## `FROM`
 
-The `FROM` instruction is supported for backward-compatibility. `FROM` is interpreted as a specific variant of `RULE`. For example, if `base` is a build stage, then
+The `FROM` instruction is supported for backward-compatibility. `FROM` is interpreted as a special case of `RULE`. For example, if `base` is a build stage, then
 
     FROM base AS compile
 
@@ -132,7 +169,7 @@ is interpreted as
 
 If `base` is not a build stage, then it is interpreted as an image name:
 
-    RULE compile :- i"base"
+    RULE compile :- image(i"base")
 
 ## `COPY --from`
 
@@ -164,4 +201,4 @@ RULE b(X, V) :- ...
 QUERY a(X, "foo", 1), b(X, v"1.2") 
 ```
 
-Several `QUERY` instructions are treated as disjunction.
+Several `QUERY` instructions are treated as a disjunction.
