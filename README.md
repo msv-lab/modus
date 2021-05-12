@@ -2,7 +2,7 @@
 
 Modus is a Datalog-based language for building Docker images. Modus extends [Dockerfile](https://docs.docker.com/engine/reference/builder/)'s syntax with [Horn clauses](https://en.wikipedia.org/wiki/Horn_clause) for representing build dependencies. Modus has the following advantages:
 
-- __Modularity:__ Modus allows splitting build definitions into independent reusable parts called _parameterised build stages_. Parametrised build stages are [build stages](https://docs.docker.com/develop/develop-images/multistage-build/) with arguments whose values are resolved automatically using a Datalog solver. This makes build stages feel closer to functions, and addresses longstanding usability issues (e.g. [#32100](https://github.com/moby/moby/issues/32100), [#37345](https://github.com/moby/moby/issues/32100)).
+- __Modularity:__ Modus allows splitting build definitions into independent reusable parts called _parameterised build stages_. Parametrised build stages are [build stages](https://docs.docker.com/develop/develop-images/multistage-build/) whose arguments are resolved automatically using a Datalog solver. This makes build stages feel closer to functions, and addresses longstanding usability issues (e.g. [#32100](https://github.com/moby/moby/issues/32100), [#37345](https://github.com/moby/moby/issues/32100)).
 
 - __Dependency resolution:__ Modus allows automatically resolving build dependencies such as versions, base images, compilations flags, etc. Modus provides first-class support for [SemVer](https://semver.org/) constraints.
 
@@ -53,7 +53,7 @@ RUN ...
 
 where `i"alpine"` and `i"ubuntu"` are special literals for image objects.
 
-Note that `c(X) :- a(X), b(2)` is a Horn clause. The use of Horn clauses enables Modus to take advantage of the power of logic programming languages such as Datalog/Prolog. For example, Modus can automatic resolve SemVer versions, and build multiple images at the same time.
+Note that `c(X) :- a(X), b(2)` is a Horn clause. The use of Horn clauses enables Modus to take advantage of the power of logic programming languages such as Datalog/Prolog. For example, Modus can automatically resolve SemVer versions, and build multiple related images.
 
 
 ## Motivating example
