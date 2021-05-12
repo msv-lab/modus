@@ -137,10 +137,10 @@ First, parameter expansion can used as a generic approach to convert values into
 
 ```
 (string(X), X = _1;
-   integer(X), number_string(X, _1);
-   atom(X), atom_string(X, _1);
-   functor(X, version, 5), version_string(X, _1);
-   functor(X, image, 4), image_string(X, _1)),
+   number_string(X, _1);
+   atom_string(X, _1);
+   version_string(X, _1);
+   image_string(X, _1)),
 f(_1)
 ```
 
