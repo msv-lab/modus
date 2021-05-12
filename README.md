@@ -113,7 +113,7 @@ where the `--query` option specifies the target image.
 
 Modus can print the proof tree of a given query that shows how the target image is constructed from parent images:
 
-    $ modus-transpile Modusfile --query 'app(v"1.2.5", "release")' --proof
+    $ modus-transpile Modusfile --query 'app(v"1.2.5", production)' --proof
     app(v"1.2.5", production)
     └── base(v"1.2.5", production)
         ├── image(i"python:3.5-alpine")
