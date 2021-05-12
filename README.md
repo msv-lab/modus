@@ -4,7 +4,7 @@ Modus is a Datalog-based language for building Docker images. Modus extends [Doc
 
 - __Modularity:__ Modus allows splitting build definitions into independent reusable parts called _parameterised build stages_. Parametrised build stages are [build stages](https://docs.docker.com/develop/develop-images/multistage-build/) whose arguments are resolved automatically using a Datalog solver. This makes build stages feel closer to functions, and addresses longstanding usability issues (e.g. [#32100](https://github.com/moby/moby/issues/32100), [#37345](https://github.com/moby/moby/issues/32100)).
 
-- __Dependency resolution:__ Modus allows automatically resolving build dependencies such as versions, base images, compilations flags, etc. Modus provides first-class support for [SemVer](https://semver.org/) constraints.
+- __Dependency resolution:__ Modus allows automatically resolving build dependencies such as versions, base images, compilations flags, etc. Modus provides first-class support for [SemVer](https://semver.org/).
 
 - __Efficiency:__ For a given target, Modus computes a build tree that minimises the number of executed build steps. Combined with [BuildKit](https://github.com/moby/buildkit), Modus enables efficient parallel builds of groups of related images. Parametrised build stages provide fine-grained control of the resulting image size.
 
