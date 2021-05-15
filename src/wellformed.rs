@@ -30,3 +30,8 @@ pub fn check_image_predicates<C, V>(rules: Vec<Rule<C,V>>) -> Option<Vec<Atom>> 
     None
 }
 
+// checks if grounded variables are grounded in each rule
+pub fn check_groundness<C, V>(rules: Vec<Rule<C,V>>) -> Option<Vec<Atom>> {
+    None
+}
+

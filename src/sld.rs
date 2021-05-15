@@ -24,6 +24,3 @@ pub trait Variable {
     fn rename(&self) -> Self;
     fn aux() -> Self; 
 }
-
-
-type Substitution = i32;

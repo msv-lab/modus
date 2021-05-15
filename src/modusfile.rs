@@ -18,21 +18,12 @@
 use std::str;
 use std::fmt;
 
-use nom::{
-    IResult,
-    branch::alt,
-    bytes::complete::{tag_no_case, tag},
-    character::complete::{line_ending, none_of, alpha1, alphanumeric1},
-    combinator::{eof, map, peek, recognize},
-    multi::{many0},
-    sequence::{pair, terminated, preceded, delimited}
-};
-
 use crate::dockerfile;
 use dockerfile::{
     Copy, Run, Env, Workdir
 };
 use crate::logic;
+use crate::typing;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Constant {
@@ -111,6 +102,17 @@ impl fmt::Display for Constant {
 mod parser {
     use super::*;
     use dockerfile::Image;
+
+    use nom::{
+        IResult,
+        branch::alt,
+        bytes::complete::{tag_no_case, tag},
+        character::complete::{line_ending, none_of, alpha1, alphanumeric1},
+        combinator::{eof, map, peek, recognize},
+        multi::{many0},
+        sequence::{pair, terminated, preceded, delimited}
+    };
+   
 
     //TODO: support proper string literals
     fn string_content(i: &str) -> IResult<&str, &str> {

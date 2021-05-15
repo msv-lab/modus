@@ -17,6 +17,6 @@ By default, `modus-transpile` outputs Dockerfile instructions on the standard ou
 
 `modus-transpile` supports multi-file builds using the `--include` option followed by a comma-separated list of files:
 
-    $ modus-transpile Modusfile --include lib1/Modusfile,lib2/Modusfile --query compile > Dockerfile
+    $ modus-transpile Modusfile --include lib1/Modusfile,lib2/Dockerfile --query compile > Dockerfile
 
 

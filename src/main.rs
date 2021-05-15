@@ -19,9 +19,13 @@ mod dockerfile;
 mod logic;
 mod wellformed;
 mod modusfile;
+mod typing;
+mod unification;
 mod sld;
 mod transpiler;
 
+#[macro_use]
+extern crate lazy_static;
 
 #[macro_use]
 extern crate fp_core;

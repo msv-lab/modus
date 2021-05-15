@@ -19,6 +19,8 @@
 use std::str;
 use std::fmt;
 
+use std::convert::TryInto;
+
 use fp_core::compose::compose_two;
 
 
@@ -41,9 +43,40 @@ pub struct Literal<C, V> {
 }
 
 #[derive(Clone, PartialEq, Debug)]
+pub struct Signature(Atom, u32);
+
+#[derive(Clone, PartialEq, Debug)]
 pub struct Rule<C,V> {
     pub head: Literal<C,V>,
     pub body: Vec<Literal<C,V>>
+}
+
+pub trait Groundness {
+    fn is_grounded() -> bool;
+}
+
+impl<C, V> Literal<C, V> {
+    pub fn singature(&self) -> Signature {
+        Signature(self.atom.clone(), self.args.len().try_into().unwrap())
+    }
+}
+
+impl<C, V> Groundness for Term<C, V> {
+    fn is_grounded() -> bool {
+        todo!()
+    }
+}
+
+impl<C, V> Groundness for Literal<C, V> {
+    fn is_grounded() -> bool {
+        todo!()
+    }
+}
+
+impl fmt::Display for Signature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.0, self.1)
+    }
 }
 
 impl fmt::Display for Atom {
