@@ -18,34 +18,40 @@
 
 use crate::logic;
 use logic::{ Rule };
-use crate::unification::Substitution;
+use crate::unification::{Substitution, Rename};
 
 
-pub trait Variable {
-    fn rename(&self) -> Self;
+pub trait Variable<C, V>: Rename<C, V> {
     fn aux() -> Self; 
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::{collections::HashMap, sync::atomic::{AtomicU32, Ordering}};
 
     use super::*;
 
     static AVAILABLE_INDEX: AtomicU32 = AtomicU32::new(0);
 
     /// Assume that underscore is not used in normal variables
-    impl Variable for logic::toy::Variable {
+
+    impl Rename<logic::Atom, logic::toy::Variable> for logic::toy::Variable {
+        type Output = logic::toy::Variable;
+        fn rename(&self) -> (Self::Output, Substitution<logic::Atom, logic::toy::Variable>) {
+            let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
+            let prefix = self.split('_').next().unwrap();
+            let renamed = format!("{}_{}", prefix, index);
+            let mut s = HashMap::<logic::toy::Variable, logic::Term<logic::Atom, logic::toy::Variable>>::new();
+            s.insert(self.clone(), logic::Term::Variable(renamed.clone()));
+            (renamed, s)
+        }
+    }
+
+    impl Variable<logic::Atom, logic::toy::Variable> for logic::toy::Variable {
         fn aux() -> logic::toy::Variable {
             let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
             format!("Aux{}", index)
         }
-        fn rename(&self) -> logic::toy::Variable {
-            let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
-            let prefix = self.split('_').next().unwrap();
-            format!("{}_{}", prefix, index)
-        }
     }
-
-    
+   
 }

@@ -18,13 +18,12 @@
 
 use std::str;
 use std::fmt;
-
 use std::convert::TryInto;
-
 use fp_core::compose::compose_two;
+use std::{collections::HashSet, hash::Hash};
 
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Atom(pub String);
 
 /// C is constant, V is variable
@@ -55,9 +54,31 @@ pub trait Groundness {
     fn is_grounded() -> bool;
 }
 
-impl<C, V> Literal<C, V> {
+impl<C, V: Clone + Eq + Hash> Term<C, V> {
+    pub fn variables(&self) -> HashSet<V> {
+        let mut s = HashSet::<V>::new();
+        match self {
+            Term::Variable(v) => { s.insert(v.clone()); },
+            _ => ()
+        };
+        s
+    }
+}
+
+impl<C, V: Clone + Eq + Hash> Literal<C, V> {
     pub fn signature(&self) -> Signature {
         Signature(self.atom.clone(), self.args.len().try_into().unwrap())
+    }
+    pub fn variables(&self) -> HashSet<V> {
+        self.args.iter().map(|r| r.variables()).reduce(|mut l, r| { l.extend(r); l }).unwrap()
+    }
+}
+
+impl<C, V: Clone + Eq + Hash> Rule<C, V> {
+    pub fn variables(&self) -> HashSet<V> {
+        let mut body = self.body.iter().map(|r| r.variables()).reduce(|mut l, r| { l.extend(r); l }).unwrap();
+        body.extend(self.head.variables());
+        body
     }
 }
 

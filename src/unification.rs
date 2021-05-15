@@ -16,7 +16,7 @@
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
 
-use std::{collections::HashMap, hash::Hash};
+use std::{collections::{HashMap, HashSet}, hash::Hash};
 
 use crate::logic;
 use logic::{ Atom, Term, Rule, Literal, Groundness };
@@ -29,13 +29,19 @@ impl<C, V> Groundness for Substitution<C, V> {
     }
 }
 
-trait Substitutable<C, V> {
+pub trait Substitute<C, V> {
     type Output;
 
     fn substitute(&self, s: &Substitution<C, V>) -> Self::Output;
+}
+
+pub trait Rename<C, V> {
+    type Output;
+
+    fn rename(&self) -> (Self::Output, Substitution<C, V>);
 } 
 
-impl<C: Clone, V: Eq + Hash + Clone> Substitutable<C, V> for Term<C, V> {
+impl<C: Clone, V: Eq + Hash + Clone> Substitute<C, V> for Term<C, V> {
     type Output = Term<C, V>;
     fn substitute(&self, s: &Substitution<C, V>) -> Self::Output {
         match &self {
@@ -46,17 +52,44 @@ impl<C: Clone, V: Eq + Hash + Clone> Substitutable<C, V> for Term<C, V> {
     }
 }
 
-impl<C: Clone, V: Eq + Hash + Clone> Substitutable<C, V> for Literal<C, V> {
+impl<C: Clone, V: Eq + Hash + Clone + Rename<C, V>> Rename<C, V> for Term<C, V> {
+    type Output = Term<C, V>;
+    fn rename(&self) -> (Self::Output, Substitution<C, V>) {
+        let s: Substitution<C, V> =
+            self.variables().iter().map(|r| r.rename().1).reduce(|mut l, r| { l.extend(r); l }).unwrap();
+        (self.substitute(&s), s)
+    }
+}
+
+impl<C: Clone, V: Eq + Hash + Clone> Substitute<C, V> for Literal<C, V> {
     type Output = Literal<C, V>;
     fn substitute(&self, s: &Substitution<C, V>) -> Self::Output {
         Literal { atom: self.atom.clone(), args: self.args.iter().map(|t| t.substitute(s)).collect() }
     }
 }
 
-impl<C: Clone, V: Eq + Hash + Clone> Substitutable<C, V> for Vec<Literal<C, V>> {
+impl<C: Clone, V: Eq + Hash + Clone + Rename<C, V>> Rename<C, V> for Literal<C, V> {
+    type Output = Literal<C, V>;
+    fn rename(&self) -> (Self::Output, Substitution<C, V>) {
+        let s: Substitution<C, V> =
+            self.variables().iter().map(|r| r.rename().1).reduce(|mut l, r| { l.extend(r); l }).unwrap();
+        (self.substitute(&s), s)
+    }
+}
+
+impl<C: Clone, V: Eq + Hash + Clone> Substitute<C, V> for Vec<Literal<C, V>> {
     type Output = Vec<Literal<C, V>>;
     fn substitute(&self, s: &Substitution<C, V>) -> Self::Output {
         self.iter().map(|l| l.substitute(s)).collect()
+    }
+}
+
+impl<C: Clone, V: Eq + Hash + Clone + Rename<C, V>> Rename<C, V> for Vec<Literal<C, V>> {
+    type Output = Vec<Literal<C, V>>;
+    fn rename(&self) -> (Self::Output, Substitution<C, V>) {
+        let s: Substitution<C, V> =
+            self.iter().flat_map(|e| e.variables()).map(|r| r.rename().1).reduce(|mut l, r| { l.extend(r); l }).unwrap();
+        (self.substitute(&s), s)
     }
 }
 
@@ -152,5 +185,14 @@ mod tests {
         let m: logic::toy::Literal = "q(Y, a, a, Y)".parse().unwrap();
         let result = l.unify(&m);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn simple_renaming() {
+        let l: logic::toy::Literal = "a(X, X, Y)".parse().unwrap();
+        let (m, _) = l.rename();
+        assert!(l != m);
+        assert!(m.args[0] == m.args[1]);
+        assert!(m.args[0] != m.args[2]);
     }
 }

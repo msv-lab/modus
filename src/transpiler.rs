@@ -15,22 +15,23 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{sync::atomic::{AtomicU32, Ordering}};
+use std::{collections::HashMap, sync::atomic::{AtomicU32, Ordering}};
 
 use crate::{
-    sld,
     dockerfile,
     dockerfile::{
         Dockerfile, ResolvedParent,
     },
-    modusfile,
-    modusfile::{Constant, Modusfile}, 
     logic::{
         Rule, Literal, Term
-    }
+    },
+    modusfile,
+    modusfile::{Constant, Modusfile},
+    sld,
+    unification::{Rename, Substitution}
 };
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 enum Variable {
     User(String),
     Auxiliary(u32),
@@ -39,17 +40,23 @@ enum Variable {
 
 static AVAILABLE_INDEX: AtomicU32 = AtomicU32::new(0);
 
-impl sld::Variable for Variable {
+impl Rename<Constant, Variable> for Variable {
+    type Output = Variable;
+    fn rename(&self) -> (Variable, Substitution<Constant, Variable>) {
+        let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
+        let renamed = Variable::Renamed(index, Box::new((*self).clone()));
+        let mut s = HashMap::<Variable, Term<Constant, Variable>>::new();
+        s.insert(self.clone(), Term::Variable(renamed.clone()));
+        (renamed, s)
+    }
+}
+
+impl sld::Variable<Constant, Variable> for Variable {
     fn aux() -> Variable {
         let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
         Variable::Auxiliary(index)
     }
-    fn rename(&self) -> Variable {
-        let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
-        Variable::Renamed(index, Box::new((*self).clone()))
-    }
 }
-
 
 pub fn transpile(mf: Modusfile, query: Option<modusfile::Literal>) -> Dockerfile<ResolvedParent> {
     let mut docker_instrs = vec![];
