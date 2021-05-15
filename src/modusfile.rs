@@ -28,37 +28,25 @@ use nom::{
     sequence::{pair, terminated, preceded, delimited}
 };
 
-use crate::dockerfile::{
-    Copy, Run, Env, Workdir,
-    copy_instr, run_instr, env_instr, workdir_instr,
-    mandatory_space, ignored_line
-};
-use crate::values::{
-    Text, Image,
-    image_literal
+use crate::dockerfile;
+use dockerfile::{
+    Copy, Run, Env, Workdir
 };
 use crate::logic;
-use logic::{
-    Rule, Literal, Term
-};
-
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct ModusVariable(String);
-
-#[derive(Clone, PartialEq, Debug)]
-pub enum ModusConstant {
-    Text(Text),
-    Image(Image)
+pub enum Constant {
+    String(String),
+    Integer(u32)  //TODO: arbitrary-precision arithmetic?
 }
 
-pub type ModusRule = Rule<ModusConstant, ModusVariable>;
-pub type ModusLiteral = Literal<ModusConstant, ModusVariable>;
-pub type ModusTerm = Term<ModusConstant, ModusVariable>;
+pub type Rule = logic::Rule<Constant, String>;
+pub type Literal = logic::Literal<Constant, String>;
+pub type Term = logic::Term<Constant, String>;
 
 #[derive(Clone, PartialEq, Debug)]
-pub enum ModusInstruction {
-    Rule(ModusRule),
+pub enum Instruction {
+    Rule(Rule),
     Run(Run),
     Env(Env),
     Copy(Copy),
@@ -66,102 +54,117 @@ pub enum ModusInstruction {
 }
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Modusfile(pub Vec<ModusInstruction>);
+pub struct Modusfile(pub Vec<Instruction>);
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct Version {
+    major: u32,
+    minor: u32,
+    patch: u32,
+    pre_release: String,
+    build: String,
+}
+
 
 impl str::FromStr for Modusfile {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match modusfile(s) {
+        match parser::modusfile(s) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
     }
 }
 
-impl str::FromStr for ModusRule {
+impl str::FromStr for Rule {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match logic::rule(modus_const, modus_var)(s) {
+        match logic::parser::rule(parser::modus_const, parser::modus_var)(s) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
     }
 }
 
-impl str::FromStr for ModusLiteral {
+impl str::FromStr for Literal {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match logic::literal(modus_const, modus_var)(s) {
+        match logic::parser::literal(parser::modus_const, parser::modus_var)(s) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
     }
 }
 
-impl fmt::Display for ModusConstant {
+impl fmt::Display for Constant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ModusConstant::Image(i) => write!(f, "i\"{}\"", i),
-            ModusConstant::Text(s) => write!(f, "\"{}\"", s)
+            Constant::String(s) => write!(f, "i\"{}\"", s),
+            Constant::Integer(i) => write!(f, "{}", i)
         }
     }
 }
 
-impl fmt::Display for ModusVariable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}/", self.0)
+mod parser {
+    use super::*;
+    use dockerfile::Image;
+
+    //TODO: support proper string literals
+    fn string_content(i: &str) -> IResult<&str, &str> {
+        recognize(many0(none_of("\\\"")))(i)
     }
-}
 
-//TODO: support proper string literals
-fn string_content(i: &str) -> IResult<&str, &str> {
-    recognize(many0(none_of("\\\"")))(i)
-}
+    pub fn image_literal(i: &str) -> IResult<&str, Image> {
+        delimited(tag("i\""), dockerfile::parser::image, tag("\""))(i)
+    }
 
-fn modus_const(i: &str) -> IResult<&str, ModusConstant> {
-    alt((
-        map(delimited(tag("\""), string_content, tag("\"")),
-            |s| ModusConstant::Text(Text(s.into()))),
-        map(image_literal,
-            |s| ModusConstant::Image(s))
-    ))(i)
-}
+    pub fn modus_const(i: &str) -> IResult<&str, Constant> {
+        alt((
+            map(delimited(tag("\""), string_content, tag("\"")),
+                |s| Constant::String(s.into())),
+            map(image_literal,
+                |s| Constant::String(s.to_string())) //TODO: Need to construct a compound object
+        ))(i)
+    }
 
-//TODO: I need to think more carefully how to connect this to ARGs
-pub fn variable_identifier(i: &str) -> IResult<&str, &str> {
-    recognize(
-      pair(
-        alpha1,
-        many0(alt((alphanumeric1, tag("_"))))
-      )
-    )(i)
-}
+    //TODO: I need to think more carefully how to connect this to ARGs
+    pub fn variable_identifier(i: &str) -> IResult<&str, &str> {
+        recognize(
+        pair(
+            alpha1,
+            many0(alt((alphanumeric1, tag("_"))))
+        )
+        )(i)
+    }
 
-fn modus_var(i: &str) -> IResult<&str, ModusVariable> {
-    map(variable_identifier, |s| ModusVariable(s.into()))(i)
-}
+    pub fn modus_var(i: &str) -> IResult<&str, String> {
+        map(variable_identifier, String::from)(i)
+    }
 
-pub fn rule_instr(i: &str) -> IResult<&str, ModusRule> {
-    preceded(pair(tag_no_case("RULE"), mandatory_space), logic::rule(modus_const, modus_var))(i)
-}
+    pub fn rule_instr(i: &str) -> IResult<&str, Rule> {
+        preceded(pair(tag_no_case("RULE"), dockerfile::parser::mandatory_space),
+                logic::parser::rule(modus_const, modus_var))(i)
+    }
 
-//TODO: a parsing rule for an instruction should be extracted into a combinator
-fn modus_instruction(i: &str) -> IResult<&str, ModusInstruction> {
-    alt((
-        map(terminated(rule_instr, alt((line_ending, peek(eof)))), ModusInstruction::Rule),
-        map(terminated(copy_instr, alt((line_ending, peek(eof)))), ModusInstruction::Copy),
-        map(terminated(run_instr, alt((line_ending, peek(eof)))), ModusInstruction::Run),
-        map(terminated(env_instr, alt((line_ending, peek(eof)))), ModusInstruction::Env),
-        map(terminated(workdir_instr, alt((line_ending, peek(eof)))), ModusInstruction::Workdir)
-    ))(i)
-}
+    //TODO: a parsing rule for an instruction should be extracted into a combinator
+    fn modus_instruction(i: &str) -> IResult<&str, Instruction> {
+        alt((
+            map(terminated(rule_instr, alt((line_ending, peek(eof)))), Instruction::Rule),
+            map(terminated(dockerfile::parser::copy_instr, alt((line_ending, peek(eof)))), Instruction::Copy),
+            map(terminated(dockerfile::parser::run_instr, alt((line_ending, peek(eof)))), Instruction::Run),
+            map(terminated(dockerfile::parser::env_instr, alt((line_ending, peek(eof)))), Instruction::Env),
+            map(terminated(dockerfile::parser::workdir_instr, alt((line_ending, peek(eof)))), Instruction::Workdir)
+        ))(i)
+    }
 
-fn modusfile(i: &str) -> IResult<&str, Modusfile> {
-    map(terminated(many0(preceded(many0(ignored_line), modus_instruction)),
-                   terminated(many0(ignored_line), eof)), Modusfile)(i)
+    pub fn modusfile(i: &str) -> IResult<&str, Modusfile> {
+        map(terminated(many0(preceded(many0(dockerfile::parser::ignored_line), modus_instruction)),
+                    terminated(many0(dockerfile::parser::ignored_line), eof)), Modusfile)(i)
+    }
+
 }
 
 

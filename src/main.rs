@@ -15,12 +15,11 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-mod common_parsers;
-mod values;
 mod dockerfile;
 mod logic;
 mod wellformed;
 mod modusfile;
+mod sld;
 mod transpiler;
 
 
@@ -34,9 +33,8 @@ use clap::{
 };
 use std::fs;
 
-use dockerfile::{ Dockerfile, ResolvedParent };
-use modusfile::{ Modusfile, ModusLiteral };
-use logic::Literal;
+use dockerfile::ResolvedDockerfile;
+use modusfile::Modusfile;
 
 
 fn main() {
@@ -68,7 +66,7 @@ fn main() {
         let input_file = matches.value_of("FILE").unwrap();
     let content = fs::read_to_string(input_file).unwrap();
     let mf: Modusfile = content.parse().unwrap();
-    let query: Option<ModusLiteral> = matches.value_of("query").map(|s| s.parse().unwrap());
-    let df: Dockerfile<ResolvedParent> = transpiler::transpile(mf, query);
+    let query: Option<modusfile::Literal> = matches.value_of("query").map(|s| s.parse().unwrap());
+    let df: ResolvedDockerfile = transpiler::transpile(mf, query);
     println!("{}", df);
 }

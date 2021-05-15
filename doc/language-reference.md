@@ -10,10 +10,11 @@ The Modusfile language is a superset of the Dockerfile language. The main differ
 * [FROM](#from)
 * [COPY \-\-from](#copy---from)
 * [QUERY](#query)
+* [Technical Details](#technical-details)
 
 ## Syntax of `RULE`
 
-The syntax of Modus rules is similar to Datalog with Prolog-like extensions.
+The language of Modus rules is a dialect of Datalog with Prolog-like extensions.
 
 In Modus, terms are variables, atoms, or values of primitive types (integers and strings):
 
@@ -104,8 +105,6 @@ RULE c :- a, b
 ```
 
 Modus guarantees that although the dependencies of `a` and `b` will be chosen arbitrarily (because of the disjunction `;`), it will use the same dependency for both of these rules (either both `base1`, or both `base2`) to avoid an extra operation.
-
-Modus solves Horn clauses using SLD resolution, a top-down approach. Compared to Prolog, the semantics of Modus is declarative, i.e. success does not depend on the order of predicates in the rules.
 
 In Modus, predicates are divided into two categories: image predicates and imageless predicates.
 
@@ -202,3 +201,17 @@ QUERY a(X, "foo", 1), b(X, v"1.2")
 ```
 
 Several `QUERY` instructions are treated as a disjunction.
+
+## Technical Details
+
+Modus is a dialect of Datalog with the following extensions:
+
+- Ungrounded variables
+- Builtin predicates
+- Compound terms (currently, only `version` and `image`)
+
+These extensions are chosen because they help in modelling the problem domain. Ungrounded variables allow passing build parameters specified in the query, not in the database. Builtin predicates enable version management and basic string manipulation. Compound terms improve handling of versions and images.
+
+Because of the used extensions, Modus solves Horn clauses using [SLD resolution](https://en.wikipedia.org/wiki/SLD_resolution), a top-down approach. Compared to Prolog that also uses top-down evaluation, the semantics of Modus is more declarative. Specifically, the success of a query does not depend on the order of predicates and rules. Currently, the output of Modus may depend on the order of predicates and rules when are there are several optimal solutions with the same cost.
+
+Currently, Modus does not support recursive rules.

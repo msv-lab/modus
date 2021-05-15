@@ -19,25 +19,13 @@
 use std::str;
 use std::fmt;
 
-use nom::{
-    bytes::complete::{tag},
-    character::complete::{
-        alpha1,
-        alphanumeric1,
-        one_of,
-        none_of
-    },
-    branch::alt,
-    sequence::{pair, delimited, terminated, preceded, separated_pair},
-    multi::{many0, separated_list0, separated_list1},
-    combinator::{value, recognize, map, opt},
-    IResult
-};
-use fp_core::compose::*;
+use fp_core::compose::compose_two;
+
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Atom(pub String);
 
+/// C is constant, V is variable
 #[derive(Clone, PartialEq, Debug)]
 pub enum Term<C, V> {
     Constant(C),
@@ -114,76 +102,110 @@ where
     }
 }
 
-fn space(i: &str) -> IResult<&str, ()> {
-    value(
-        (), // Output is thrown away.
-        one_of(" \t")
-    )(i)
-}
+pub mod parser {
 
-fn optional_space(i: &str) -> IResult<&str, ()> {
-    value(
-        (), // Output is thrown away.
-        many0(space)
-    )(i)
-}
+    use super::*;
 
-fn ws<'a, F: 'a, O>(inner: F) -> impl FnMut(&'a str) -> IResult<&'a str, O>
-  where
-  F: FnMut(&'a str) -> IResult<&'a str, O>,
-{
-  delimited(
-    optional_space,
-    inner,
-    optional_space
-  )
-}
+    use nom::{
+        bytes::complete::{tag},
+        character::complete::{
+            alpha1,
+            alphanumeric1,
+            one_of,
+        },
+        branch::alt,
+        sequence::{pair, delimited, terminated, preceded, separated_pair},
+        multi::{many0, separated_list1},
+        combinator::{value, recognize, map, opt},
+        IResult
+    };
 
-//TODO: I need to think more carefully how to connect this to stage name
-pub fn literal_identifier(i: &str) -> IResult<&str, &str> {
-    recognize(
-      pair(
-        alpha1,
-        many0(alt((alphanumeric1, tag("_"), tag("-"))))
-      )
-    )(i)
-}
+    fn space(i: &str) -> IResult<&str, ()> {
+        value(
+            (), // Output is thrown away.
+            one_of(" \t")
+        )(i)
+    }
 
-pub fn term<'a, FC: 'a, FV: 'a, C, V>(constant: FC, variable: FV) -> impl FnMut(&'a str) -> IResult<&'a str, Term<C, V>>
-  where
-    FC: FnMut(&'a str) -> IResult<&'a str, C>,
-    FV: FnMut(&'a str) -> IResult<&'a str, V>,
-{
-    alt((map(constant, Term::Constant), map(variable, Term::Variable)))
-}
+    fn optional_space(i: &str) -> IResult<&str, ()> {
+        value(
+            (), // Output is thrown away.
+            many0(space)
+        )(i)
+    }
 
-pub fn literal<'a, FC: 'a, FV: 'a, C, V>(constant: FC, variable: FV) -> impl FnMut(&'a str) -> IResult<&'a str, Literal<C, V>>
-  where
-    FC: FnMut(&'a str) -> IResult<&'a str, C>,
-    FV: FnMut(&'a str) -> IResult<&'a str, V>,
-{
-    map(pair(literal_identifier,
-             opt(delimited(terminated(tag("("), optional_space),
-                       separated_list1(ws(tag(",")), term(constant, variable)),
-                       preceded(optional_space, tag(")"))))),
-   |(name, args)| match args { Some(args) => Literal { atom: Atom(name.into()), args },
-                               None => Literal { atom: Atom(name.into()), args: Vec::new() } })
-}
+    fn ws<'a, F: 'a, O>(inner: F) -> impl FnMut(&'a str) -> IResult<&'a str, O>
+    where
+    F: FnMut(&'a str) -> IResult<&'a str, O>,
+    {
+    delimited(
+        optional_space,
+        inner,
+        optional_space
+    )
+    }
 
-pub fn rule<'a, FC: 'a, FV: 'a, C, V>(constant: FC, variable: FV) -> impl FnMut(&'a str) -> IResult<&'a str, Rule<C, V>>
-  where
-    FC: FnMut(&'a str) -> IResult<&'a str, C> + Clone,
-    FV: FnMut(&'a str) -> IResult<&'a str, V> + Clone,
-{
-    map(separated_pair(literal(constant.clone(), variable.clone()),
-                       ws(tag(":-")),
-                       separated_list1(ws(tag(",")), literal(constant, variable))),
-        |(head, body)| Rule { head, body })
+    //TODO: I need to think more carefully how to connect this to stage name
+    pub fn literal_identifier(i: &str) -> IResult<&str, &str> {
+        recognize(
+        pair(
+            alpha1,
+            many0(alt((alphanumeric1, tag("_"), tag("-"))))
+        )
+        )(i)
+    }
+
+    pub fn term<'a, FC: 'a, FV: 'a, C, V>(constant: FC, variable: FV) -> impl FnMut(&'a str) -> IResult<&'a str, Term<C, V>>
+    where
+        FC: FnMut(&'a str) -> IResult<&'a str, C>,
+        FV: FnMut(&'a str) -> IResult<&'a str, V>,
+    {
+        alt((map(constant, Term::Constant), map(variable, Term::Variable)))
+    }
+
+    pub fn literal<'a, FC: 'a, FV: 'a, C, V>(constant: FC, variable: FV) -> impl FnMut(&'a str) -> IResult<&'a str, Literal<C, V>>
+    where
+        FC: FnMut(&'a str) -> IResult<&'a str, C>,
+        FV: FnMut(&'a str) -> IResult<&'a str, V>,
+    {
+        map(pair(literal_identifier,
+                opt(delimited(terminated(tag("("), optional_space),
+                        separated_list1(ws(tag(",")), term(constant, variable)),
+                        preceded(optional_space, tag(")"))))),
+    |(name, args)| match args { Some(args) => Literal { atom: Atom(name.into()), args },
+                                None => Literal { atom: Atom(name.into()), args: Vec::new() } })
+    }
+
+    pub fn rule<'a, FC: 'a, FV: 'a, C, V>(constant: FC, variable: FV) -> impl FnMut(&'a str) -> IResult<&'a str, Rule<C, V>>
+    where
+        FC: FnMut(&'a str) -> IResult<&'a str, C> + Clone,
+        FV: FnMut(&'a str) -> IResult<&'a str, V> + Clone,
+    {
+        map(separated_pair(literal(constant.clone(), variable.clone()),
+                        ws(tag(":-")),
+                        separated_list1(ws(tag(",")), literal(constant, variable))),
+            |(head, body)| Rule { head, body })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use nom::{
+        bytes::complete::{tag},
+        character::complete::{
+            alpha1,
+            alphanumeric1,
+            none_of
+        },
+        branch::alt,
+        sequence::{pair, delimited},
+        multi::{many0},
+        combinator::{recognize, map},
+        IResult
+    };
+    
 
     // define a toy language for testing
 
@@ -217,7 +239,7 @@ mod tests {
         type Err = String;
     
         fn from_str(s: &str) -> Result<Self, Self::Err> {
-            match rule(str_const, str_var)(s) {
+            match parser::rule(str_const, str_var)(s) {
                 Result::Ok((_, o)) => Ok(o),
                 Result::Err(e) => Result::Err(format!("{}", e)),
             }

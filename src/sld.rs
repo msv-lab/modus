@@ -16,27 +16,14 @@
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
 
-use crate::datalog;
-use datalog::{ Rule };
+use crate::logic;
+use logic::{ Rule };
 
-pub struct Renamed<V> {
-    index: u32,
-    variable: V,
+
+pub trait Variable {
+    fn rename(&self) -> Self;
+    fn aux() -> Self; 
 }
 
-static mut availableIndex: u32 = 0;
-
-impl Renamed<V> {
-    pub fn new(variable: V) -> Renamed<V> {
-        let index = availableIndex;
-        availableIndex += 1;
-        Renaming{ index, variable }
-    }
-    pub fn rename(&self) -> Renamed<V> {
-        let index = availableIndex;
-        availableIndex += 1;
-        Renaming{ index, ..self }       
-    }
-}
 
 type Substitution = i32;

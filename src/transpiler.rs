@@ -15,29 +15,55 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::str;
+use std::{sync::atomic::{AtomicU32, Ordering}};
 
-use crate::modusfile::{
-    Modusfile, ModusInstruction, ModusConstant, ModusRule, ModusLiteral, ModusTerm
-};
-use crate::dockerfile::{
-    Dockerfile, DockerInstruction, From, ResolvedParent,
-};
-use crate::logic;
-use logic::{
-    Rule, Literal, Term
+use crate::{
+    sld,
+    dockerfile,
+    dockerfile::{
+        Dockerfile, ResolvedParent,
+    },
+    modusfile,
+    modusfile::{Constant, Modusfile}, 
+    logic::{
+        Rule, Literal, Term
+    }
 };
 
+#[derive(Clone, PartialEq, Debug)]
+enum Variable {
+    User(String),
+    Auxiliary(u32),
+    Renamed(u32, Box<Variable>),
+}
 
-pub fn transpile(mf: Modusfile, query: Option<ModusLiteral>) -> Dockerfile<ResolvedParent> {
+static AVAILABLE_INDEX: AtomicU32 = AtomicU32::new(0);
+
+impl sld::Variable for Variable {
+    fn aux() -> Variable {
+        let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
+        Variable::Auxiliary(index)
+    }
+    fn rename(&self) -> Variable {
+        let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
+        Variable::Renamed(index, Box::new((*self).clone()))
+    }
+}
+
+
+pub fn transpile(mf: Modusfile, query: Option<modusfile::Literal>) -> Dockerfile<ResolvedParent> {
     let mut docker_instrs = vec![];
     for instr in mf.0 {
         match instr {
-            ModusInstruction::Copy(c) => docker_instrs.push(DockerInstruction::Copy(c)),
-            ModusInstruction::Run(r) => docker_instrs.push(DockerInstruction::Run(r)),
-            ModusInstruction::Env(e) => docker_instrs.push(DockerInstruction::Env(e)),
-            ModusInstruction::Workdir(e) => docker_instrs.push(DockerInstruction::Workdir(e)),
-            ModusInstruction::Rule(ModusRule{head, body}) => {
+            modusfile::Instruction::Copy(c) =>
+                docker_instrs.push(dockerfile::Instruction::Copy(c)),
+            modusfile::Instruction::Run(r) =>
+                docker_instrs.push(dockerfile::Instruction::Run(r)),
+            modusfile::Instruction::Env(e) =>
+                docker_instrs.push(dockerfile::Instruction::Env(e)),
+            modusfile::Instruction::Workdir(e) =>
+                docker_instrs.push(dockerfile::Instruction::Workdir(e)),
+            modusfile::Instruction::Rule(Rule{head, body}) => {
                 if !head.args.is_empty() {
                     panic!("head literals with parameters are not supported")
                 }
@@ -47,16 +73,16 @@ pub fn transpile(mf: Modusfile, query: Option<ModusLiteral>) -> Dockerfile<Resol
                 }
                 let body_literal = &body[0];
                 let from = {
-                    let ModusLiteral { atom, args } = body_literal;
+                    let Literal { atom, args } = body_literal;
                     match (atom.0.as_str(), args.as_slice()) {
-                        ("image", [Term::Constant(ModusConstant::Image(i))]) =>
-                            From{ parent: ResolvedParent::Image(i.clone()), alias: Some(stage_name) },
+                        ("image", [Term::Constant(Constant::String(s))]) =>
+                            dockerfile::From{ parent: ResolvedParent::Image(s.parse().unwrap()), alias: Some(stage_name) },
                         (s, []) =>
-                            From{ parent: ResolvedParent::Stage(s.into()), alias: Some(stage_name) },
+                            dockerfile::From{ parent: ResolvedParent::Stage(s.into()), alias: Some(stage_name) },
                         _ => panic!("unsuppored body literal {}", body_literal)
                     }
                 };
-                docker_instrs.push(DockerInstruction::From(from))
+                docker_instrs.push(dockerfile::Instruction::From(from))
             },
         }
     }

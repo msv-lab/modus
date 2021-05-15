@@ -18,31 +18,13 @@
 use std::str;
 use std::fmt;
 
-use nom::{
-    IResult,
-    branch::alt,
-    bytes::complete::{is_not, tag, tag_no_case},
-    character::complete::{
-        char,
-        alpha1,
-        alphanumeric1,
-        space0,
-        space1,
-        line_ending,
-        one_of
-    },
-    combinator::{eof, map, opt, peek, recognize, value},
-    multi::{many0, many1, separated_list1},
-    sequence::{pair, delimited, terminated, preceded, tuple}
-};
-
-use crate::values::{ Image, image };
-use crate::common_parsers::{
-    repo_identifier,
-    tag_identifier,
-    alias_identifier
-};
-
+#[derive(Clone, PartialEq, Debug)]
+pub struct Image {
+    registry: String,
+    namespace: String,
+    repo: String,
+    tag: String,
+}
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum ResolvedParent {
@@ -75,7 +57,7 @@ pub struct Arg(String);
 pub struct Workdir(String);
 
 #[derive(Clone, PartialEq, Debug)]
-pub enum DockerInstruction<P> {
+pub enum Instruction<P> {
     From(From<P>),
     Run(Run),
     //Cmd(String),
@@ -97,7 +79,48 @@ pub enum DockerInstruction<P> {
 }
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Dockerfile<P>(pub Vec<DockerInstruction<P>>);
+pub struct Dockerfile<P>(pub Vec<Instruction<P>>);
+
+pub type ResolvedDockerfile = Dockerfile<ResolvedParent>;
+
+impl Image {
+    pub fn from_repo_tag(repo: String, tag: String) -> Image {
+        Image {
+            registry: String::new(), 
+            namespace: String::new(),
+            repo,
+            tag
+        }
+    }
+}
+
+impl fmt::Display for Image {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.registry.is_empty() {
+            write!(f, "{}/", self.registry)?;
+        }
+        if !self.namespace.is_empty() {
+            write!(f, "{}/", self.namespace)?;
+        }
+        write!(f, "{}", self.repo)?;
+        if self.tag.is_empty() {
+            write!(f, ":latest") // being implicit about tag
+        } else {
+            write!(f, ":{}", self.tag)
+        }
+    }
+}
+
+impl str::FromStr for Image {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match parser::image(s) {
+            Result::Ok((_, o)) => Ok(o),
+            Result::Err(e) => Result::Err(format!("{}", e)),
+        }
+    }
+}
 
 impl<P> fmt::Display for From<P> 
 where
@@ -160,7 +183,7 @@ impl str::FromStr for Dockerfile<UnresolvedParent> {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match dockerfile(s) {
+        match parser::dockerfile(s) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
@@ -174,151 +197,232 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for i in self.0.iter() {
             match i {
-                DockerInstruction::Arg(s) => writeln!(f, "ARG {}", s),
-                DockerInstruction::Copy(s) => writeln!(f, "COPY {}", s),
-                DockerInstruction::From(image) => writeln!(f, "FROM {}", image),
-                DockerInstruction::Run(s) => writeln!(f, "RUN {}", s),
-                DockerInstruction::Env(s) => writeln!(f, "ENV {}", s),
-                DockerInstruction::Workdir(s) => writeln!(f, "WORKDIR {}", s),
+                Instruction::Arg(s) => writeln!(f, "ARG {}", s),
+                Instruction::Copy(s) => writeln!(f, "COPY {}", s),
+                Instruction::From(image) => writeln!(f, "FROM {}", image),
+                Instruction::Run(s) => writeln!(f, "RUN {}", s),
+                Instruction::Env(s) => writeln!(f, "ENV {}", s),
+                Instruction::Workdir(s) => writeln!(f, "WORKDIR {}", s),
             }?;
         }
         Ok(())
     }
 }
 
-fn line_continuation(i: &str) -> IResult<&str, ()> {
-    value(
-        (), // Output is thrown away.
-        tuple((char('\\'), space0, line_ending))
-    )(i)
-}
+pub mod parser {
+    use super::*;
 
-fn empty_line(i: &str) -> IResult<&str, ()> {
-    value(
-        (), // Output is thrown away.
-        alt((preceded(space0, line_ending), preceded(space1, peek(eof))))
-    )(i)
-}
+    use nom::{
+        IResult,
+        branch::alt,
+        bytes::complete::{is_not, tag, tag_no_case},
+        character::complete::{
+            char,
+            alpha1,
+            alphanumeric1,
+            space0,
+            space1,
+            line_ending,
+            one_of
+        },
+        combinator::{eof, map, opt, peek, recognize, value},
+        multi::{many0, many1, separated_list1},
+        sequence::{pair, delimited, terminated, preceded, tuple}
+    };
 
-pub fn ignored_line(i: &str) -> IResult<&str, ()> {
-    value(
-        (), // Output is thrown away.
-        alt((comment_line, empty_line))
-    )(i)
-}
+    //TODO: need to double-check
+    pub fn alias_identifier(i: &str) -> IResult<&str, &str> {
+        recognize(
+        pair(
+            alpha1,
+            many0(alt((alphanumeric1, tag("_"), tag("-"))))
+        )
+        )(i)
+    }
 
-// one line continuation followed by an arbitrary number of comments
-fn continuation_with_comments(i: &str) -> IResult<&str, ()> {
-    value(
-        (), // Output is thrown away.
-        terminated(line_continuation, many0(comment_line))
-    )(i)
-}
+    //TODO: need to double-check
+    pub fn repo_identifier(i: &str) -> IResult<&str, &str> {
+        recognize(
+        pair(
+            alt((alphanumeric1, tag("_"))),
+            many0(alt((alphanumeric1, tag("_"), tag("-"), tag("/"))))
+        )
+        )(i)
+    }
 
-fn space(i: &str) -> IResult<&str, ()> {
-    value(
-        (), // Output is thrown away.
-        one_of(" \t")
-    )(i)
-}
+    //TODO: need to double-check
+    pub fn tag_identifier(i: &str) -> IResult<&str, &str> {
+        recognize(
+            many0(alt((alphanumeric1, tag("_"), tag("-"), tag("."))))
+        )(i)
+    }
 
-fn optional_space(i: &str) -> IResult<&str, ()> {
-    value(
-        (), // Output is thrown away.
-        many0(alt((space, continuation_with_comments)))
-    )(i)
-}
+    fn line_continuation(i: &str) -> IResult<&str, ()> {
+        value(
+            (), // Output is thrown away.
+            tuple((char('\\'), space0, line_ending))
+        )(i)
+    }
 
-pub fn mandatory_space(i: &str) -> IResult<&str, ()> {
-    value(
-        (), // Output is thrown away.
-        delimited(many0(continuation_with_comments), space, optional_space)
-    )(i)
-}
+    fn empty_line(i: &str) -> IResult<&str, ()> {
+        value(
+            (), // Output is thrown away.
+            alt((preceded(space0, line_ending), preceded(space1, peek(eof))))
+        )(i)
+    }
 
-fn comment(i: &str) -> IResult<&str, &str> {
-    preceded(char('#'), is_not("\n\r"))(i)
-}
+    pub fn ignored_line(i: &str) -> IResult<&str, ()> {
+        value(
+            (), // Output is thrown away.
+            alt((comment_line, empty_line))
+        )(i)
+    }
 
-fn comment_line(i: &str) -> IResult<&str, ()> {
-    value(
-        (), // Output is thrown away.
-        delimited(space0, comment, alt((line_ending, peek(eof))))
-    )(i)
-}
+    // one line continuation followed by an arbitrary number of comments
+    fn continuation_with_comments(i: &str) -> IResult<&str, ()> {
+        value(
+            (), // Output is thrown away.
+            terminated(line_continuation, many0(comment_line))
+        )(i)
+    }
+
+    fn space(i: &str) -> IResult<&str, ()> {
+        value(
+            (), // Output is thrown away.
+            one_of(" \t")
+        )(i)
+    }
+
+    fn optional_space(i: &str) -> IResult<&str, ()> {
+        value(
+            (), // Output is thrown away.
+            many0(alt((space, continuation_with_comments)))
+        )(i)
+    }
+
+    pub fn mandatory_space(i: &str) -> IResult<&str, ()> {
+        value(
+            (), // Output is thrown away.
+            delimited(many0(continuation_with_comments), space, optional_space)
+        )(i)
+    }
+
+    fn comment(i: &str) -> IResult<&str, &str> {
+        preceded(char('#'), is_not("\n\r"))(i)
+    }
+
+    fn comment_line(i: &str) -> IResult<&str, ()> {
+        value(
+            (), // Output is thrown away.
+            delimited(space0, comment, alt((line_ending, peek(eof))))
+        )(i)
+    }
 
 
-//TODO: I need to test alias parsing
+    //TODO: I need to test alias parsing
 
-fn parent(i: &str) -> IResult<&str, UnresolvedParent> {
-    map(recognize(image), |s| UnresolvedParent(s.into()))(i)
-}
+    fn parent(i: &str) -> IResult<&str, UnresolvedParent> {
+        map(recognize(image), |s| UnresolvedParent(s.into()))(i)
+    }
 
-fn from_content(i: &str) -> IResult<&str, From<UnresolvedParent>> {
-    map(pair(
-        parent,
-        opt(map(preceded(delimited(optional_space, tag("AS"), space), alias_identifier), String::from))
-        ),
-        |(parent, alias)| From{ parent, alias }
-    )(i)
-}
+    fn from_content(i: &str) -> IResult<&str, From<UnresolvedParent>> {
+        map(pair(
+            parent,
+            opt(map(preceded(delimited(optional_space, tag("AS"), space), alias_identifier), String::from))
+            ),
+            |(parent, alias)| From{ parent, alias }
+        )(i)
+    }
 
-pub fn multiline_string(i: &str) -> IResult<&str, String> {
-    let one_line = map(many1(alt((is_not("\\\n\r"), recognize(tuple((char('\\'), many0(space), is_not(" \n\r"))))))), |s| s.join(""));
-    let body = map(separated_list1(many1(line_continuation), one_line), |s| s.join(""));
-    preceded(many0(line_continuation), body)(i)
-}
+    pub fn multiline_string(i: &str) -> IResult<&str, String> {
+        let one_line = map(many1(alt((is_not("\\\n\r"), recognize(tuple((char('\\'), many0(space), is_not(" \n\r"))))))), |s| s.join(""));
+        let body = map(separated_list1(many1(line_continuation), one_line), |s| s.join(""));
+        preceded(many0(line_continuation), body)(i)
+    }
 
-pub fn from_instr(i: &str) -> IResult<&str, From<UnresolvedParent>> {
-    preceded(pair(tag_no_case("FROM"), mandatory_space), from_content)(i)
-}
+    pub fn from_instr(i: &str) -> IResult<&str, From<UnresolvedParent>> {
+        preceded(pair(tag_no_case("FROM"), mandatory_space), from_content)(i)
+    }
 
-pub fn env_instr(i: &str) -> IResult<&str, Env> {
-    let body = map(multiline_string, Env);
-    preceded(pair(tag_no_case("ENV"), mandatory_space), body)(i)
-}
+    pub fn env_instr(i: &str) -> IResult<&str, Env> {
+        let body = map(multiline_string, Env);
+        preceded(pair(tag_no_case("ENV"), mandatory_space), body)(i)
+    }
 
-pub fn copy_instr(i: &str) -> IResult<&str, Copy> {
-    let body = map(multiline_string, Copy);
-    preceded(pair(tag_no_case("COPY"), mandatory_space), body)(i)
-}
+    pub fn copy_instr(i: &str) -> IResult<&str, Copy> {
+        let body = map(multiline_string, Copy);
+        preceded(pair(tag_no_case("COPY"), mandatory_space), body)(i)
+    }
 
-pub fn arg_instr(i: &str) -> IResult<&str, Arg> {
-    let body = map(multiline_string, Arg);
-    preceded(pair(tag_no_case("ARG"), mandatory_space), body)(i)
-}
+    pub fn arg_instr(i: &str) -> IResult<&str, Arg> {
+        let body = map(multiline_string, Arg);
+        preceded(pair(tag_no_case("ARG"), mandatory_space), body)(i)
+    }
 
-pub fn run_instr(i: &str) -> IResult<&str, Run> {
-    let body = map(multiline_string, Run);
-    preceded(pair(tag_no_case("RUN"), mandatory_space), body)(i)
-}
+    pub fn run_instr(i: &str) -> IResult<&str, Run> {
+        let body = map(multiline_string, Run);
+        preceded(pair(tag_no_case("RUN"), mandatory_space), body)(i)
+    }
 
-pub fn workdir_instr(i: &str) -> IResult<&str, Workdir> {
-    let body = map(multiline_string, Workdir);
-    preceded(pair(tag_no_case("WORKDIR"), mandatory_space), body)(i)
-}
+    pub fn workdir_instr(i: &str) -> IResult<&str, Workdir> {
+        let body = map(multiline_string, Workdir);
+        preceded(pair(tag_no_case("WORKDIR"), mandatory_space), body)(i)
+    }
 
-fn docker_instruction(i: &str) -> IResult<&str, DockerInstruction<UnresolvedParent>> {
-    alt((
-        map(terminated(from_instr, alt((line_ending, peek(eof)))), DockerInstruction::From),
-        map(terminated(copy_instr, alt((line_ending, peek(eof)))), DockerInstruction::Copy),
-        map(terminated(arg_instr, alt((line_ending, peek(eof)))), DockerInstruction::Arg),
-        map(terminated(run_instr, alt((line_ending, peek(eof)))), DockerInstruction::Run),
-        map(terminated(env_instr, alt((line_ending, peek(eof)))), DockerInstruction::Env),
-        map(terminated(workdir_instr, alt((line_ending, peek(eof)))), DockerInstruction::Workdir)
-    ))(i)
-}
+    fn docker_instruction(i: &str) -> IResult<&str, Instruction<UnresolvedParent>> {
+        alt((
+            map(terminated(from_instr, alt((line_ending, peek(eof)))), Instruction::From),
+            map(terminated(copy_instr, alt((line_ending, peek(eof)))), Instruction::Copy),
+            map(terminated(arg_instr, alt((line_ending, peek(eof)))), Instruction::Arg),
+            map(terminated(run_instr, alt((line_ending, peek(eof)))), Instruction::Run),
+            map(terminated(env_instr, alt((line_ending, peek(eof)))), Instruction::Env),
+            map(terminated(workdir_instr, alt((line_ending, peek(eof)))), Instruction::Workdir)
+        ))(i)
+    }
 
-fn dockerfile(i: &str) -> IResult<&str, Dockerfile<UnresolvedParent>> {
-    map(terminated(many0(preceded(many0(ignored_line), docker_instruction)),
-                   terminated(many0(ignored_line), eof)),
-        Dockerfile)(i)
+    pub fn dockerfile(i: &str) -> IResult<&str, Dockerfile<UnresolvedParent>> {
+        map(terminated(many0(preceded(many0(ignored_line), docker_instruction)),
+                    terminated(many0(ignored_line), eof)),
+            Dockerfile)(i)
+    }
+ 
+    pub fn host_identifier(i: &str) -> IResult<&str, &str> {
+        recognize(
+            delimited(
+                many0(alt((alphanumeric1, tag("_"), tag("-")))),
+                tag("."), //needs to be at least one dot
+                many0(alt((alphanumeric1, tag("_"), tag("-"), tag("."))))
+        ))(i)
+    }
+    
+    //FIXME: this is very approximate
+    pub fn image(i: &str) -> IResult<&str, Image> {
+        map(pair(opt(terminated(host_identifier, tag("/"))),
+                pair(opt(recognize(many1(terminated(many0(alt((alphanumeric1, tag("_"), tag("-")))), tag("/"))))),
+                     pair(repo_identifier,
+                          opt(preceded(tag(":"), tag_identifier))))),
+            |(registry, (namespace, (repo, tag)))| Image {
+                registry: registry.unwrap_or("").into(),
+                namespace: match namespace {
+                    Some(s) => {
+                        let mut n = s.to_string();
+                        n.pop();
+                        n
+                    },
+                    None => String::new()
+                },
+                repo: repo.into(), 
+                tag: tag.unwrap_or("").into()
+            }
+        )(i)
+    }
+      
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    
     fn from_ubuntu_latest() -> From<UnresolvedParent> {
         From{ parent: UnresolvedParent("ubuntu".into()), alias: None }
     }
@@ -329,76 +433,105 @@ mod tests {
 
     #[test]
     fn only_simple_from() {
-        let f = DockerInstruction::From(from_ubuntu_latest());
+        let f = Instruction::From(from_ubuntu_latest());
         let e = Dockerfile(vec![f]);
         assert_eq!(Ok(e), "FROM ubuntu\n".parse());
     }
 
     #[test]
     fn only_from_with_tag() {
-        let f = DockerInstruction::From(from_ubuntu_20_04());
+        let f = Instruction::From(from_ubuntu_20_04());
         let e = Dockerfile(vec![f]);
         assert_eq!(Ok(e), "FROM ubuntu:20.04\n".parse());
     }
 
     #[test]
     fn two_instructions() {
-        let f = DockerInstruction::From(from_ubuntu_latest());
-        let r = DockerInstruction::Run(Run("ls".into()));
+        let f = Instruction::From(from_ubuntu_latest());
+        let r = Instruction::Run(Run("ls".into()));
         let e = Dockerfile(vec![f, r]);
         assert_eq!(Ok(e), "FROM ubuntu\nRUN ls\n".parse());
     }
 
     #[test]
     fn no_newline() {
-        let f = DockerInstruction::From(from_ubuntu_latest());
-        let r = DockerInstruction::Run(Run("ls".into()));
+        let f = Instruction::From(from_ubuntu_latest());
+        let r = Instruction::Run(Run("ls".into()));
         let e = Dockerfile(vec![f, r]);
         assert_eq!(Ok(e), "FROM ubuntu\nRUN ls".parse());
     }
 
     #[test]
     fn empty_line() {
-        let f = DockerInstruction::From(from_ubuntu_latest());
-        let r = DockerInstruction::Run(Run("ls".into()));
+        let f = Instruction::From(from_ubuntu_latest());
+        let r = Instruction::Run(Run("ls".into()));
         let e = Dockerfile(vec![f, r]);
         assert_eq!(Ok(e), "\nFROM ubuntu\n  \nRUN ls\n \n".parse());
     }
 
     #[test]
     fn comment() {
-        let f = DockerInstruction::From(from_ubuntu_latest());
+        let f = Instruction::From(from_ubuntu_latest());
         let e = Dockerfile(vec![f]);
         assert_eq!(Ok(e), "# hello world\nFROM ubuntu".parse());
     }
 
     #[test]
     fn from_line_continuation_with_comment() {
-        let f = DockerInstruction::From(from_ubuntu_latest());
+        let f = Instruction::From(from_ubuntu_latest());
         let e = Dockerfile(vec![f]);
         assert_eq!(Ok(e), "FROM\\\n# hello world\n ubuntu".parse());
     }
 
     #[test]
     fn from_line_continuation() {
-        let f = DockerInstruction::From(from_ubuntu_latest());
+        let f = Instruction::From(from_ubuntu_latest());
         let e = Dockerfile(vec![f]);
         assert_eq!(Ok(e), "FROM\\ \n ubuntu".parse());
     }
 
     #[test]
     fn run_line_continuation_beginning() {
-        let f = DockerInstruction::From(from_ubuntu_latest());
-        let r = DockerInstruction::Run(Run("ls -la".into()));
+        let f = Instruction::From(from_ubuntu_latest());
+        let r = Instruction::Run(Run("ls -la".into()));
         let e = Dockerfile(vec![f, r]);
         assert_eq!(Ok(e), "FROM ubuntu\nRUN\\\n ls -la".parse());
     }
 
     #[test]
     fn run_line_continuation_middle() {
-        let f = DockerInstruction::From(from_ubuntu_latest());
-        let r = DockerInstruction::Run(Run("ls -la".into()));
+        let f = Instruction::From(from_ubuntu_latest());
+        let r = Instruction::Run(Run("ls -la".into()));
         let e = Dockerfile(vec![f, r]);
         assert_eq!(Ok(e), "FROM ubuntu\nRUN ls \\\n-la".parse());
     }
+
+    #[test]
+    fn parse_simple_image() {
+        let i = Image::from_repo_tag("ubuntu".into(), "latest".into());
+        assert_eq!(Ok(i), "ubuntu:latest".parse());
+    }
+
+    #[test]
+    fn parse_complex_image() {
+        let i = Image {
+            registry: "registry.access.redhat.com".into(),
+            namespace: "rhel7".into(),
+            repo: "rhel".into(), 
+            tag: "7.3-53".into()
+        };
+        assert_eq!(Ok(("", i)), parser::image("registry.access.redhat.com/rhel7/rhel:7.3-53"));
+    }
+
+    #[test]
+    fn parse_long_namespace() {
+        let i = Image {
+            registry: "".into(),
+            namespace: "a/b/c".into(),
+            repo: "r".into(), 
+            tag: "".into()
+        };
+        assert_eq!(Ok(("", i)), parser::image("a/b/c/r"));
+    }
+
 }
