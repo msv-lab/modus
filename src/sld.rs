@@ -18,9 +18,34 @@
 
 use crate::logic;
 use logic::{ Rule };
+use crate::unification::Substitution;
 
 
 pub trait Variable {
     fn rename(&self) -> Self;
     fn aux() -> Self; 
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use super::*;
+
+    static AVAILABLE_INDEX: AtomicU32 = AtomicU32::new(0);
+
+    /// Assume that underscore is not used in normal variables
+    impl Variable for logic::toy::Variable {
+        fn aux() -> logic::toy::Variable {
+            let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
+            format!("Aux{}", index)
+        }
+        fn rename(&self) -> logic::toy::Variable {
+            let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
+            let prefix = self.split('_').next().unwrap();
+            format!("{}_{}", prefix, index)
+        }
+    }
+
+    
 }

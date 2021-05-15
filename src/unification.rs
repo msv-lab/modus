@@ -21,7 +21,7 @@ use std::{collections::HashMap, hash::Hash};
 use crate::logic;
 use logic::{ Atom, Term, Rule, Literal, Groundness };
 
-type Substitution<C, V> = HashMap<V, Term<C, V>>;
+pub type Substitution<C, V> = HashMap<V, Term<C, V>>;
 
 impl<C, V> Groundness for Substitution<C, V> {
     fn is_grounded() -> bool {
@@ -65,9 +65,7 @@ fn composition<C: Clone, V: Eq + Hash + Clone>(l: &Substitution<C, V>, r: &Subst
     for (k, v) in l {
         result.insert(k.clone(), v.substitute(r));
     }
-    for (k, v) in r {
-        result.insert(k.clone(), v.clone());
-    }
+    result.extend(r.clone());
     result
 }
 

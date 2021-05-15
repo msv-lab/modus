@@ -241,11 +241,12 @@ pub mod toy {
     
     // define a toy language with only atoms for testing
  
-    pub type Term = super::Term<Atom, String>;
-    pub type Literal = super::Literal<Atom, String>;
-    pub type Rule = super::Rule<Atom, String>;
+    pub type Variable = String;
+    pub type Term = super::Term<Atom, Variable>;
+    pub type Literal = super::Literal<Atom, Variable>;
+    pub type Rule = super::Rule<Atom, Variable>;
 
-    fn toy_var(i: &str) -> IResult<&str, String> {
+    fn toy_var(i: &str) -> IResult<&str, Variable> {
         map(
             recognize(
                 pair(
