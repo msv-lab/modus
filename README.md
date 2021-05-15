@@ -62,25 +62,28 @@ Thus, build definitions in Modus can be thought of as a deductive database, and 
 
 ## Motivating example
 
-Assume that we would like to containerise the application `app`. Suppose also that `app` depends on the library `lib`, different versions of which depend on different versions of Python. We would like to have two build mode: "development" mode for development and testing, and "production" mode with a smaller image and better security. The Modusfile below defines a parametrised build that (1) automatically resolves dependencies, and (2) supports both "development" and "production" modes without code duplication. 
+Assume that we would like to containerise the application `app`. Suppose also that `app` depends on the library `library`, different versions of which depend on different versions of Python. We would like to have two build mode: "development" mode for development and testing, and "production" mode with a smaller image and better security. The Modusfile below defines a parametrised build that (1) automatically resolves dependencies, and (2) supports both "development" and "production" modes without code duplication. 
 
 The example below uses special literals for Docker images, e.g. `i"python:3.8"`, and for SemVer versions, e.g. `v"1.3.0-alpha"`:
 
 ```Dockerfile
 # Relation between the library version and the required Python version:
-RULE lib_python(LIB_VER, v"3.4") :- LIB_VER < v"1.1.0"
-RULE lib_python(LIB_VER, v"3.5") :- \
+RULE library_python(LIB_VER, v"3.4") :- LIB_VER < v"1.1.0"
+RULE library_python(LIB_VER, v"3.5") :- \
        LIB_VER >= v"1.1.0", LIB_VER < v"1.3.0-alpha"
-RULE lib_python(LIB_VER, v"3.8") :- LIB_VER >= v"1.3.0-alpha"
+RULE library_python(LIB_VER, v"3.8") :- LIB_VER >= v"1.3.0-alpha"
 
-# Relation between build modes (development/production) and library targets (debug/release):
+# Relation between build modes (development/production)
+# and library targets (debug/release):
 RULE mode_target(development, "debug")
 RULE mode_target(production, "release")
 
-# The build stage that downloads and compiles the library. Python's version and the make target are resolved based on the library version and the build mode:
+# The build stage that downloads and compiles the library.
+# Python's version and the make target are resolved based
+# on the library version and the build mode:
 RULE library(LIB_VER, MODE) :- \
        image(i"python:${PYTHON_VER}"), \
-       lib_python(LIB_VER, PYTHON_VER), \
+       library_python(LIB_VER, PYTHON_VER), \
        mode_target(MODE, TARGET)
 RUN apt-get install make
 RUN wget https://library.com/releases/library-v${LIB_VER}.tar.gz && \
@@ -89,16 +92,18 @@ RUN wget https://library.com/releases/library-v${LIB_VER}.tar.gz && \
 WORKDIR /my_lib
 RUN make ${TARGET}
 
-# For the development mode, use the "library" build stage as the parent image, and additionally install development tools (Pylint):
+# In development mode, use the "library" build stage as the parent image,
+# and additionally install development tools (Pylint):
 RULE dependencies(LIB_VER, development) :- library(LIB_VER)
 RUN pip install pylint
 
-# For the production mode, use Alpine as the parent image, and copy compiled binaries from the "library" build stage:
+# In production mode, use Alpine as the parent image,
+# and copy compiled binaries from the "library" build stage:
 RULE dependencies(LIB_VER, production) :- \
        image(i"python:${PYTHON_VER}-alpine"), \
        library(LIB_VER), \
-       lib_python(LIB_VER, PYTHON_VER)
-COPY --from=lib /my_lib /my_lib
+       library_python(LIB_VER, PYTHON_VER)
+COPY --from=library /my_lib /my_lib
 
 # Copy app's source code to the appropriate parent image:
 RULE app(LIB_VER, MODE) :- dependencies(LIB_VER, MODE)
@@ -117,9 +122,9 @@ Modus can print the proof tree of a given query that shows how the target image 
         ├── image(i"python:3.5-alpine")
         ├── library(v"1.2.5", production)
         │   ├── image(i"python:3.5")
-        │   ├╶╶ lib_python(v"1.2.5", v"3.5")
+        │   ├╶╶ library_python(v"1.2.5", v"3.5")
         │   └╶╶ mode_target(production, "debug")
-        └╶╶ lib_python(v"1.2.5", v"3.5")
+        └╶╶ library_python(v"1.2.5", v"3.5")
 
 Predicates that do not represent images (_imageless_ predicates) in the proof tree are preceded with `╶╶`.
 
