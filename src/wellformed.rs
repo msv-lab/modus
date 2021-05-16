@@ -15,23 +15,17 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use crate::logic::{Atom, Term, Literal, Rule};
+use crate::logic::{Atom, Term, Literal, Clause};
 
-
-/// checks if the rules have recursion
-/// outputs predicates with recursive dependencies if any
-pub fn check_recursion<C, V>(rules: Vec<Rule<C,V>>) -> Option<Vec<Atom>> {
-    None //TODO use dependency graphs to find loops
-}
 
 /// checks if image predicates transitively depend on image/1 in each disjunct
 /// outputs those that do not depend on image/1 in some disjuncts
-pub fn check_image_predicates<C, V>(rules: Vec<Rule<C,V>>) -> Option<Vec<Atom>> {
+pub fn check_image_predicates<C, V>(clauses: Vec<Clause<C,V>>) -> Option<Vec<Atom>> {
     None
 }
 
 // checks if grounded variables are grounded in each rule
-pub fn check_groundness<C, V>(rules: Vec<Rule<C,V>>) -> Option<Vec<Atom>> {
+pub fn check_groundness<C, V>(clauses: Vec<Clause<C,V>>) -> Option<Vec<Atom>> {
     None
 }
 

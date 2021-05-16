@@ -27,7 +27,7 @@ use std::{collections::HashSet, hash::Hash};
 pub struct Atom(pub String);
 
 /// C is constant, V is variable
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Term<C, V> {
     Constant(C),
     Atom(Atom),
@@ -35,7 +35,7 @@ pub enum Term<C, V> {
     Compound(Atom, Vec<Term<C, V>>),
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Literal<C, V> {
     pub atom: Atom,
     pub args: Vec<Term<C,V>>
@@ -45,7 +45,7 @@ pub struct Literal<C, V> {
 pub struct Signature(Atom, u32);
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Rule<C,V> {
+pub struct Clause<C,V> {
     pub head: Literal<C,V>,
     pub body: Vec<Literal<C,V>>
 }
@@ -70,13 +70,13 @@ impl<C, V: Clone + Eq + Hash> Literal<C, V> {
         Signature(self.atom.clone(), self.args.len().try_into().unwrap())
     }
     pub fn variables(&self) -> HashSet<V> {
-        self.args.iter().map(|r| r.variables()).reduce(|mut l, r| { l.extend(r); l }).unwrap()
+        self.args.iter().map(|r| r.variables()).reduce(|mut l, r| { l.extend(r); l }).unwrap_or_default()
     }
 }
 
-impl<C, V: Clone + Eq + Hash> Rule<C, V> {
+impl<C, V: Clone + Eq + Hash> Clause<C, V> {
     pub fn variables(&self) -> HashSet<V> {
-        let mut body = self.body.iter().map(|r| r.variables()).reduce(|mut l, r| { l.extend(r); l }).unwrap();
+        let mut body = self.body.iter().map(|r| r.variables()).reduce(|mut l, r| { l.extend(r); l }).unwrap_or_default();
         body.extend(self.head.variables());
         body
     }
@@ -146,7 +146,7 @@ where
     }
 }
 
-impl<C, V> fmt::Display for Rule<C, V>
+impl<C, V> fmt::Display for Clause<C, V>
 where
     C: fmt::Display,
     V: fmt::Display,
@@ -230,15 +230,15 @@ pub mod parser {
                                 None => Literal { atom: Atom(name.into()), args: Vec::new() } })
     }
 
-    pub fn rule<'a, FC: 'a, FV: 'a, C, V>(constant: FC, variable: FV) -> impl FnMut(&'a str) -> IResult<&'a str, Rule<C, V>>
+    pub fn clause<'a, FC: 'a, FV: 'a, C, V>(constant: FC, variable: FV) -> impl FnMut(&'a str) -> IResult<&'a str, Clause<C, V>>
     where
         FC: FnMut(&'a str) -> IResult<&'a str, C> + Clone,
         FV: FnMut(&'a str) -> IResult<&'a str, V> + Clone,
     {
         map(separated_pair(literal(constant.clone(), variable.clone()),
-                        ws(tag(":-")),
-                        separated_list1(ws(tag(",")), literal(constant, variable))),
-            |(head, body)| Rule { head, body })
+                           ws(tag(":-")),
+                           separated_list1(ws(tag(",")), literal(constant, variable))),
+            |(head, body)| Clause { head, body })
     }
 }
 
@@ -265,7 +265,7 @@ pub mod toy {
     pub type Variable = String;
     pub type Term = super::Term<Atom, Variable>;
     pub type Literal = super::Literal<Atom, Variable>;
-    pub type Rule = super::Rule<Atom, Variable>;
+    pub type Clause = super::Clause<Atom, Variable>;
 
     fn toy_var(i: &str) -> IResult<&str, Variable> {
         map(
@@ -285,11 +285,11 @@ pub mod toy {
             compose!(String::from, Atom))(i)
     }
 
-    impl str::FromStr for Rule {
+    impl str::FromStr for Clause {
         type Err = String;
     
         fn from_str(s: &str) -> Result<Self, Self::Err> {
-            match super::parser::rule(toy_const, toy_var)(s) {
+            match super::parser::clause(toy_const, toy_var)(s) {
                 Result::Ok((_, o)) => Ok(o),
                 Result::Err(e) => Result::Err(format!("{}", e)),
             }
@@ -322,7 +322,7 @@ mod tests {
         let l1 = toy::Literal{ atom: Atom("l1".into()), args: vec![va.clone(), vb.clone()] };
         let l2 = toy::Literal{ atom: Atom("l2".into()), args: vec![va.clone(), c.clone()] };
         let l3 = toy::Literal{ atom: Atom("l3".into()), args: vec![vb.clone(), c.clone()] };
-        let r = Rule{ head: l1, body: vec![l2, l3] };
+        let r = Clause{ head: l1, body: vec![l2, l3] };
         assert_eq!("l1(A, B) :- l2(A, c), l3(B, c)", r.to_string());
         assert_eq!(Ok(r), "l1(A, B) :- l2(A, c), l3(B, c)".parse());
     }
@@ -332,7 +332,7 @@ mod tests {
         let va = toy::Term::Variable("A".into());
         let l1 = toy::Literal{ atom: Atom("l1".into()), args: Vec::new() };
         let l2 = toy::Literal{ atom: Atom("l2".into()), args: vec![va.clone()] };
-        let r = Rule{ head: l1, body: vec![l2] };
+        let r = Clause{ head: l1, body: vec![l2] };
         assert_eq!("l1 :- l2(A)", r.to_string());
         assert_eq!(Ok(r), "l1 :- l2(A)".parse());
     }

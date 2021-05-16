@@ -18,7 +18,7 @@
 use std::collections::HashSet;
 
 use crate::logic;
-use logic::{ Term, Rule };
+use logic::{ Term, Clause };
 
 #[derive(Hash, Eq, PartialEq)]
 pub enum ConcreteType {

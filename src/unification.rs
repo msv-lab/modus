@@ -19,7 +19,7 @@
 use std::{collections::{HashMap, HashSet}, hash::Hash};
 
 use crate::logic;
-use logic::{ Atom, Term, Rule, Literal, Groundness };
+use logic::{ Atom, Term, Clause, Literal, Groundness };
 
 pub type Substitution<C, V> = HashMap<V, Term<C, V>>;
 
@@ -93,7 +93,27 @@ impl<C: Clone, V: Eq + Hash + Clone + Rename<C, V>> Rename<C, V> for Vec<Literal
     }
 }
 
-fn composition<C: Clone, V: Eq + Hash + Clone>(l: &Substitution<C, V>, r: &Substitution<C, V>) -> Substitution<C, V> {
+impl<C: Clone, V: Eq + Hash + Clone> Substitute<C, V> for Clause<C, V> {
+    type Output = Clause<C, V>;
+    fn substitute(&self, s: &Substitution<C, V>) -> Self::Output {
+        Clause { head: self.head.substitute(s), body: self.body.iter().map(|t| t.substitute(s)).collect() }
+    }
+}
+
+impl<C: Clone, V: Eq + Hash + Clone + Rename<C, V>> Rename<C, V> for Clause<C, V> {
+    type Output = Clause<C, V>;
+    fn rename(&self) -> (Self::Output, Substitution<C, V>) {
+        let s: Substitution<C, V> =
+            self.variables().iter().map(|r| r.rename().1).reduce(|mut l, r| { l.extend(r); l }).unwrap_or_default();
+        (self.substitute(&s), s)
+    }
+}
+
+pub fn composition<C, V>(l: &Substitution<C, V>, r: &Substitution<C, V>) -> Substitution<C, V>
+where
+    C: Clone,
+    V: Eq + Hash + Clone
+{
     let mut result = HashMap::<V, Term<C, V>>::new();
     for (k, v) in l {
         result.insert(k.clone(), v.substitute(r));

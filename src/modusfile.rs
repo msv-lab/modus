@@ -31,7 +31,7 @@ pub enum Constant {
     Integer(u32)  //TODO: arbitrary-precision arithmetic?
 }
 
-pub type Rule = logic::Rule<Constant, String>;
+pub type Rule = logic::Clause<Constant, String>;
 pub type Literal = logic::Literal<Constant, String>;
 pub type Term = logic::Term<Constant, String>;
 
@@ -72,7 +72,7 @@ impl str::FromStr for Rule {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match logic::parser::rule(parser::modus_const, parser::modus_var)(s) {
+        match logic::parser::clause(parser::modus_const, parser::modus_var)(s) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
@@ -148,7 +148,7 @@ mod parser {
 
     pub fn rule_instr(i: &str) -> IResult<&str, Rule> {
         preceded(pair(tag_no_case("RULE"), dockerfile::parser::mandatory_space),
-                logic::parser::rule(modus_const, modus_var))(i)
+                logic::parser::clause(modus_const, modus_var))(i)
     }
 
     //TODO: a parsing rule for an instruction should be extracted into a combinator

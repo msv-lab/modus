@@ -107,8 +107,6 @@ Modus also provides Prolog-like builtin predicates:
 
 Predicates do not throw exceptions like in Prolog. If a value of an incompatible type is passed as an argument, the predicate fails.
 
-Currently, Modus does not support recursive rules.
-
 ### Parameter Expansion
 
 Modus provides special syntax for parameter expansion that allows using variables inside strings via the shell-style `${X}` syntax.

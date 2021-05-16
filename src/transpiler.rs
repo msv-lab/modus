@@ -23,7 +23,7 @@ use crate::{
         Dockerfile, ResolvedParent,
     },
     logic::{
-        Rule, Literal, Term
+        Clause, Literal, Term
     },
     modusfile,
     modusfile::{Constant, Modusfile},
@@ -70,7 +70,7 @@ pub fn transpile(mf: Modusfile, query: Option<modusfile::Literal>) -> Dockerfile
                 docker_instrs.push(dockerfile::Instruction::Env(e)),
             modusfile::Instruction::Workdir(e) =>
                 docker_instrs.push(dockerfile::Instruction::Workdir(e)),
-            modusfile::Instruction::Rule(Rule{head, body}) => {
+            modusfile::Instruction::Rule(Clause{head, body}) => {
                 if !head.args.is_empty() {
                     panic!("head literals with parameters are not supported")
                 }
