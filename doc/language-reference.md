@@ -4,30 +4,51 @@ The Modusfile language is a superset of the Dockerfile language. The main differ
 
 ## Table of Contents
 
-* [Syntax of RULE](#syntax-of-rule)
-* [Semantics of RULE](#semantics-of-rule)
-* [Parameter Expansion](#parameter-expansion)
+* [RULE](#rule)
+    * [Terms](#terms)
+    * [Rules](#rules)
+    * [Parameter Expansion](#parameter-expansion)
+    * [Semantics](#semantics)
 * [FROM](#from)
 * [COPY \-\-from](#copy---from)
 * [QUERY](#query)
 * [Technical Details](#technical-details)
 
-## Syntax of `RULE`
+## `RULE`
 
-The language of Modus rules is a dialect of Datalog with Prolog-like extensions.
+The language of Modus rules is a dialect of Datalog with extensions that help to model the domain of Docker image builds.
 
-In Modus, terms are variables, atoms, or values of primitive types (integers and strings):
+### Terms
 
-- `X` is a variable;
-- `bar` is an atom;
-- `1` is integer;
-- `"foo"` is string.
+Modus supports five kinds of terms:
 
-Variable names begin with a capital letter or the underscore character `_`. Atom names begin with a small letter.
+- _Integer_: Represents integer values. For example, `1` and `-20` are integers;
+- _String_: Represents arbitrary text. For example, `"foo"` is a string.
+- _Variable_: Represents variables that range over concrete terms. Variable names begin with a capital letter or the underscore character `_`. For example, `X` and `_a` are variables;
+- _Atom_: Represents unique names (labels) with no inherent meaning. Atom names begin with a small letter. For example, `a` and `bar` are atoms;
+- _Compound_: Represents complex objects. Compound terms are built by applying functors `version/5` and `image/4` that represent versions and images respectively.
 
-Modus also supports compound terms (objects) built by applying functors `version` and `image`:
+The `version/5` functor is applied to terms that represent parts of a SemVer version, i.e. 
+    
+    version(MAJOR: Integer, 
+            MINOR: Integer, 
+            PATCH: Integer, 
+            PRE_RELEASE: String, 
+            PATCH: String)
 
+For example,
 - `version(1, 2, 3, "alpha", "")` is the SemVer version "1.2.3-alpha";
+- `version(1, X, Y, "", "")` is the version number with the major version `1`, while the minor and the major versions are represented with the integer variables `X` and `Y`.
+
+The `image/4` functor is applied to terms that represent parts of a Docker image, i.e.
+
+    image(REGISTRY: String, 
+          NAMESPACE: String,
+          REPO: String, 
+          TAG: String)
+          
+For example,
+
 - `image("registry.redhat.io", "rhel7", "rhel-atomic", "7.9")` is the image "registry.redhat.io/rhel7/rhel-atomic:7.9"
 - `image("", "", "ubuntu", "latest")` is the image "ubuntu:latest"
 
@@ -40,20 +61,19 @@ For convenience, the version syntax also supports incomplete SemVer versions:
 
 - `v"1.2"` is equivalent to `version(1, 2, 0, "", "")`.
 
+### Rules
+
 Literals are predicates applied to terms:
 
 - `bar(1, "foo")` is a literal;
 - `bar` is nullary predicate.
 
-A rule consists of a head and a body; a head is a literal; a body is a list of literals:
+A rule consists of a head and a body separated with the neck symbol `:-`; the head is a literal; the body is an expression built using literals, the conjunction symbol `,`, and the disjunction symbol `;`:
 
 - `RULE f :- b`
 - `RULE f(g, "foo") :- b(t), c`
 - `RULE f(X) :- b`
 - `RULE f(X, g) :- b(X)`
-
-Modus supports logical disjunction with `;`:
-
 - `RULE f :- a; b`
 - `RULE f(X) :- a, (b; c)`
 
@@ -69,7 +89,7 @@ Modus also provides Prolog-like builtin predicates:
 - Comparison of integers and versions:
     - ['<'/2](https://www.swi-prolog.org/pldoc/doc_for?object=(%3E)/2), extended for versions according to [SemVer 2.0.0](https://semver.org/);
     - ['>'/2](https://www.swi-prolog.org/pldoc/doc_for?object=(%3C)/2), extended for versions according to [SemVer 2.0.0](https://semver.org/);
-    - ['=<'/2](https://www.swi-prolog.org/pldoc/doc_for?object=(%3D%3C)/2), extended for versions according to [SemVer 2.0.0](https://semver.org/);
+    - `'<='/2`, equivalent to ['=<'/2](https://www.swi-prolog.org/pldoc/doc_for?object=(%3D%3C)/2), extended for versions according to [SemVer 2.0.0](https://semver.org/);
     - ['>='/2](https://www.swi-prolog.org/pldoc/doc_for?object=(%3E%3D)/2), extended for versions according to [SemVer 2.0.0](https://semver.org/).
 - Structure inspection:
     - [functor/3](https://www.swi-prolog.org/pldoc/doc_for?object=functor/3)
@@ -85,52 +105,11 @@ Modus also provides Prolog-like builtin predicates:
 - Image predicate
     - `image/1`: is true for any image object, but the argument has to be instantiated.
 
-Currently, Modus forbids recursive rules.
+Predicates do not throw exceptions like in Prolog. If a value of an incompatible type is passed as an argument, the predicate fails.
 
-## Semantics of `RULE`
+### Parameter Expansion
 
-For a given query, the Modus solver computes the minimum proof tree in terms of the number of required build actions. This proof tree corresponds to the build tree of the target image. For example, for the following rules
-
-```
-RULE base1 :- image(i"ubuntu")
-RUN ...  # time-consuming operation
-
-RULE base2 :- image(i"ubuntu")
-RUN ...  # time-consuming operation
-
-RULE a :- base1; base2
-RULE b :- base2; base1
-
-RULE c :- a, b
-```
-
-Modus guarantees that although the dependencies of `a` and `b` will be chosen arbitrarily (because of the disjunction `;`), it will use the same dependency for both of these rules (either both `base1`, or both `base2`) to avoid an extra operation.
-
-In Modus, predicates are divided into two categories: image predicates and imageless predicates.
-
-Image predicates represent images. Each image predicate should transitively depend on `image/1`. Rules defining image predicates may be accompanied with build actions, e.g.
-
-```
-RULE a :- image(i"alpine")
-RUN ...
-```
-
-If there are several image predicates in the body of a rule, the first one is used as the parent image. In the following example, `a` uses `b` as the parent image, because `b` precedes `c` and `f` is an imageless predicate:
-
-```
-RULE f(V) :- V > v"1.2"
-
-RULE b :- image(i"alpine")
-RULE c :- image(i"ubuntu")
-
-RULE a(V) :- f(V), b, c
-```
-
-Imageless predicates are those that do not represent any image, and therefore do not depend on `image/1`. Rules defining imageless predicates are not accompanied with build actions. Therefore, imageless predicates are also not used in calculating the cost of the proof tree.
-
-## Parameter Expansion
-
-Modus provides special syntax for parameter expansion that allows to use variables inside strings via the shell-style `${X}` syntax.
+Modus provides special syntax for parameter expansion that allows using variables inside strings via the shell-style `${X}` syntax.
 
 First, parameter expansion can be used as a generic approach to convert values into strings. For example, the literal `f("${X}")` is equivalent to 
 
@@ -155,6 +134,59 @@ Parameter expansion can also be used with special syntax for versions and images
 
 - `v"0.${MINOR}.${MAJOR}"` 
 - `i"ubuntu:${TAG}"`
+
+### Semantics
+
+For a given query, the Modus solver computes the minimum proof tree in terms of the number of required build actions. This proof tree corresponds to the build tree of the target image. For example, for the following rules
+
+```
+RULE base1 :- image(i"ubuntu")
+RUN ...  # time-consuming operation
+
+RULE base2 :- image(i"ubuntu")
+RUN ...  # time-consuming operation
+
+RULE a :- base1; base2
+RULE b :- base2; base1
+
+RULE c :- a, b
+```
+
+Modus guarantees that although the dependencies of `a` and `b` will be chosen arbitrarily (because of the disjunction `;`), it will use the same dependency for both of these rules (either both `base1`, or both `base2`) to avoid an extra operation. For example,
+
+```
+c
+├── a
+│   └── base1
+│       └── image(i"ubuntu")
+└── b
+    └── base1
+        └── image(i"ubuntu")    
+```
+
+In Modus, predicates are divided into two categories: image predicates and imageless predicates.
+
+Image predicates represent images. Each image predicate should transitively depend on `image/1`. Rules defining image predicates may be accompanied with build actions, e.g.
+
+```
+RULE a(X) :- image(i"alpine"),  b(X, Y)
+RUN ...
+```
+
+All variables appearing in the rule can be used in build stage instruction in the same way as Docker's ARGs. The values corresponding to these variables, say `X` and `Y`, are converted into strings using `"${X}"` and `"${Y}"`.
+
+If there are several image predicates in the body of a rule, the first one is used as the parent image. In the following example, `a` uses `b` as the parent image, because `b` precedes `c` and `f` is an imageless predicate:
+
+```
+RULE f(V) :- V > v"1.2"
+
+RULE b :- image(i"alpine")
+RULE c :- image(i"ubuntu")
+
+RULE a(V) :- f(V), b, c
+```
+
+Imageless predicates are those that do not represent any image, and therefore do not depend on `image/1`. Rules defining imageless predicates are not accompanied with build actions. Therefore, imageless predicates are also not used in calculating the cost of the proof tree.
 
 ## `FROM`
 

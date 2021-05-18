@@ -17,32 +17,24 @@
 
 use std::str;
 use std::fmt;
+use fp_core::compose::compose_two;
 
-use nom::{
-    IResult,
-    branch::alt,
-    bytes::complete::{tag_no_case, tag},
-    character::complete::{line_ending, none_of, alpha1, alphanumeric1},
-    combinator::{eof, map, peek, recognize},
-    multi::{many0},
-    sequence::{pair, terminated, preceded, delimited}
-};
-
-use crate::dockerfile;
+use crate::{dockerfile, transpiler};
 use dockerfile::{
     Copy, Run, Env, Workdir
 };
 use crate::logic;
 
-#[derive(Clone, PartialEq, Debug)]
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Constant {
     String(String),
     Integer(u32)  //TODO: arbitrary-precision arithmetic?
 }
 
-pub type Rule = logic::Rule<Constant, String>;
-pub type Literal = logic::Literal<Constant, String>;
-pub type Term = logic::Term<Constant, String>;
+pub type Rule = logic::Clause<Constant, transpiler::Variable>;
+pub type Literal = logic::Literal<Constant, transpiler::Variable>;
+pub type Term = logic::Term<Constant, transpiler::Variable>;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Instruction {
@@ -81,7 +73,7 @@ impl str::FromStr for Rule {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match logic::parser::rule(parser::modus_const, parser::modus_var)(s) {
+        match logic::parser::clause(parser::modus_const, parser::modus_var)(s) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
@@ -109,8 +101,21 @@ impl fmt::Display for Constant {
 }
 
 mod parser {
+    use crate::transpiler;
+
     use super::*;
     use dockerfile::Image;
+
+    use nom::{
+        IResult,
+        branch::alt,
+        bytes::complete::{tag_no_case, tag},
+        character::complete::{line_ending, none_of, alpha1, alphanumeric1},
+        combinator::{eof, map, peek, recognize},
+        multi::{many0},
+        sequence::{pair, terminated, preceded, delimited}
+    };
+   
 
     //TODO: support proper string literals
     fn string_content(i: &str) -> IResult<&str, &str> {
@@ -140,13 +145,13 @@ mod parser {
         )(i)
     }
 
-    pub fn modus_var(i: &str) -> IResult<&str, String> {
-        map(variable_identifier, String::from)(i)
+    pub fn modus_var(i: &str) -> IResult<&str, transpiler::Variable> {
+        map(variable_identifier, compose!(String::from, transpiler::Variable::User))(i)
     }
 
     pub fn rule_instr(i: &str) -> IResult<&str, Rule> {
         preceded(pair(tag_no_case("RULE"), dockerfile::parser::mandatory_space),
-                logic::parser::rule(modus_const, modus_var))(i)
+                logic::parser::clause(modus_const, modus_var))(i)
     }
 
     //TODO: a parsing rule for an instruction should be extracted into a combinator

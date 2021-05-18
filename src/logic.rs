@@ -18,15 +18,16 @@
 
 use std::str;
 use std::fmt;
-
+use std::convert::TryInto;
 use fp_core::compose::compose_two;
+use std::{collections::HashSet, hash::Hash};
 
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Atom(pub String);
 
 /// C is constant, V is variable
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Term<C, V> {
     Constant(C),
     Atom(Atom),
@@ -34,16 +35,84 @@ pub enum Term<C, V> {
     Compound(Atom, Vec<Term<C, V>>),
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Literal<C, V> {
     pub atom: Atom,
     pub args: Vec<Term<C,V>>
 }
 
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Signature(pub Atom, pub u32);
+
 #[derive(Clone, PartialEq, Debug)]
-pub struct Rule<C,V> {
+pub struct Clause<C,V> {
     pub head: Literal<C,V>,
     pub body: Vec<Literal<C,V>>
+}
+
+pub trait Ground {
+    fn is_ground(&self) -> bool;
+}
+
+impl<C, V: Clone + Eq + Hash> Term<C, V> {
+    pub fn variables(&self) -> HashSet<V> {
+        let mut s = HashSet::<V>::new();
+        match self {
+            Term::Variable(v) => { s.insert(v.clone()); },
+            _ => ()
+        };
+        s
+    }
+}
+
+impl<C, V: Clone + Eq + Hash> Literal<C, V> {
+    pub fn signature(&self) -> Signature {
+        Signature(self.atom.clone(), self.args.len().try_into().unwrap())
+    }
+    pub fn variables(&self) -> HashSet<V> {
+        self.args.iter().map(|r| r.variables()).reduce(|mut l, r| { l.extend(r); l }).unwrap_or_default()
+    }
+}
+
+impl<C, V: Clone + Eq + Hash> Clause<C, V> {
+    pub fn variables(&self) -> HashSet<V> {
+        let mut body = self.body.iter().map(|r| r.variables()).reduce(|mut l, r| { l.extend(r); l }).unwrap_or_default();
+        body.extend(self.head.variables());
+        body
+    }
+}
+
+impl<C, V> Ground for Term<C, V>
+where
+    V: Clone + Eq + Hash
+{
+    fn is_ground(&self) -> bool {
+        self.variables().is_empty()
+    }
+}
+
+impl<C, V> Ground for Literal<C, V>
+where
+    V: Clone + Eq + Hash
+{
+    fn is_ground(&self) -> bool {
+        self.variables().is_empty()
+    }
+}
+
+impl<C, V> Ground for Clause<C, V>
+where
+    V: Clone + Eq + Hash
+{
+    fn is_ground(&self) -> bool {
+        self.variables().is_empty()
+    }
+}
+
+impl fmt::Display for Signature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.0, self.1)
+    }
 }
 
 impl fmt::Display for Atom {
@@ -92,7 +161,7 @@ where
     }
 }
 
-impl<C, V> fmt::Display for Rule<C, V>
+impl<C, V> fmt::Display for Clause<C, V>
 where
     C: fmt::Display,
     V: fmt::Display,
@@ -176,95 +245,109 @@ pub mod parser {
                                 None => Literal { atom: Atom(name.into()), args: Vec::new() } })
     }
 
-    pub fn rule<'a, FC: 'a, FV: 'a, C, V>(constant: FC, variable: FV) -> impl FnMut(&'a str) -> IResult<&'a str, Rule<C, V>>
+    pub fn clause<'a, FC: 'a, FV: 'a, C, V>(constant: FC, variable: FV) -> impl FnMut(&'a str) -> IResult<&'a str, Clause<C, V>>
     where
         FC: FnMut(&'a str) -> IResult<&'a str, C> + Clone,
         FV: FnMut(&'a str) -> IResult<&'a str, V> + Clone,
     {
         map(separated_pair(literal(constant.clone(), variable.clone()),
-                        ws(tag(":-")),
-                        separated_list1(ws(tag(",")), literal(constant, variable))),
-            |(head, body)| Rule { head, body })
+                           ws(tag(":-")),
+                           separated_list1(ws(tag(",")), literal(constant, variable))),
+            |(head, body)| Clause { head, body })
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod toy {
+    use super::Atom;
+    use fp_core::compose::compose_two;
+    use std::str;
 
     use nom::{
-        bytes::complete::{tag},
-        character::complete::{
-            alpha1,
-            alphanumeric1,
-            none_of
-        },
+        IResult,
         branch::alt,
-        sequence::{pair, delimited},
-        multi::{many0},
+        bytes::complete::tag,
+        character::complete::{
+            one_of,
+            alphanumeric1
+        },
         combinator::{recognize, map},
-        IResult
+        multi::{many0},
+        sequence::{pair}
     };
     
+    // define a toy language with only atoms for testing
+ 
+    pub type Variable = String;
+    pub type Term = super::Term<Atom, Variable>;
+    pub type Literal = super::Literal<Atom, Variable>;
+    pub type Clause = super::Clause<Atom, Variable>;
 
-    // define a toy language for testing
-
-    #[derive(Clone, PartialEq, Debug)]
-    struct StringConst(String);
-
-    impl fmt::Display for StringConst {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "\"{}\"", self.0)
-        }
-    }
-    
-    type TestTerm = Term<StringConst, String>;
-    type TestRule = Rule<StringConst, String>;
-
-    fn str_const(i: &str) -> IResult<&str, StringConst> {
-        map(delimited(tag("\""), recognize(many0(none_of("\\\""))), tag("\"")),
-            compose!(String::from, StringConst))(i)
-    }
-
-    fn str_var(i: &str) -> IResult<&str, String> {
+    fn toy_var(i: &str) -> IResult<&str, Variable> {
         map(
             recognize(
                 pair(
-                    alpha1,
+                    one_of("_ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
                     many0(alt((alphanumeric1, tag("_")))))), 
             String::from)(i)
     }
 
-    impl str::FromStr for TestRule {
+    fn toy_const(i: &str) -> IResult<&str, Atom> {
+        map(
+            recognize(
+                pair(
+                    one_of("abcdefghijklmnopqrstuvwxyz"),
+                    many0(alt((alphanumeric1, tag("_")))))), 
+            compose!(String::from, Atom))(i)
+    }
+
+    impl str::FromStr for Clause {
         type Err = String;
     
         fn from_str(s: &str) -> Result<Self, Self::Err> {
-            match parser::rule(str_const, str_var)(s) {
+            match super::parser::clause(toy_const, toy_var)(s) {
                 Result::Ok((_, o)) => Ok(o),
                 Result::Err(e) => Result::Err(format!("{}", e)),
             }
         }
     }
+
+    impl str::FromStr for Literal {
+        type Err = String;
+    
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            match super::parser::literal(toy_const, toy_var)(s) {
+                Result::Ok((_, o)) => Ok(o),
+                Result::Err(e) => Result::Err(format!("{}", e)),
+            }
+        }
+    }
+
+} 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::toy;
     
     #[test]
     fn simple_rule() {
-        let c = TestTerm::Constant(StringConst("C".into()));
-        let va = Term::Variable("A".into());
-        let vb = Term::Variable("B".into());
-        let l1 = Literal{ atom: Atom("l1".into()), args: vec![va.clone(), vb.clone()] };
-        let l2 = Literal{ atom: Atom("l2".into()), args: vec![va.clone(), c.clone()] };
-        let l3 = Literal{ atom: Atom("l3".into()), args: vec![vb.clone(), c.clone()] };
-        let r = Rule{ head: l1, body: vec![l2, l3] };
-        assert_eq!("l1(A, B) :- l2(A, \"C\"), l3(B, \"C\")", r.to_string());
-        assert_eq!(Ok(r), "l1(A, B) :- l2(A, \"C\"), l3(B, \"C\")".parse());
+        let c = toy::Term::Constant(Atom("c".into()));
+        let va = toy::Term::Variable("A".into());
+        let vb = toy::Term::Variable("B".into());
+        let l1 = toy::Literal{ atom: Atom("l1".into()), args: vec![va.clone(), vb.clone()] };
+        let l2 = toy::Literal{ atom: Atom("l2".into()), args: vec![va.clone(), c.clone()] };
+        let l3 = toy::Literal{ atom: Atom("l3".into()), args: vec![vb.clone(), c.clone()] };
+        let r = Clause{ head: l1, body: vec![l2, l3] };
+        assert_eq!("l1(A, B) :- l2(A, c), l3(B, c)", r.to_string());
+        assert_eq!(Ok(r), "l1(A, B) :- l2(A, c), l3(B, c)".parse());
     }
 
     #[test]
     fn nullary_predicate() {
-        let va = TestTerm::Variable("A".into());
-        let l1 = Literal{ atom: Atom("l1".into()), args: Vec::new() };
-        let l2 = Literal{ atom: Atom("l2".into()), args: vec![va.clone()] };
-        let r = Rule{ head: l1, body: vec![l2] };
+        let va = toy::Term::Variable("A".into());
+        let l1 = toy::Literal{ atom: Atom("l1".into()), args: Vec::new() };
+        let l2 = toy::Literal{ atom: Atom("l2".into()), args: vec![va.clone()] };
+        let r = Clause{ head: l1, body: vec![l2] };
         assert_eq!("l1 :- l2(A)", r.to_string());
         assert_eq!(Ok(r), "l1 :- l2(A)".parse());
     }

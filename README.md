@@ -47,18 +47,14 @@ RUN ...   # use ${X}
 RULE d(Y) :- c
 RUN ...   # use ${Y}
 
-RULE e(X, Y) :- b(X), d(2)
+RULE e(X, Z) :- b(X), d(2)
 COPY --from=d ...
 RUN ...   # use ${Z}
 ```
 
-Effectively, build dependency resolution is reduced to solving a set of [Horn clauses](https://en.wikipedia.org/wiki/Horn_clause):
+Effectively, build dependency resolution is reduced to solving a set of [Horn clauses](https://en.wikipedia.org/wiki/Horn_clause) such as `e(X, Y) :- b(X), d(2)`. Specifically, build definitions in Modus can be thought of as a deductive database, and build targets are specified as queries to this database. Then, the build tree corresponds to the minimal proof of a given query from _facts_ representing existing images.
 
-    b(X) :- a
-    d(Y) :- c
-    e(X, Y) :- b(X), d(2)
-
-Thus, build definitions in Modus can be thought of as a deductive database, and build targets are specified as queries to this database. Apart from improving modularity and clarity of build definitions,  this enables additional features, e.g. automatic resolution of software versions and compilation flags, building groups of related images, and more.
+Apart from improving modularity and clarity of build definitions, Horn clauses enables additional features such as automatic resolution of software versions and compilation flags, building groups of related images, and more.
 
 ## Motivating example
 
