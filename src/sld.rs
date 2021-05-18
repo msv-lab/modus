@@ -16,9 +16,9 @@
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
 
-use std::{collections::{HashMap, HashSet}, convert::TryInto, fmt::{Debug, Display}, hash::Hash};
+use std::{collections::{HashMap, HashSet}, fmt::{Debug, Display}, hash::Hash};
 
-use crate::{logic, unification::Substitute};
+use crate::{logic::{self, Signature}, unification::Substitute, wellformed};
 use logic::{ Clause, Literal, Term, Atom };
 use crate::unification::{Substitution, Rename, compose_extend, compose_no_extend};
 
@@ -110,12 +110,28 @@ where
     C: Clone + PartialEq + Debug + Display,
     V: Clone + Eq + Hash + Variable<C, V> + Debug + Display
 {
-    fn select<C, V>(goal: &GoalWithHistory<C, V>) -> (LiteralGoalId, LiteralWithHistory<C, V>)
+    /// select leftmost literal with compatible groundness
+    fn select<C, V>(goal: &GoalWithHistory<C, V>,
+                    grounded: &HashMap<Signature, Vec<bool>>) -> Option<(LiteralGoalId, LiteralWithHistory<C, V>)>
     where
         C: Clone,
-        V: Clone
+        V: Clone + Eq + Hash
     {
-        (0, goal[0].clone())
+        let mut selected: Option<(LiteralGoalId, LiteralWithHistory<C, V>)> = None;
+        'outer: for (id, lit) in goal.iter().enumerate() {
+            let LiteralWithHistory { literal, introduction: _, origin: _ } = lit;
+            let lit_grounded = grounded.get(&literal.signature()).unwrap();
+            let mut matching = true;
+            literal.args.iter().enumerate().for_each(|(id, t)| match (t, lit_grounded[id]) {
+                (Term::Variable(_), false) => matching = false,
+                _ => ()
+            });
+            if matching {
+                selected = Some((id, lit.clone()));
+                break 'outer;
+            }
+        }
+        selected
     }
 
     fn resolve<C, V>(lid: LiteralGoalId,
@@ -141,7 +157,8 @@ where
     fn inner<C, V>(rules: &Vec<Clause<C, V>>,
                    goal: &GoalWithHistory<C, V>,
                    maxdepth: TreeLevel,
-                   level: TreeLevel) -> Option<Tree<C, V>>
+                   level: TreeLevel,
+                   grounded: &HashMap<Signature, Vec<bool>>) -> Option<Tree<C, V>>
     where
         C: Clone + PartialEq + Debug + Display,
         V: Clone + Eq + Hash + Variable<C, V> + Debug + Display
@@ -151,7 +168,11 @@ where
         } else if level >= maxdepth {
             None
         } else {
-            let (lid, l) = select(goal);
+            let selected = select(goal, grounded);
+            if selected.is_none() {
+                return None
+            }
+            let (lid, l) = selected.unwrap();
             let resolvents: HashMap<(LiteralGoalId, ClauseId), (Substitution<C, V>, Substitution<C, V>, Tree<C, V>)> =
                 rules.iter().enumerate()
                     .filter(|(_, c)| c.head.signature() == l.literal.signature())
@@ -160,7 +181,7 @@ where
                         c.head.unify(&l.literal).and_then(
                             |mgu| Some((rid, mgu.clone(), renaming, resolve(lid, rid, &goal, &mgu, &c, level+1)))))
                     .filter_map(|(rid, mgu, renaming, resolvent)|
-                        inner(rules, &resolvent, maxdepth, level+1).and_then(
+                        inner(rules, &resolvent, maxdepth, level+1, grounded).and_then(
                             |tree| Some(((lid, ClauseId::Rule(rid)), (mgu, renaming, tree)))))
                     .collect();
             if resolvents.is_empty() {
@@ -171,12 +192,14 @@ where
         }    
     }
 
+    let grounded = wellformed::check_grounded_variables(rules).unwrap();
+    
     let goal_with_history = goal.iter().enumerate()
         .map(|(id, l)| {
             let origin = LiteralOrigin { clause: ClauseId::Query, body_index: id };
             LiteralWithHistory { literal: l.clone(), introduction: 0, origin }}
         ).collect();
-    inner(rules, &goal_with_history, maxdepth, 0)
+    inner(rules, &goal_with_history, maxdepth, 0, &grounded)
 }
 
 pub fn solutions<C, V>(tree: &Tree<C, V>) -> HashSet<Goal<C, V>>
@@ -186,7 +209,7 @@ where
 {
     fn inner<C, V>(tree: &Tree<C, V>) -> Vec<Substitution<C, V>>
     where
-        C: Clone + Eq + Hash + Debug,
+        C: Clone,
         V: Clone + Eq + Hash + Debug
     {
         if tree.goal.is_empty() {
@@ -335,6 +358,29 @@ mod tests {
         assert_eq!(solutions.len(), 2);
         assert!(solutions.contains(&vec!["a(c)".parse::<logic::toy::Literal>().unwrap()]));
         assert!(solutions.contains(&vec!["a(d)".parse::<logic::toy::Literal>().unwrap()]));
+    }
+
+    #[test]
+    fn simple_nongrounded() {
+        let goal: Goal<logic::Atom, logic::toy::Variable> = 
+            vec!["a(b)".parse().unwrap()];
+        let clauses: Vec<logic::toy::Clause> = 
+            vec![logic::toy::Clause{ head: "a(X)".parse().unwrap(), body: vec![] }];
+        let result = sld(&clauses, &goal, 10);
+        assert!(result.is_some());
+        let solutions = solutions(&result.unwrap());
+        assert_eq!(solutions.len(), 1);
+        assert!(solutions.contains(&vec!["a(b)".parse::<logic::toy::Literal>().unwrap()]));
+    }
+
+    #[test]
+    fn simple_nongrounded_invalid() {
+        let goal: Goal<logic::Atom, logic::toy::Variable> = 
+            vec!["a(X)".parse().unwrap()];
+        let clauses: Vec<logic::toy::Clause> = 
+            vec![logic::toy::Clause{ head: "a(X)".parse().unwrap(), body: vec![] }];
+        let result = sld(&clauses, &goal, 10);
+        assert!(result.is_none());
     }
 
     #[test]

@@ -19,13 +19,23 @@
 use std::{collections::{HashMap, HashSet}, hash::Hash};
 
 use crate::logic;
-use logic::{ Atom, Term, Clause, Literal, Groundness };
+use logic::{ Atom, Term, Clause, Literal, Ground};
 
 pub type Substitution<C, V> = HashMap<V, Term<C, V>>;
 
-impl<C, V> Groundness for Substitution<C, V> {
-    fn is_grounded() -> bool {
-        todo!()
+impl<C, V> Ground for Substitution<C, V>
+where
+    C: Clone,
+    V: Clone + Eq + Hash
+{
+    fn is_ground(&self) -> bool {
+        let mut result = true;
+        for v in self.values() {
+            if !v.variables().is_empty() {
+                result = false
+            }
+        }
+        result
     }
 }
 

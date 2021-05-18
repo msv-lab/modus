@@ -41,8 +41,8 @@ pub struct Literal<C, V> {
     pub args: Vec<Term<C,V>>
 }
 
-#[derive(Clone, PartialEq, Debug)]
-pub struct Signature(Atom, u32);
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Signature(pub Atom, pub u32);
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Clause<C,V> {
@@ -50,8 +50,8 @@ pub struct Clause<C,V> {
     pub body: Vec<Literal<C,V>>
 }
 
-pub trait Groundness {
-    fn is_grounded() -> bool;
+pub trait Ground {
+    fn is_ground(&self) -> bool;
 }
 
 impl<C, V: Clone + Eq + Hash> Term<C, V> {
@@ -82,15 +82,30 @@ impl<C, V: Clone + Eq + Hash> Clause<C, V> {
     }
 }
 
-impl<C, V> Groundness for Term<C, V> {
-    fn is_grounded() -> bool {
-        todo!()
+impl<C, V> Ground for Term<C, V>
+where
+    V: Clone + Eq + Hash
+{
+    fn is_ground(&self) -> bool {
+        self.variables().is_empty()
     }
 }
 
-impl<C, V> Groundness for Literal<C, V> {
-    fn is_grounded() -> bool {
-        todo!()
+impl<C, V> Ground for Literal<C, V>
+where
+    V: Clone + Eq + Hash
+{
+    fn is_ground(&self) -> bool {
+        self.variables().is_empty()
+    }
+}
+
+impl<C, V> Ground for Clause<C, V>
+where
+    V: Clone + Eq + Hash
+{
+    fn is_ground(&self) -> bool {
+        self.variables().is_empty()
     }
 }
 
