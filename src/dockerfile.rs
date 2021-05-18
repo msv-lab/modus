@@ -51,7 +51,7 @@ pub struct Run(String);
 pub struct Env(String);
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Arg(String);
+pub struct Arg(pub String);
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Workdir(String);
@@ -199,7 +199,7 @@ where
             match i {
                 Instruction::Arg(s) => writeln!(f, "ARG {}", s),
                 Instruction::Copy(s) => writeln!(f, "COPY {}", s),
-                Instruction::From(image) => writeln!(f, "FROM {}", image),
+                Instruction::From(image) => writeln!(f, "\nFROM {}", image),
                 Instruction::Run(s) => writeln!(f, "RUN {}", s),
                 Instruction::Env(s) => writeln!(f, "ENV {}", s),
                 Instruction::Workdir(s) => writeln!(f, "WORKDIR {}", s),

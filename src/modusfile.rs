@@ -17,23 +17,24 @@
 
 use std::str;
 use std::fmt;
+use fp_core::compose::compose_two;
 
-use crate::dockerfile;
+use crate::{dockerfile, transpiler};
 use dockerfile::{
     Copy, Run, Env, Workdir
 };
 use crate::logic;
-use crate::typing;
 
-#[derive(Clone, PartialEq, Debug)]
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Constant {
     String(String),
     Integer(u32)  //TODO: arbitrary-precision arithmetic?
 }
 
-pub type Rule = logic::Clause<Constant, String>;
-pub type Literal = logic::Literal<Constant, String>;
-pub type Term = logic::Term<Constant, String>;
+pub type Rule = logic::Clause<Constant, transpiler::Variable>;
+pub type Literal = logic::Literal<Constant, transpiler::Variable>;
+pub type Term = logic::Term<Constant, transpiler::Variable>;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Instruction {
@@ -100,6 +101,8 @@ impl fmt::Display for Constant {
 }
 
 mod parser {
+    use crate::transpiler;
+
     use super::*;
     use dockerfile::Image;
 
@@ -142,8 +145,8 @@ mod parser {
         )(i)
     }
 
-    pub fn modus_var(i: &str) -> IResult<&str, String> {
-        map(variable_identifier, String::from)(i)
+    pub fn modus_var(i: &str) -> IResult<&str, transpiler::Variable> {
+        map(variable_identifier, compose!(String::from, transpiler::Variable::User))(i)
     }
 
     pub fn rule_instr(i: &str) -> IResult<&str, Rule> {

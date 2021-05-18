@@ -29,7 +29,7 @@ pub trait Variable<C, V>: Rename<C, V> {
 
 type RuleId = usize;
 type TreeLevel = usize;
-type Goal<C, V> = Vec<Literal<C, V>>;
+pub(crate) type Goal<C, V> = Vec<Literal<C, V>>;
 
 /// A clause is either a rule, or a query
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -87,9 +87,9 @@ pub struct Tree<C, V> {
 /// - proofs for parts of the clause body 
 #[derive(Clone, Debug)]
 pub struct Proof<C, V> {
-    clause: ClauseId,
-    valuation: Substitution<C, V>,
-    children: Vec<Proof<C, V>>
+    pub clause: ClauseId,
+    pub valuation: Substitution<C, V>,
+    pub children: Vec<Proof<C, V>>
 }
 
 impl<C: Clone, V: Eq + Hash + Clone> Substitute<C, V> for GoalWithHistory<C, V> {
@@ -107,8 +107,8 @@ pub fn sld<C, V>(rules: &Vec<Clause<C, V>>,
                  goal: &Goal<C, V>,
                  maxdepth: TreeLevel) -> Option<Tree<C, V>>
 where
-    C: Clone + PartialEq + Debug + Display,
-    V: Clone + Eq + Hash + Variable<C, V> + Debug + Display
+    C: Clone + PartialEq + Debug,
+    V: Clone + Eq + Hash + Variable<C, V> + Debug
 {
     /// select leftmost literal with compatible groundness
     fn select<C, V>(goal: &GoalWithHistory<C, V>,
@@ -141,8 +141,8 @@ where
                      rule: &Clause<C, V>,
                      level: TreeLevel) -> GoalWithHistory<C, V>
     where
-        C: Clone + PartialEq + Debug + Display,
-        V: Clone + Eq + Hash + Variable<C, V> + Debug + Display
+        C: Clone + PartialEq + Debug,
+        V: Clone + Eq + Hash + Variable<C, V> + Debug
     {
         let mut g: GoalWithHistory<C, V> = goal.clone();
         g.remove(lid);
@@ -160,8 +160,8 @@ where
                    level: TreeLevel,
                    grounded: &HashMap<Signature, Vec<bool>>) -> Option<Tree<C, V>>
     where
-        C: Clone + PartialEq + Debug + Display,
-        V: Clone + Eq + Hash + Variable<C, V> + Debug + Display
+        C: Clone + PartialEq + Debug,
+        V: Clone + Eq + Hash + Variable<C, V> + Debug
     {
         if goal.is_empty() {
             Some(Tree { goal: goal.clone(), level, resolvents: HashMap::new() })
@@ -237,7 +237,7 @@ struct PathNode<C, V> {
 // sequence of nodes and global mgu
 type Path<C, V> = (Vec<PathNode<C, V>>, Substitution<C, V>);
 
-pub fn proofs<C, V>(tree: &Tree<C, V>, rules: &Vec<Clause<C, V>>) -> Vec<Proof<C, V>>
+pub fn proofs<C, V>(tree: &Tree<C, V>, rules: &Vec<Clause<C, V>>, goal: &Goal<C, V>) -> Vec<Proof<C, V>>
 where
     C: Clone + Eq + Hash + Debug,
     V: Clone + Eq + Hash + Variable<C, V> + Debug,
@@ -312,8 +312,23 @@ where
         }
     }
     // assume lid of root is 0, as if it came from a clause "true :- goal" for query "true", but this is not used anyway
-    let paths = flatten_compose(&0, &ClauseId::Query, &Substitution::new(), &Substitution::new(), tree);
-    paths.iter().map(|(path, mgu)| proof_for_level(path, mgu, rules, 0)).collect()
+    let goal_vars = goal.iter().map(|l| l.variables()).reduce(|mut l, r| { l.extend(r); l }).unwrap_or_default();
+    let goal_id_reaming: Substitution<C, V> = goal_vars.iter().map(|v| (v.clone(), Term::Variable(v.clone()))).collect();
+    let paths = flatten_compose(&0, &ClauseId::Query, &Substitution::new(), &goal_id_reaming, tree);
+    let all_proofs: Vec<Proof<C, V>> = paths.iter().map(|(path, mgu)| proof_for_level(path, mgu, rules, 0)).collect();
+
+    //TODO: instead, I should find optimal proofs
+    let mut computed: HashSet<Goal<C, V>> = HashSet::new();
+    let mut proofs: Vec<Proof<C, V>> = Vec::new();
+    for p in all_proofs {
+        let solution: Goal<C, V> = goal.substitute(&p.valuation);
+        if !computed.contains(&solution) {
+            computed.insert(solution.clone());
+            proofs.push(p)
+        }
+    }
+    println!("proofs: {}", proofs.len());
+    proofs
 }
 
 #[cfg(test)]
