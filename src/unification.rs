@@ -109,7 +109,7 @@ impl<C: Clone, V: Eq + Hash + Clone + Rename<C, V>> Rename<C, V> for Clause<C, V
     }
 }
 
-pub fn composition<C, V>(l: &Substitution<C, V>, r: &Substitution<C, V>) -> Substitution<C, V>
+pub fn compose_no_extend<C, V>(l: &Substitution<C, V>, r: &Substitution<C, V>) -> Substitution<C, V>
 where
     C: Clone,
     V: Eq + Hash + Clone
@@ -118,6 +118,15 @@ where
     for (k, v) in l {
         result.insert(k.clone(), v.substitute(r));
     }
+    result
+}
+
+pub fn compose_extend<C, V>(l: &Substitution<C, V>, r: &Substitution<C, V>) -> Substitution<C, V>
+where
+    C: Clone,
+    V: Eq + Hash + Clone
+{
+    let mut result = compose_no_extend(l, r);
     result.extend(r.clone());
     result
 }
@@ -146,13 +155,13 @@ where
                     Term::Variable(v) => {
                         let mut upd = HashMap::<V, Term<C, V>>::new();
                         upd.insert(v.clone(), other_term_subs.clone());
-                        s = composition(&s, &upd);
+                        s = compose_extend(&s, &upd);
                     },
                     _ => match other_term_subs {
                         Term::Variable(v) => {
                             let mut upd = HashMap::<V, Term<C, V>>::new();
                             upd.insert(v.clone(), self_term_subs.clone());
-                            s = composition(&s, &upd);
+                            s = compose_extend(&s, &upd);
                         },
                         _ => return None
                     }
