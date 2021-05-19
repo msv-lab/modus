@@ -8,7 +8,7 @@ Modus is a Datalog-based language for building Docker images. Modus extends [Doc
 
 - Modus computes build trees that optimise the __build time__; combined with [BuildKit](https://github.com/moby/buildkit), Modus enables efficient __parallel builds__ of groups of related images; Modus provides fine-grained control for optimising __image size__.
 
-- Modus is a backwards-compatible extension, a Dockerfile is also a valid Modus input format. Modus is __easy__ to use and understand because it is declarative and non-Turing-complete.
+- Modus is a backwards-compatible extension; a Dockerfile is also a valid Modus input format. Modus is __easy__ to use and understand because it is declarative and non-Turing-complete.
 
 Modus uses semantic versioning; until version 1.0 is declared, breaking changes are possible. We welcome bug reports and feature requests submitted through [GitHub Issues](https://github.com/mechtaev/modus/issues).
 
@@ -71,8 +71,8 @@ RULE library_python(LIB_VER, v"3.8") :- LIB_VER >= v"1.3.0-alpha"
 
 # Relation between build modes (development/production)
 # and library targets (debug/release):
-RULE mode_target(development, "debug")
-RULE mode_target(production, "release")
+RULE mode_target("development", "debug")
+RULE mode_target("production", "release")
 
 # The build stage that downloads and compiles the library.
 # Python's version and the make target are resolved based
@@ -84,18 +84,18 @@ RULE library(LIB_VER, MODE) :- \
 RUN apt-get install make
 RUN wget https://library.com/releases/library-v${LIB_VER}.tar.gz && \
     tar xf library-v${LIB_VER}.tar.gz && \
-    mv library-v${VERSION}/ /my_lib
+    mv library-v${LIB_VER}/ /my_lib
 WORKDIR /my_lib
 RUN make ${TARGET}
 
 # In development mode, use the "library" build stage as the parent image,
 # and additionally install development tools (Pylint):
-RULE dependencies(LIB_VER, development) :- library(LIB_VER)
+RULE dependencies(LIB_VER, "development") :- library(LIB_VER)
 RUN pip install pylint
 
 # In production mode, use Alpine as the parent image,
 # and copy compiled binaries from the "library" build stage:
-RULE dependencies(LIB_VER, production) :- \
+RULE dependencies(LIB_VER, "production") :- \
        image(i"python:${PYTHON_VER}-alpine"), \
        library(LIB_VER), \
        library_python(LIB_VER, PYTHON_VER)
@@ -108,18 +108,18 @@ COPY . /my_app
 
 For a given query, Modus generates a Dockerfile that builds the corresponding targets, using the `modus-transpile` tool. In Bash, the above build can be executed by running 
 
-    docker build . -f <(modus-transpile Modusfile --query 'app(v"1.2.5", production)')
+    docker build . -f <(modus-transpile Modusfile --query 'app(v"1.2.5", "production")')
 
 Modus can print the proof tree of a given query that shows how the target image is constructed from parent images:
 
-    $ modus-transpile Modusfile --query 'app(v"1.2.5", production)' --proof
-    app(v"1.2.5", production)
-    └── dependencies(v"1.2.5", production)
+    $ modus-transpile Modusfile --query 'app(v"1.2.5", "production")' --proof
+    app(v"1.2.5", "production")
+    └── dependencies(v"1.2.5", "production")
         ├── image(i"python:3.5-alpine")
-        ├── library(v"1.2.5", production)
+        ├── library(v"1.2.5", "production")
         │   ├── image(i"python:3.5")
         │   ├╶╶ library_python(v"1.2.5", v"3.5")
-        │   └╶╶ mode_target(production, "debug")
+        │   └╶╶ mode_target("production", "debug")
         └╶╶ library_python(v"1.2.5", v"3.5")
 
 Predicates that do not represent images (_imageless_ predicates) in the proof tree are preceded with `╶╶`.
