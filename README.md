@@ -8,7 +8,7 @@ Modus is a [Datalog](https://en.wikipedia.org/wiki/Datalog)-based [DSL](https://
 - parallel builds of multiple images;
 - distributed caching.
 
-Becides, it addresses usability issues of Dockerfiles, for example:
+Besides, it addresses usability issues of Dockerfiles, for example:
 
 - [modular](http://www.eecs.qmul.ac.uk/~mmh/AMCM048/abstraction/procedural.html) parametrised [build stages](https://docs.docker.com/develop/develop-images/multistage-build/);
 - build stages can return values ([Docker #32100](https://github.com/moby/moby/issues/32100));
