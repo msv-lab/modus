@@ -67,60 +67,78 @@ The example below uses special literals for Docker images, e.g. `i"python:3.8"`,
 
 ```Prolog
 % Relation between the library version and the required Python version:
-library_python(VERSION, v"3.4") :- VERSION < v"1.1.0".
-library_python(VERSION, v"3.5") :- VERSION >= v"1.1.0", VERSION < v"1.3.0-alpha".
-library_python(VERSION, v"3.8") :- VERSION >= v"1.3.0-alpha".
+library_python(Version, v"3.4") :- Version < v"1.1.0".
+library_python(Version, v"3.5") :- Version >= v"1.1.0", Version < v"1.3.0-alpha".
+library_python(Version, v"3.8") :- Version >= v"1.3.0-alpha".
 
 % The build stage that downloads and compiles the library.
 % Python's version and the make target are resolved based
 % on the library version and the build mode:
-library(VERSION, MODE) :-
-    library_python(VERSION, PYTHON),
-    from(i"python:${PYTHON}"),
+build(Version, Mode, Output) :-
+    library_python(Version, Python),
+    from(i"python:${Python}"),
+    arg("DEBIAN_FRONTEND", "noninteractive"),
     run("apt-get install -y make"),
-    run("wget https://library.com/releases/library-v${VERSION}.tar.gz && \
-         tar xf library-v${VERSION}.tar.gz && \
-         mv library-v${VERSION}/ /my_lib"),
-    workdir("/my_lib"),
-    (MODE = "development", run("make debug");
-     MODE = "production", run("make release")).
+    run(f"wget https://library.com/releases/library-v${Version}.tar.gz && \
+          tar xf library-v${Version}.tar.gz && \
+          mv library-v${Version}/ /library-build"),
+    workdir("/library-build"),
+    (Mode = "development", run("make debug"), Output = "/library-build/debug/";
+     Mode = "production", run("make release"), Output = "/library-build/release/").
 
 % In development mode, use the "library" build stage as the parent image,
 % and additionally install development tools (Pylint):
-dependencies(VERSION, "development") :-
-    library(VERSION),
+dependencies(Version, "development") :-
+    build(Version, "development", Output),
+    run(f"cp ${Output} /my_lib"),
     run("pip install pylint").
 
 % In production mode, use Alpine as the parent image,
 % and copy compiled binaries from the "library" build stage:
-dependencies(VERSION, "production") :-
-    library_python(VERSION, PYTHON),
-    from(i"python:${PYTHON}-alpine"),
-    library(VERSION)::copy("/my_lib", "/my_lib").
+dependencies(Version, "production") :-
+    library_python(Version, Python),
+    from(i"python:${Python}-alpine"),
+    build(Version, "production", Output)::copy(Output, "/my_lib").
 
 % Copy app's source code to the appropriate parent image:
-app(VERSION, MODE) :-
-    dependencies(VERSION, MODE),
+app(Version, Mode) :-
+    dependencies(Version, Mode),
     copy(".", "/my_app").
 ```
 
 For a given query, Modus generates a Dockerfile that builds the corresponding targets, using the `modus-transpile` tool. In Bash, the above build can be executed by running 
 
-    docker build . -f <(modus-transpile Modusfile --query 'app(v"1.2.5", "production")')
+    docker build . -f <(modus-transpile Modusfile 'app(v"1.2.5", "production")')
 
-Modus can print the proof tree of a given query that shows how the target image is constructed from parent images:
+Modus can print the build tree of a given target that shows how the target image is constructed from parent images:
 
-    $ modus-transpile Modusfile --query 'app(v"1.2.5", "production")' --proof
+    $ modus-transpile Modusfile 'app(v"1.2.5", "production")' --tree
     app(v"1.2.5", "production")
     └── dependencies(v"1.2.5", "production")
-        ├── image(i"python:3.5-alpine")
-        ├── library(v"1.2.5", "production")
-        │   ├── image(i"python:3.5")
-        │   ├╶╶ library_python(v"1.2.5", v"3.5")
-        │   └╶╶ mode_target("production", "debug")
+        ├── from(i"python:3.5-alpine")
+        ├── build(v"1.2.5", "production", "/library_build/release")
+        │   ├── from(i"python:3.5")
+        │   └╶╶ library_python(v"1.2.5", v"3.5")
         └╶╶ library_python(v"1.2.5", v"3.5")
 
-Predicates that do not represent images (_imageless_ predicates) in the proof tree are preceded with `╶╶`.
+Modus can also build multiple images if the target contains a variable:
+
+    $ modus-transpile Modusfile 'app(v"1.2.5", X)' --tree
+    app(v"1.2.5", "production")
+    └── dependencies(v"1.2.5", "production")
+        ├── from(i"python:3.5-alpine")
+        ├── build(v"1.2.5", "production", "/library_build/release")
+        │   ├── from(i"python:3.5")
+        │   └╶╶ library_python(v"1.2.5", v"3.5")
+        └╶╶ library_python(v"1.2.5", v"3.5")
+    app(v"1.2.5", "development")
+    └── dependencies(v"1.2.5", "development")
+        ├── build(v"1.2.5", "production", "/library_build/debug")
+        │   ├── from(i"python:3.5")
+        │   └╶╶ library_python(v"1.2.5", v"3.5")
+        └╶╶ library_python(v"1.2.5", v"3.5")
+
+Predicates that do not represent images (logical predicates) in the build tree are preceded with `╶╶`.
 
 ## Documentation
 
