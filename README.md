@@ -47,7 +47,7 @@ build(Version, Mode, Output) :-
     (Mode = "development", run("make debug"), Output = "/library-build/debug/";
      Mode = "production", run("make release"), Output = "/library-build/release/").
 
-% In development mode, use the "library" build stage as the parent image,
+% In development mode, use the build stage as the parent image,
 % and additionally install development tools (Pylint):
 dependencies(Version, "development") :-
     build(Version, "development", Output),
@@ -55,7 +55,7 @@ dependencies(Version, "development") :-
     run("pip install pylint").
 
 % In production mode, use Alpine as the parent image,
-% and copy compiled binaries from the "library" build stage:
+% and copy compiled binaries from the build stage:
 dependencies(Version, "production") :-
     library_python(Version, Python),
     from(i"python:${Python}-alpine"),
@@ -75,10 +75,10 @@ Modus can print the build tree of a given target that shows how the target image
 
     $ modus-transpile Modusfile 'app(v"1.2.5", "production")' --tree
     app(v"1.2.5", "production")
-    └── dependencies(v"1.2.5", "production")
-        ├── from(i"python:3.5-alpine")
+    ╘══ dependencies(v"1.2.5", "production")
+        ╞══ from(i"python:3.5-alpine")
         ├── build(v"1.2.5", "production", "/library_build/release")
-        │   ├── from(i"python:3.5")
+        │   ╞══ from(i"python:3.5")
         │   └╶╶ library_python(v"1.2.5", v"3.5")
         └╶╶ library_python(v"1.2.5", v"3.5")
 
@@ -86,20 +86,20 @@ Modus can also build multiple images if the target contains a variable:
 
     $ modus-transpile Modusfile 'app(v"1.2.5", X)' --tree
     app(v"1.2.5", "production")
-    └── dependencies(v"1.2.5", "production")
-        ├── from(i"python:3.5-alpine")
+    ╘══ dependencies(v"1.2.5", "production")
+        ╞══ from(i"python:3.5-alpine")
         ├── build(v"1.2.5", "production", "/library_build/release")
-        │   ├── from(i"python:3.5")
+        │   ╞══ from(i"python:3.5")
         │   └╶╶ library_python(v"1.2.5", v"3.5")
         └╶╶ library_python(v"1.2.5", v"3.5")
     app(v"1.2.5", "development")
-    └── dependencies(v"1.2.5", "development")
-        ├── build(v"1.2.5", "production", "/library_build/debug")
-        │   ├── from(i"python:3.5")
+    ╘══ dependencies(v"1.2.5", "development")
+        ╞══ build(v"1.2.5", "production", "/library_build/debug")
+        │   ╞══ from(i"python:3.5")
         │   └╶╶ library_python(v"1.2.5", v"3.5")
         └╶╶ library_python(v"1.2.5", v"3.5")
 
-Predicates that do not represent images (logical predicates) in the build tree are preceded with `╶╶`.
+In these build trees, parent images are preceded with `══`, images from which files are copied are preceded with `──`, and logical predicates are preceded with `╶╶`.
 
 ## Documentation
 
