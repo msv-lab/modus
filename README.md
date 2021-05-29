@@ -1,63 +1,24 @@
 # Modus
 
-Modus is a Datalog-based language for building Docker images. Modus extends [Dockerfile](https://docs.docker.com/engine/reference/builder/)'s syntax with [Horn clauses](https://en.wikipedia.org/wiki/Horn_clause) for expressing build dependencies. Modus has the following advantages:
+Modus is a [Datalog](https://en.wikipedia.org/wiki/Datalog)-based [DSL](https://en.wikipedia.org/wiki/Domain-specific_language) for building Docker images. It supports complex build workflows for evolving configurable software. Modus is declarative and non-Turing-complete. Compared with Dockerfiles, it provides the following extra capabilities:
 
-- Parameterised [build stages](https://docs.docker.com/develop/develop-images/multistage-build/), whose arguments are resolved automatically using a Datalog solver, improve __modularity__, enable __complex workflows__, and address longstanding [usability](https://github.com/moby/moby/issues/32100) [issues](https://github.com/moby/moby/issues/32100).
+- modularity and code reuse;
+- automatic resolution of dependencies: images, compilations flags, etc;
+- constraints over [SemVer](https://semver.org/) versions;
+- parallel builds of multiple images;
+- distributed caching.
 
-- Modus allows automatically __resolving dependencies__ such as versions, base images, compilations flags, etc. Modus provides first-class support for [SemVer](https://semver.org/) constraints.
+Becides, it addresses usability issues of Dockerfiles, for example:
 
-- Modus computes build trees that optimise the __build time__; combined with [BuildKit](https://github.com/moby/buildkit), Modus enables efficient __parallel builds__ of groups of related images; Modus provides fine-grained control for optimising __image size__.
-
-- Modus is a backwards-compatible extension; a Dockerfile is also a valid Modus input format. Modus is __easy__ to use and understand because it is declarative and non-Turing-complete.
+- [modular](http://www.eecs.qmul.ac.uk/~mmh/AMCM048/abstraction/procedural.html) parametrised [build stages](https://docs.docker.com/develop/develop-images/multistage-build/);
+- build stages can return values ([Docker #32100](https://github.com/moby/moby/issues/32100));
+- conditional instructions ([Stackoverflow](https://stackoverflow.com/questions/43654656/dockerfile-if-else-condition-with-external-arguments), [Earthly #779](https://github.com/earthly/earthly/issues/779));
+- copying from parametrised stages (e.g. [Docker #34482](https://github.com/moby/moby/issues/34482));
+- predictable variable expansion ([Docker #2637](https://github.com/moby/moby/issues/2637)).
+- multi-line shell commands ([Docker #34423](https://github.com/moby/moby/issues/34423), [Docker #16058](https://github.com/moby/moby/issues/16058));
+- user-defined commands ([Earthly #581](https://github.com/earthly/earthly/issues/581)).
 
 Modus uses semantic versioning; until version 1.0 is declared, breaking changes are possible. We welcome bug reports and feature requests submitted through [GitHub Issues](https://github.com/mechtaev/modus/issues).
-
-## Overview
-
-Docker container images are built using sequences of instructions specified in Dockerfiles. Dockerfiles allow grouping sequences of instructions into units called [build stages](https://docs.docker.com/develop/develop-images/multistage-build/). Build stages enable code reuse, optimisation of build times and image sizes, etc.
-
-Compared to functions/procedures in general-purpose programming languages, build stages do not provide [procedural abstraction](http://www.eecs.qmul.ac.uk/~mmh/AMCM048/abstraction/procedural.html). Consider this example of a typical Dockerfile with build stages:
-
-```Dockerfile
-FROM base1 AS stage1
-ARG X
-RUN ...   # use ${X}
-
-FROM base2 AS stage2
-ARG Y
-RUN ...   # use ${Y}
-
-FROM stage1 AS stage3
-ARG Z
-COPY --from=stage2 ...
-RUN ...   # use ${Z}
-```
-
-In this example, the stage `stage3`, parametrised with the variable `Z`, depends on the stages `stage1` and `stage2`, which are parametrised with the variables `X` and `Y` respectively. When the build is executed, the variables `X`, `Y` and `Z` have to be set through command line options, e.g. `--build-arg X=1 --build-arg Y=2 --build-arg Z=1`. This approach has several problems:
-- There can be implicit dependencies between `stage3` and the arguments of `stage1` and `stage2` that are not reflected in the code. For example, `stage3` may require `stage2` with `Y=2`.
-- The user has to find and correctly set all relevant arguments in all transitively dependent stages to build a given stage.
-- The same stage cannot be reused with different parameter values within the same build.
-
-Modus addresses these issues by replacing the instruction `FROM` with the instruction `RULE` that explicitly describes dependencies between build stages and their parameters:
-
-```Prolog
-stage1(X) :-
-       base1,
-       run("... ${X} ..."). 
-
-stage2(Y) :-
-       base2, 
-       run("... ${Y} ...").
-
-stage3(X, Z) :-
-       stage1(X), 
-       stage2(2)::copy("...", "..."),
-       run("... ${Y} ...").
-```
-
-Effectively, build dependency resolution is reduced to solving a set of [Horn clauses](https://en.wikipedia.org/wiki/Horn_clause) such as `stage3(X, Y) :- stage1(X), stage2(2)`. Specifically, build definitions in Modus can be thought of as a deductive database, and build targets are specified as queries to this database. Then, the build tree corresponds to the minimal proof of a given query from _facts_ representing existing images.
-
-Apart from improving modularity and clarity of build definitions, Horn clauses enables additional features such as automatic resolution of software versions and compilation flags, building groups of related images, and more.
 
 ## Motivating example
 
