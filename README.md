@@ -19,40 +19,43 @@ Docker container images are built using sequences of instructions specified in D
 Compared to functions/procedures in general-purpose programming languages, build stages do not provide [procedural abstraction](http://www.eecs.qmul.ac.uk/~mmh/AMCM048/abstraction/procedural.html). Consider this example of a typical Dockerfile with build stages:
 
 ```Dockerfile
-FROM a AS b
+FROM base1 AS stage1
 ARG X
 RUN ...   # use ${X}
 
-FROM c AS d
+FROM base2 AS stage2
 ARG Y
 RUN ...   # use ${Y}
 
-FROM b AS e
+FROM stage1 AS stage3
 ARG Z
-COPY --from=d ...
+COPY --from=stage2 ...
 RUN ...   # use ${Z}
 ```
 
-In this example, the stage `e`, parametrised with the variable `Z`, depends on the stages `b` and `d`, which are parametrised with the variables `X` and `Y` respectively. When the build is executed, the variables `X`, `Y` and `Z` have to be set through command line options, e.g. `--build-arg X=1 --build-arg Y=2 --build-arg Z=1`. This approach has several problems:
-- There can be implicit dependencies between `e` and the arguments of `b` and `d` that are not reflected in the code. For example, `e` may require `d` with `Y=2`.
+In this example, the stage `stage3`, parametrised with the variable `Z`, depends on the stages `stage1` and `stage2`, which are parametrised with the variables `X` and `Y` respectively. When the build is executed, the variables `X`, `Y` and `Z` have to be set through command line options, e.g. `--build-arg X=1 --build-arg Y=2 --build-arg Z=1`. This approach has several problems:
+- There can be implicit dependencies between `stage3` and the arguments of `stage1` and `stage2` that are not reflected in the code. For example, `stage3` may require `stage2` with `Y=2`.
 - The user has to find and correctly set all relevant arguments in all transitively dependent stages to build a given stage.
 - The same stage cannot be reused with different parameter values within the same build.
 
 Modus addresses these issues by replacing the instruction `FROM` with the instruction `RULE` that explicitly describes dependencies between build stages and their parameters:
 
-```Dockerfile
-RULE b(X) :- a
-RUN ...   # use ${X}
+```Prolog
+stage1(X) :-
+       base1,
+       run("... ${X} ..."). 
 
-RULE d(Y) :- c
-RUN ...   # use ${Y}
+stage2(Y) :-
+       base2, 
+       run("... ${Y} ...").
 
-RULE e(X, Z) :- b(X), d(2)
-COPY --from=d ...
-RUN ...   # use ${Z}
+stage3(X, Z) :-
+       stage1(X), 
+       stage2(2)::copy("...", "..."),
+       run("... ${Y} ...").
 ```
 
-Effectively, build dependency resolution is reduced to solving a set of [Horn clauses](https://en.wikipedia.org/wiki/Horn_clause) such as `e(X, Y) :- b(X), d(2)`. Specifically, build definitions in Modus can be thought of as a deductive database, and build targets are specified as queries to this database. Then, the build tree corresponds to the minimal proof of a given query from _facts_ representing existing images.
+Effectively, build dependency resolution is reduced to solving a set of [Horn clauses](https://en.wikipedia.org/wiki/Horn_clause) such as `stage3(X, Y) :- stage1(X), stage2(2)`. Specifically, build definitions in Modus can be thought of as a deductive database, and build targets are specified as queries to this database. Then, the build tree corresponds to the minimal proof of a given query from _facts_ representing existing images.
 
 Apart from improving modularity and clarity of build definitions, Horn clauses enables additional features such as automatic resolution of software versions and compilation flags, building groups of related images, and more.
 
@@ -62,48 +65,43 @@ Assume that we would like to containerise the application `app`. Suppose also th
 
 The example below uses special literals for Docker images, e.g. `i"python:3.8"`, and for SemVer versions, e.g. `v"1.3.0-alpha"`:
 
-```Dockerfile
-# Relation between the library version and the required Python version:
-RULE library_python(LIB_VER, v"3.4") :- LIB_VER < v"1.1.0"
-RULE library_python(LIB_VER, v"3.5") :- \
-       LIB_VER >= v"1.1.0", LIB_VER < v"1.3.0-alpha"
-RULE library_python(LIB_VER, v"3.8") :- LIB_VER >= v"1.3.0-alpha"
+```Prolog
+% Relation between the library version and the required Python version:
+library_python(VERSION, v"3.4") :- VERSION < v"1.1.0".
+library_python(VERSION, v"3.5") :- VERSION >= v"1.1.0", VERSION < v"1.3.0-alpha".
+library_python(VERSION, v"3.8") :- VERSION >= v"1.3.0-alpha".
 
-# Relation between build modes (development/production)
-# and library targets (debug/release):
-RULE mode_target("development", "debug")
-RULE mode_target("production", "release")
+% The build stage that downloads and compiles the library.
+% Python's version and the make target are resolved based
+% on the library version and the build mode:
+library(VERSION, MODE) :-
+    library_python(VERSION, PYTHON),
+    from(i"python:${PYTHON}"),
+    run("apt-get install -y make"),
+    run("wget https://library.com/releases/library-v${VERSION}.tar.gz && \
+         tar xf library-v${VERSION}.tar.gz && \
+         mv library-v${VERSION}/ /my_lib"),
+    workdir("/my_lib"),
+    (MODE = "development", run("make debug");
+     MODE = "production", run("make release")).
 
-# The build stage that downloads and compiles the library.
-# Python's version and the make target are resolved based
-# on the library version and the build mode:
-RULE library(LIB_VER, MODE) :- \
-       image(i"python:${PYTHON_VER}"), \
-       library_python(LIB_VER, PYTHON_VER), \
-       mode_target(MODE, TARGET)
-RUN apt-get install make
-RUN wget https://library.com/releases/library-v${LIB_VER}.tar.gz && \
-    tar xf library-v${LIB_VER}.tar.gz && \
-    mv library-v${LIB_VER}/ /my_lib
-WORKDIR /my_lib
-RUN make ${TARGET}
+% In development mode, use the "library" build stage as the parent image,
+% and additionally install development tools (Pylint):
+dependencies(VERSION, "development") :-
+    library(VERSION),
+    run("pip install pylint").
 
-# In development mode, use the "library" build stage as the parent image,
-# and additionally install development tools (Pylint):
-RULE dependencies(LIB_VER, "development") :- library(LIB_VER)
-RUN pip install pylint
+% In production mode, use Alpine as the parent image,
+% and copy compiled binaries from the "library" build stage:
+dependencies(VERSION, "production") :-
+    library_python(VERSION, PYTHON),
+    from(i"python:${PYTHON}-alpine"),
+    library(VERSION)::copy("/my_lib", "/my_lib").
 
-# In production mode, use Alpine as the parent image,
-# and copy compiled binaries from the "library" build stage:
-RULE dependencies(LIB_VER, "production") :- \
-       image(i"python:${PYTHON_VER}-alpine"), \
-       library(LIB_VER), \
-       library_python(LIB_VER, PYTHON_VER)
-COPY --from=library /my_lib /my_lib
-
-# Copy app's source code to the appropriate parent image:
-RULE app(LIB_VER, MODE) :- dependencies(LIB_VER, MODE)
-COPY . /my_app
+% Copy app's source code to the appropriate parent image:
+app(VERSION, MODE) :-
+    dependencies(VERSION, MODE),
+    copy(".", "/my_app").
 ```
 
 For a given query, Modus generates a Dockerfile that builds the corresponding targets, using the `modus-transpile` tool. In Bash, the above build can be executed by running 
