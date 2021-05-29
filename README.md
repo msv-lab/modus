@@ -94,10 +94,9 @@ Modus can also build multiple images if the target contains a variable:
         └╶╶ library_python(v"1.2.5", v"3.5")
     app(v"1.2.5", "development")
     ╘══ dependencies(v"1.2.5", "development")
-        ╞══ build(v"1.2.5", "production", "/library_build/debug")
-        │   ╞══ from(i"python:3.5")
-        │   └╶╶ library_python(v"1.2.5", v"3.5")
-        └╶╶ library_python(v"1.2.5", v"3.5")
+        ╘══ build(v"1.2.5", "production", "/library_build/debug")
+            ╞══ from(i"python:3.5")
+            └╶╶ library_python(v"1.2.5", v"3.5")
 
 In these build trees, parent images are preceded with `══`, images from which files are copied are preceded with `──`, and logical predicates are preceded with `╶╶`.
 
