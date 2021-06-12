@@ -1,6 +1,6 @@
 # Modus
 
-Modus is a [Datalog](https://en.wikipedia.org/wiki/Datalog)-based [DSL](https://en.wikipedia.org/wiki/Domain-specific_language) for building Docker images. It supports complex build workflows for evolving configurable software. Modus is declarative and non-Turing-complete. Compared with Dockerfiles, it provides the following extra capabilities:
+Modus is a [Datalog](https://en.wikipedia.org/wiki/Datalog)-based [DSL](https://en.wikipedia.org/wiki/Domain-specific_language) for building Docker images. It supports complex build workflows for configurable, evolving software. Modus is declarative and non-Turing-complete. Compared with Dockerfiles, it provides the following extra capabilities:
 
 - modularity and code reuse;
 - automatic resolution of dependencies: images, compilations flags, etc;
