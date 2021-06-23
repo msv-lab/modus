@@ -126,7 +126,7 @@ Modus can also build multiple images if the target contains a variable:
             ├── install_python("ubuntu:18.04", "3.7")
             └╶╶ library_python("1.2.5", "3.7")
 
-In these build trees, images relations are preceded with `══`, layer relations are preceeded with `──`, and logical relations are preceded with `╶╶`.
+In these build trees, image relations are preceded with `══`, layer relations are preceeded with `──`, and logical relations are preceded with `╶╶`.
 
 ## Documentation
 
