@@ -105,8 +105,8 @@ Modus can print the build tree of a given target that shows how the target image
         ├── build("ubuntu:18.04", "1.2.5", "production", "/library_build/release")::copy("/library_build/release", "/my_lib")
         │   ╞══ from("ubuntu:18.04")
         |   ├── install_python("ubuntu:18.04", "3.7")
-        │   └── library_python("1.2.5", "3.7")
-        └── library_python("1.2.5", "3.7")
+        │   └╶╶ library_python("1.2.5", "3.7")
+        └╶╶ library_python("1.2.5", "3.7")
 
 Modus can also build multiple images if the target contains a variable:
 
@@ -117,16 +117,16 @@ Modus can also build multiple images if the target contains a variable:
         ├── build("ubuntu:18.04", "1.2.5", "production", "/library_build/release")::copy("/library_build/release", "/my_lib")
         │   ╞══ from("ubuntu:18.04")
         |   ├── install_python("ubuntu:18.04", "3.7")
-        │   └── library_python("1.2.5", "3.7")
-        └── library_python("1.2.5", "3.7")
+        │   └╶╶ library_python("1.2.5", "3.7")
+        └╶╶ library_python("1.2.5", "3.7")
     app("ubuntu:18.04", "1.2.5", "development")
     ╘══ dependencies("ubuntu:18.04", "1.2.5", "development")
         ╘══ build("ubuntu:18.04", "1.2.5", "development", "/library_build/debug")
             ╞══ from("ubuntu:18.04")
             ├── install_python("ubuntu:18.04", "3.7")
-            └── library_python("1.2.5", "3.7")
+            └╶╶ library_python("1.2.5", "3.7")
 
-In these build trees, parent images are preceded with `══`.
+In these build trees, images relations are preceded with `══`, layer relations are preceeded with `──`, and logical relations are preceded with `╶╶`.
 
 ## Documentation
 
