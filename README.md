@@ -111,16 +111,16 @@ Modus can print the build tree of a given target that shows how the target image
 Modus can also build multiple images if the target contains a variable:
 
     $ modus-transpile Modusfile 'app("ubuntu:18.04", "1.2.5", X)' --tree
-    app("1.2.5", "production")
-    ╘══ dependencies("1.2.5", "production")
+    app("ubuntu:18.04", "1.2.5", "production")
+    ╘══ dependencies("ubuntu:18.04", "1.2.5", "production")
         ╞══ from("python:3.7-alpine")
         ├── build("ubuntu:18.04", "1.2.5", "production", "/library_build/release")::copy("/library_build/release", "/my_lib")
         │   ╞══ from("ubuntu:18.04")
         |   ├── install_python("ubuntu:18.04", "3.7")
         │   └── library_python("1.2.5", "3.7")
         └── library_python("1.2.5", "3.7")
-    app("1.2.5", "development")
-    ╘══ dependencies("1.2.5", "development")
+    app("ubuntu:18.04", "1.2.5", "development")
+    ╘══ dependencies("ubuntu:18.04", "1.2.5", "development")
         ╘══ build("ubuntu:18.04", "1.2.5", "development", "/library_build/debug")
             ╞══ from("ubuntu:18.04")
             ├── install_python("ubuntu:18.04", "3.7")
