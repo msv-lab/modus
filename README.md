@@ -28,83 +28,105 @@ Modus is Datalog with domain-specific extensions. A Dockerfile can be translated
 | - | - |
 | <pre><code class="language-Dockerfile">FROM ubuntu:20.04 AS app</code><br><br><code class="language-Dockerfile">RUN apt-get update && \\</code><br><code class="language-Dockerfile">&nbsp;&nbsp;&nbsp;&nbsp;apt-get install build-essential</code><br><code class="language-Dockerfile">COPY . /app</code><br><code class="language-Dockerfile">RUN cd /app && make </code></pre>  | <pre><code class="language-prolog">app :-</code><br><code class="language-prolog">&nbsp;&nbsp;&nbsp;&nbsp;from(i"ubuntu:20.04"),</code><br><code class="language-prolog">&nbsp;&nbsp;&nbsp;&nbsp;run("apt-get update && \\</code><br><code class="language-prolog">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;apt-get install build-essential"),</code><br><code class="language-prolog">&nbsp;&nbsp;&nbsp;&nbsp;copy(".", "/app"),</code><br><code class="language-prolog">&nbsp;&nbsp;&nbsp;&nbsp;run("cd /app && make").</code></pre> |
 
-Let's consider a more complex example that showcases some features of Modus. Assume that we would like to containerise the application `app`. Suppose also that `app` depends on the library `library`, different versions of which depend on different versions of Python. We would like to have two build mode: "development" mode for development and testing, and "production" mode with a smaller image and better security. The Modusfile below defines a parametrised build that (1) automatically resolves dependencies, and (2) supports both "development" and "production" modes without code duplication. 
-
-The example below uses special literals for Docker images, e.g. `i"python:3.8"`, and for SemVer versions, e.g. `v"1.3.0-alpha"`:
+Let's consider a more complex example that showcases some features of Modus. Assume that we would like to containerise the application `app`. Suppose also that `app` depends on the library `library`, different versions of which depend on different versions of Python. We would like to have two build mode: "development" mode for development and testing on different version of Linux, and "production" mode with a smaller image and better security using Alpine. The Modusfile below defines a parametrised build that (1) automatically resolves dependencies, and (2) supports both "development" and "production" modes without code duplication. 
 
 ```Prolog
 % Relation between the library version and the required Python version:
-library_python(Version, v"3.4") :- Version < v"1.1.0".
-library_python(Version, v"3.5") :- Version >= v"1.1.0", Version < v"1.3.0-alpha".
-library_python(Version, v"3.8") :- Version >= v"1.3.0-alpha".
+library_python(v, "3.6") :- version_lt(v, "1.1.0").
+library_python(v, "3.7") :- version_geq(v, "1.1.0"), version_lt(v, "1.3.0-alpha").
+library_python(v, "3.8") :- version_geq(v, "1.3.0-alpha").
+
+% Python installation on different distros:
+install_python(image, python) :-
+  	image_repo(image, "fedora"),
+	run(f"dnf install python${python}").
+install_python(image, python) :-
+  	image_repo(image, "ubuntu"),
+	image_tag(image, tag),
+	version_geq(tag, "16.04"),
+  	arg("DEBIAN_FRONTEND", "noninteractive"),
+	run(f"apt-get install -y python${version}").
+install_python(image, python) :-
+  	image_repo(image, "ubuntu"),
+	image_tag(image, tag),
+  	version_lt(tag, "16.04"),
+    version_geq(python, "3.7")
+	run(f"apt-get install -y software-properties-common && \
+          add-apt-repository ppa:deadsnakes/ppa && \
+          apt-get update && \
+		  apt-get install -y python${version}").
 
 % The build stage that downloads and compiles the library.
 % Python's version and the make target are resolved based
 % on the library version and the build mode:
-build(Version, Mode, Output) :-
-    library_python(Version, Python),
-    from(i"python:${Python}"),
+build(image, version, mode, output) :-
+    library_python(version, python),
+    from(image),
+    install_python(image, version),
     arg("DEBIAN_FRONTEND", "noninteractive"),
     run("apt-get install -y make"),
-    run(f"wget https://library.com/releases/library-v${Version}.tar.gz && \
-          tar xf library-v${Version}.tar.gz && \
-          mv library-v${Version}/ /library-build"),
+    run(f"wget https://library.com/releases/library-v${version}.tar.gz && \
+          tar xf library-v${version}.tar.gz && \
+          mv library-v${version}/ /library-build"),
     workdir("/library-build"),
-    (Mode = "development", run("make debug"), Output = "/library-build/debug/";
-     Mode = "production", run("make release"), Output = "/library-build/release/").
+    (mode = "development", run("make debug"), output = "/library-build/debug/";
+     mode = "production", run("make release"), output = "/library-build/release/").
 
 % In development mode, use the build stage as the parent image,
 % and additionally install development tools (Pylint):
-dependencies(Version, "development") :-
-    build(Version, "development", Output),
-    run(f"cp ${Output} /my_lib"),
+dependencies(image, version, "development") :-
+    build(image, version, "development", output),
+    run(f"cp ${output} /my_lib"),
     run("pip install pylint").
 
 % In production mode, use Alpine as the parent image,
 % and copy compiled binaries from the build stage:
-dependencies(Version, "production") :-
-    library_python(Version, Python),
-    from(i"python:${Python}-alpine"),
-    build(Version, "production", Output)::copy(Output, "/my_lib").
+dependencies(image, version, "production") :-
+    library_python(version, python),
+    from(f"python:${python}-alpine"),
+    build(image, version, "production", output)::copy(output, "/my_lib").
 
 % Copy app's source code to the appropriate parent image:
-app(Version, Mode) :-
-    dependencies(Version, Mode),
+app(image, version, mode) :-
+    dependencies(image, version, mode),
     copy(".", "/my_app").
 ```
 
 For a given query, Modus generates a Dockerfile that builds the corresponding targets, using the `modus-transpile` tool. In Bash, the above build can be executed by running 
 
-    docker build . -f <(modus-transpile Modusfile 'app(v"1.2.5", "production")')
+    docker build . -f <(modus-transpile Modusfile 'app("ubuntu:18.04", "1.2.5", "production")')
 
 Modus can print the build tree of a given target that shows how the target image is constructed from parent images:
 
-    $ modus-transpile Modusfile 'app(v"1.2.5", "production")' --tree
-    app(v"1.2.5", "production")
-    ╘══ dependencies(v"1.2.5", "production")
-        ╞══ from(i"python:3.5-alpine")
-        ├── build(v"1.2.5", "production", "/library_build/release")
-        │   ╞══ from(i"python:3.5")
-        │   └╶╶ library_python(v"1.2.5", v"3.5")
-        └╶╶ library_python(v"1.2.5", v"3.5")
+    $ modus-transpile Modusfile 'app("ubuntu:18.04", "1.2.5", "production")' --tree
+    app("ubuntu:18.04", "1.2.5", "production")
+    ╘══ dependencies("ubuntu:18.04", "1.2.5", "production")
+        ╞══ from("python:3.7-alpine")
+        ├── build("ubuntu:18.04", "1.2.5", "production", "/library_build/release")::copy("/library_build/release", "/my_lib")
+        │   ╞══ from("ubuntu:18.04")
+        |   ├── install_python("ubuntu:18.04", "3.7")
+        │   └── library_python("1.2.5", "3.7")
+        └── library_python("1.2.5", "3.7")
 
 Modus can also build multiple images if the target contains a variable:
 
-    $ modus-transpile Modusfile 'app(v"1.2.5", X)' --tree
-    app(v"1.2.5", "production")
-    ╘══ dependencies(v"1.2.5", "production")
-        ╞══ from(i"python:3.5-alpine")
-        ├── build(v"1.2.5", "production", "/library_build/release")
-        │   ╞══ from(i"python:3.5")
-        │   └╶╶ library_python(v"1.2.5", v"3.5")
-        └╶╶ library_python(v"1.2.5", v"3.5")
-    app(v"1.2.5", "development")
-    ╘══ dependencies(v"1.2.5", "development")
-        ╘══ build(v"1.2.5", "production", "/library_build/debug")
-            ╞══ from(i"python:3.5")
-            └╶╶ library_python(v"1.2.5", v"3.5")
+    $ modus-transpile Modusfile 'app("ubuntu:18.04", "1.2.5", X)' --tree
+    app("1.2.5", "production")
+    ╘══ dependencies("1.2.5", "production")
+        ╞══ from("python:3.7-alpine")
+        ├── build("ubuntu:18.04", "1.2.5", "production", "/library_build/release")::copy("/library_build/release", "/my_lib")
+        │   ╞══ from("ubuntu:18.04")
+        |   ├── install_python("ubuntu:18.04", "3.7")
+        │   └── library_python("1.2.5", "3.7")
+        └── library_python("1.2.5", "3.7")
+    app("1.2.5", "development")
+    ╘══ dependencies("1.2.5", "development")
+        ╘══ build("ubuntu:18.04", "1.2.5", "development", "/library_build/debug")::copy("/library_build/debug", "/my_lib")
+            ╞══ from("ubuntu:18.04")
+            ├── install_python("ubuntu:18.04", "3.7")
+            └── library_python("1.2.5", "3.7")
 
-In these build trees, parent images are preceded with `══`, images from which files are copied are preceded with `──`, and logical predicates are preceded with `╶╶`.
+In these build trees, parent images are preceded with `══`.
 
 ## Documentation
 
