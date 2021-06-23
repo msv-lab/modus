@@ -45,7 +45,7 @@ install_python(image, python) :-
 	image_tag(image, tag),
 	version_geq(tag, "16.04"),
   	arg("DEBIAN_FRONTEND", "noninteractive"),
-	run(f"apt-get install -y python${version}").
+	run(f"apt-get install -y python${python}").
 install_python(image, python) :-
   	image_repo(image, "ubuntu"),
 	image_tag(image, tag),
@@ -54,7 +54,7 @@ install_python(image, python) :-
 	run(f"apt-get install -y software-properties-common && \
               add-apt-repository ppa:deadsnakes/ppa && \
               apt-get update && \
-              apt-get install -y python${version}").
+              apt-get install -y python${python}").
 
 % The build stage that downloads and compiles the library.
 % Python's version and the make target are resolved based
