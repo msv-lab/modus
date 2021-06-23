@@ -52,9 +52,9 @@ install_python(image, python) :-
   	version_lt(tag, "16.04"),
         version_geq(python, "3.7"),
 	run(f"apt-get install -y software-properties-common && \
-          add-apt-repository ppa:deadsnakes/ppa && \
-          apt-get update && \
-		  apt-get install -y python${version}").
+              add-apt-repository ppa:deadsnakes/ppa && \
+              apt-get update && \
+              apt-get install -y python${version}").
 
 % The build stage that downloads and compiles the library.
 % Python's version and the make target are resolved based
