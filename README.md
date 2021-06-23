@@ -1,28 +1,28 @@
 # Modus
 
-Modus is a [Datalog](https://en.wikipedia.org/wiki/Datalog)-based [DSL](https://en.wikipedia.org/wiki/Domain-specific_language) for building Docker images. It supports complex build workflows for configurable, evolving software. Modus is declarative and non-Turing-complete. Compared with Dockerfiles, it provides the following extra capabilities:
+Modus is a [Datalog](https://en.wikipedia.org/wiki/Datalog)-based [DSL](https://en.wikipedia.org/wiki/Domain-specific_language) for building Docker images. It supports complex build workflows for configurable, evolving software. In Modus, container images are identified as logical facts. For example, a container image with the app's version `1.2` built with the optimisation flag `-O2` on Ubuntu 20.04 can be identified as `app("1.2", "-O2", "ubuntu:20.04")`. Then, build instructions correspond to logical rules which define how new facts can be inferred from known facts. This enables lightweight [procedural abstraction](http://www.eecs.qmul.ac.uk/~mmh/AMCM048/abstraction/procedural.html), automatic dependency resolution and easy parallelisation.
 
-- modularity and code reuse;
-- automatic resolution of dependencies: images, compilations flags, etc;
-- constraints over [SemVer](https://semver.org/) versions;
-- parallel builds of multiple images;
-- distributed caching.
+Comparison with other container build systems:
 
-Besides, it addresses usability issues of Dockerfiles, for example:
-
-- [modular](http://www.eecs.qmul.ac.uk/~mmh/AMCM048/abstraction/procedural.html) parametrised [build stages](https://docs.docker.com/develop/develop-images/multistage-build/);
-- build stages can return values ([Docker #32100](https://github.com/moby/moby/issues/32100));
-- conditional instructions ([Stackoverflow](https://stackoverflow.com/questions/43654656/dockerfile-if-else-condition-with-external-arguments), [Earthly #779](https://github.com/earthly/earthly/issues/779));
-- copying from parametrised stages (e.g. [Docker #34482](https://github.com/moby/moby/issues/34482));
-- predictable variable expansion ([Docker #2637](https://github.com/moby/moby/issues/2637)).
-- multi-line shell commands ([Docker #34423](https://github.com/moby/moby/issues/34423), [Docker #16058](https://github.com/moby/moby/issues/16058));
-- user-defined commands ([Earthly #581](https://github.com/earthly/earthly/issues/581)).
+|  | Modus | Dockerfile | Buildah + Shell | Earthly |
+| - | - | - | - | - |
+| Automatic configuration/dependency resolution | :heavy_check_mark: | :x: | :x: | :x: |
+| Modularity and code reuse | :heavy_check_mark: | :x: | :heavy_check_mark: | :x: |
+| Non-Turing-completeness | :heavy_check_mark: | :heavy_check_mark: | :x: | :heavy_check_mark: |
+| Parallel builds of multiple images | :heavy_check_mark: | :x: | :x: | :heavy_check_mark: |
+| Build stages can return values | :heavy_check_mark: | :x: ([#32100](https://github.com/moby/moby/issues/32100)) | :heavy_check_mark: | :small_blue_diamond: (only build artifacts) |
+| Conditional instructions | :heavy_check_mark: | :x: ([StackOverflow](https://stackoverflow.com/questions/43654656/dockerfile-if-else-condition-with-external-arguments)) | :heavy_check_mark: | :x: ([#779](https://github.com/earthly/earthly/issues/779)) |
+| Copying from parametrised stages | :heavy_check_mark: | :x: ([#34482](https://github.com/moby/moby/issues/34482)) | :heavy_check_mark: | :x: |
+| Uniform variable expansion | :heavy_check_mark: | :x: ([#2637](https://github.com/moby/moby/issues/2637)) | :heavy_check_mark: | :x: |
+| Multi-line shell commands | :heavy_check_mark: | :x: ([#16058](https://github.com/moby/moby/issues/16058)) | :heavy_check_mark: | :x: |
+| User-defined commands | :heavy_check_mark: | :x: | :heavy_check_mark: | :x: ([#581](https://github.com/earthly/earthly/issues/581)) |
+| Distributed caching | :small_blue_diamond: | :x: | :x: | :x: |
 
 Modus uses semantic versioning; until version 1.0 is declared, breaking changes are possible. We welcome bug reports and feature requests submitted through [GitHub Issues](https://github.com/mechtaev/modus/issues).
 
 ## Motivating example
 
-Modus is Datalog with domain-specific extensions. A Dockerfile can be translated into Modusfile as shown in the table:
+Modus is a dialect of Datalog with domain-specific extensions. A Dockerfile can be translated into Modusfile as shown in the table:
 
 | Dockerfile | Modusfile | 
 | - | - |
