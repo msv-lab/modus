@@ -121,7 +121,7 @@ Modus can also build multiple images if the target contains a variable:
         └── library_python("1.2.5", "3.7")
     app("1.2.5", "development")
     ╘══ dependencies("1.2.5", "development")
-        ╘══ build("ubuntu:18.04", "1.2.5", "development", "/library_build/debug")::copy("/library_build/debug", "/my_lib")
+        ╘══ build("ubuntu:18.04", "1.2.5", "development", "/library_build/debug")
             ╞══ from("ubuntu:18.04")
             ├── install_python("ubuntu:18.04", "3.7")
             └── library_python("1.2.5", "3.7")
