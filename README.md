@@ -73,7 +73,7 @@ build(image, version, mode, output) :-
     run(f"wget https://library.com/releases/library-v${version}.tar.gz && \
           tar xf library-v${version}.tar.gz && \
           mv library-v${version}/ /build"),
-    workdir("/library-build"),
+    workdir("/build"),
     (mode = "development", run("make debug"), output = "/build/debug/";
      mode = "production", run("make release"), output = "/build/release/").
 
