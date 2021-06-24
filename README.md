@@ -55,6 +55,7 @@ install_python(image, python) :-
 	image_tag(image, tag),
   	version_lt(tag, "16.04"),
         version_geq(python, "3.7"),
+  	arg("DEBIAN_FRONTEND", "noninteractive"),
 	run(f"apt-get install -y software-properties-common && \
               add-apt-repository ppa:deadsnakes/ppa && \
               apt-get update && \
@@ -71,10 +72,10 @@ build(image, version, mode, output) :-
     run("apt-get install -y make"),
     run(f"wget https://library.com/releases/library-v${version}.tar.gz && \
           tar xf library-v${version}.tar.gz && \
-          mv library-v${version}/ /library-build"),
+          mv library-v${version}/ /build"),
     workdir("/library-build"),
-    (mode = "development", run("make debug"), output = "/library-build/debug/";
-     mode = "production", run("make release"), output = "/library-build/release/").
+    (mode = "development", run("make debug"), output = "/build/debug/";
+     mode = "production", run("make release"), output = "/build/release/").
 
 % In development mode, use the build stage as the parent image,
 % and additionally install development tools (Pylint):
@@ -106,7 +107,7 @@ Modus can print the build tree of a given target that shows how the target image
     app("ubuntu:18.04", "1.2.5", "production")
     ╘══ dependencies("ubuntu:18.04", "1.2.5", "production")
         ╞══ from("python:3.7-alpine")
-        ├── build("ubuntu:18.04", "1.2.5", "production", "/library_build/release")::copy("/library_build/release", "/my_lib")
+        ├── build("ubuntu:18.04", "1.2.5", "production", "/build/release")::copy("/build/release", "/my_lib")
         │   ╞══ from("ubuntu:18.04")
         |   ├── install_python("ubuntu:18.04", "3.7")
         │   └╶╶ library_python("1.2.5", "3.7")
@@ -118,14 +119,14 @@ Modus can also build multiple images if the target contains a variable:
     app("ubuntu:18.04", "1.2.5", "production")
     ╘══ dependencies("ubuntu:18.04", "1.2.5", "production")
         ╞══ from("python:3.7-alpine")
-        ├── build("ubuntu:18.04", "1.2.5", "production", "/library_build/release")::copy("/library_build/release", "/my_lib")
+        ├── build("ubuntu:18.04", "1.2.5", "production", "/build/release")::copy("/build/release", "/my_lib")
         │   ╞══ from("ubuntu:18.04")
         |   ├── install_python("ubuntu:18.04", "3.7")
         │   └╶╶ library_python("1.2.5", "3.7")
         └╶╶ library_python("1.2.5", "3.7")
     app("ubuntu:18.04", "1.2.5", "development")
     ╘══ dependencies("ubuntu:18.04", "1.2.5", "development")
-        ╘══ build("ubuntu:18.04", "1.2.5", "development", "/library_build/debug")
+        ╘══ build("ubuntu:18.04", "1.2.5", "development", "/build/debug")
             ╞══ from("ubuntu:18.04")
             ├── install_python("ubuntu:18.04", "3.7")
             └╶╶ library_python("1.2.5", "3.7")
