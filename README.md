@@ -1,6 +1,10 @@
 # Modus
 
-Modus is a [Datalog](https://en.wikipedia.org/wiki/Datalog)-based [DSL](https://en.wikipedia.org/wiki/Domain-specific_language) for building Docker images. It supports complex build workflows for configurable, evolving software. In Modus, container images are identified as logical facts. For example, a container image with the app's version `1.2` built with the optimisation flag `-O2` on Ubuntu 20.04 can be identified as `app("1.2", "-O2", "ubuntu:20.04")`. Then, build instructions correspond to logical rules which define how new facts can be inferred from known facts. This enables lightweight [procedural abstraction](http://www.eecs.qmul.ac.uk/~mmh/AMCM048/abstraction/procedural.html), automatic dependency resolution and easy parallelisation.
+Modus is a [Datalog](https://en.wikipedia.org/wiki/Datalog)-based domain-specific language for building Docker images. It supports complex build workflows for configurable, evolving software. Modus is a declarative non-Turing-complete language that enables lightweight procedural abstraction, automatic dependency resolution and easy parallelisation.
+
+[Installation & Usage](http://modus-continens.com/installation-usage/) |
+[Language Reference](http://modus-continens.com/reference/) |
+[Examples](http://modus-continens.com/examples/)
 
 Comparison with other container build systems:
 
@@ -127,12 +131,3 @@ Modus can also build multiple images if the target contains a variable:
             └╶╶ library_python("1.2.5", "3.7")
 
 In these build trees, image relations are preceded with `══`, layer relations are preceeded with `──`, and logical relations are preceded with `╶╶`.
-
-## Documentation
-
-- [Installation](doc/installation.md)
-- [Tutorial](doc/tutorial.md)
-- [Language reference](doc/language-reference.md)
-- [Command-line tool](doc/command-line-tool.md)
-- Examples
-  - [Optimising image size](doc/example/optimising-image-size.md)
