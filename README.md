@@ -35,7 +35,7 @@ Modus is a dialect of Datalog with domain-specific extensions. A Dockerfile can 
 Let's consider a more complex example that showcases some features of Modus. Assume that we would like to containerise the application `app`. Suppose also that `app` depends on the library `library`, different versions of which depend on different versions of Python. We would like to have two build mode: "development" mode for development and testing on different versions of Linux, and "production" mode with a smaller image and better security using Alpine. The Modusfile below defines a parametrised build that (1) automatically resolves dependencies, and (2) supports both "development" and "production" modes without code duplication. 
 
 ```Prolog
-% A logical predicate that captures the relation between the library version and the required Python version:
+% A logical predicate that relates a library version to the required Python version:
 library_python(v, "3.6") :- semver_lt(v, "1.1.0").
 library_python(v, "3.7") :- semver_geq(v, "1.1.0"), semver_lt(v, "1.3.0-alpha").
 library_python(v, "3.8") :- semver_geq(v, "1.3.0-alpha").
@@ -61,7 +61,7 @@ install_python(image, python_version) :-
           apt-get update && \
           apt-get install -y python${python_version}").
 
-% An image predicate (aka paramtrised build stage) that downloads and compiles the library.
+% An image predicate (aka parameterised build stage) that downloads and compiles the library.
 build(image, lib_version, mode, output) :-
     library_python(lib_version, python_version),
     from(image),
