@@ -1,6 +1,6 @@
 # Modus
 
-Modus is a [Datalog](https://en.wikipedia.org/wiki/Datalog)-based domain-specific language for building Docker images. It supports complex build workflows for configurable, evolving software. Modus is a declarative non-Turing-complete language that enables lightweight procedural abstraction, automatic dependency resolution and easy parallelisation.
+Modus is a [Datalog](https://en.wikipedia.org/wiki/Datalog)-based domain-specific language for building Docker images. It supports complex build workflows for configurable, evolving software. Modus is a declarative non-Turing-complete language that enables code reuse, automatic dependency resolution and easy parallelisation.
 
 [Installation & Usage](http://modus-continens.com/installation-usage/) |
 [Language Reference](http://modus-continens.com/reference/) |
@@ -35,65 +35,63 @@ Modus is a dialect of Datalog with domain-specific extensions. A Dockerfile can 
 Let's consider a more complex example that showcases some features of Modus. Assume that we would like to containerise the application `app`. Suppose also that `app` depends on the library `library`, different versions of which depend on different versions of Python. We would like to have two build mode: "development" mode for development and testing on different versions of Linux, and "production" mode with a smaller image and better security using Alpine. The Modusfile below defines a parametrised build that (1) automatically resolves dependencies, and (2) supports both "development" and "production" modes without code duplication. 
 
 ```Prolog
-% Relation between the library version and the required Python version:
-library_python(v, "3.6") :- version_lt(v, "1.1.0").
-library_python(v, "3.7") :- version_geq(v, "1.1.0"), version_lt(v, "1.3.0-alpha").
-library_python(v, "3.8") :- version_geq(v, "1.3.0-alpha").
+% A logical predicate that captures the relation between the library version and the required Python version:
+library_python(v, "3.6") :- semver_lt(v, "1.1.0").
+library_python(v, "3.7") :- semver_geq(v, "1.1.0"), semver_lt(v, "1.3.0-alpha").
+library_python(v, "3.8") :- semver_geq(v, "1.3.0-alpha").
 
-% Python installation on different distros:
-install_python(image, python) :-
+% A layer predicate (aka user-defined command) that installs Python on different distros:
+install_python(image, python_version) :-
   	image_repo(image, "fedora"),
-	run(f"dnf install python${python}").
-install_python(image, python) :-
+	run(f"dnf install python${python_version}").
+install_python(image, python_version) :-
   	image_repo(image, "ubuntu"),
 	image_tag(image, tag),
-	version_geq(tag, "16.04"),
+	semver_geq(tag, "16.04"),
   	arg("DEBIAN_FRONTEND", "noninteractive"),
-	run(f"apt-get install -y python${python}").
-install_python(image, python) :-
+	run(f"apt-get install -y python${python_version}").
+install_python(image, python_version) :-
   	image_repo(image, "ubuntu"),
 	image_tag(image, tag),
-  	version_lt(tag, "16.04"),
-        version_geq(python, "3.7"),
+  	semver_lt(tag, "16.04"),
+        semver_geq(python_version, "3.7"),
   	arg("DEBIAN_FRONTEND", "noninteractive"),
 	run(f"apt-get install -y software-properties-common && \
               add-apt-repository ppa:deadsnakes/ppa && \
               apt-get update && \
-              apt-get install -y python${python}").
+              apt-get install -y python${python_version}").
 
-% The build stage that downloads and compiles the library.
-% Python's version and the make target are resolved based
-% on the library version and the build mode:
-build(image, version, mode, output) :-
-    library_python(version, python),
+% An image predicate (aka paramtrised build stage) that downloads and compiles the library.
+build(image, lib_version, mode, output) :-
+    library_python(lib_version, python_version),
     from(image),
     install_python(image, version),
     arg("DEBIAN_FRONTEND", "noninteractive"),
     run("apt-get install -y make"),
-    run(f"wget https://library.com/releases/library-v${version}.tar.gz && \
-          tar xf library-v${version}.tar.gz && \
-          mv library-v${version}/ /build"),
+    run(f"wget https://library.com/releases/library-v${lib_version}.tar.gz && \
+          tar xf library-v${lib_version}.tar.gz && \
+          mv library-v${lib_version}/ /build"),
     workdir("/build"),
     (mode = "development", run("make debug"), output = "/build/debug/";
      mode = "production", run("make release"), output = "/build/release/").
 
-% In development mode, use the build stage as the parent image,
-% and additionally install development tools (Pylint):
-dependencies(image, version, "development") :-
-    build(image, version, "development", output),
+% An image predicate for the development mode that uses the build stage
+% as the parent image, and installs development tools (Pylint):
+dependencies(image, lib_version, "development") :-
+    build(image, lib_version, "development", output),
     run(f"cp ${output} /my_lib"),
     run("pip install pylint").
 
-% In production mode, use Alpine as the parent image,
-% and copy compiled binaries from the build stage:
-dependencies(image, version, "production") :-
-    library_python(version, python),
-    from(f"python:${python}-alpine"),
-    build(image, version, "production", output)::copy(output, "/my_lib").
+% An image predicate for the production mode that uses Alpine 
+% as the parent image, and copies compiled binaries from the build stage:
+dependencies(image, lib_version, "production") :-
+    library_python(lib_version, python_version),
+    from(f"python:${python_version}-alpine"),
+    build(image, lib_version, "production", output)::copy(output, "/my_lib").
 
-% Copy app's source code to the appropriate parent image:
-app(image, version, mode) :-
-    dependencies(image, version, mode),
+% An image predicate that copies app's source code to the appropriate parent image:
+app(image, lib_version, mode) :-
+    dependencies(image, lib_version, mode),
     copy(".", "/my_app").
 ```
 
@@ -131,4 +129,4 @@ Modus can also build multiple images if the target contains a variable:
             ├── install_python("ubuntu:18.04", "3.7")
             └╶╶ library_python("1.2.5", "3.7")
 
-In these build trees, image relations are preceded with `══`, layer relations are preceeded with `──`, and logical relations are preceded with `╶╶`.
+In the build trees, image predicates are preceded with `══`, layer predicates are preceeded with `──`, and logical predicates are preceded with `╶╶`.
