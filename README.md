@@ -42,24 +42,24 @@ library_python(v, "3.8") :- semver_geq(v, "1.3.0-alpha").
 
 % A layer predicate (aka user-defined command) that installs Python on different distros:
 install_python(image, python_version) :-
-  	image_repo(image, "fedora"),
-	run(f"dnf install python${python_version}").
+    image_repo(image, "fedora"),
+    run(f"dnf install python${python_version}").
 install_python(image, python_version) :-
-  	image_repo(image, "ubuntu"),
-	image_tag(image, tag),
-	semver_geq(tag, "16.04"),
-  	arg("DEBIAN_FRONTEND", "noninteractive"),
-	run(f"apt-get install -y python${python_version}").
+    image_repo(image, "ubuntu"),
+    image_tag(image, tag),
+    semver_geq(tag, "16.04"),
+    arg("DEBIAN_FRONTEND", "noninteractive"),
+    run(f"apt-get install -y python${python_version}").
 install_python(image, python_version) :-
-  	image_repo(image, "ubuntu"),
-	image_tag(image, tag),
-  	semver_lt(tag, "16.04"),
-        semver_geq(python_version, "3.7"),
-  	arg("DEBIAN_FRONTEND", "noninteractive"),
-	run(f"apt-get install -y software-properties-common && \
-              add-apt-repository ppa:deadsnakes/ppa && \
-              apt-get update && \
-              apt-get install -y python${python_version}").
+    image_repo(image, "ubuntu"),
+    image_tag(image, tag),
+    semver_lt(tag, "16.04"),
+    semver_geq(python_version, "3.7"),
+    arg("DEBIAN_FRONTEND", "noninteractive"),
+    run(f"apt-get install -y software-properties-common && \
+          add-apt-repository ppa:deadsnakes/ppa && \
+          apt-get update && \
+          apt-get install -y python${python_version}").
 
 % An image predicate (aka paramtrised build stage) that downloads and compiles the library.
 build(image, lib_version, mode, output) :-
