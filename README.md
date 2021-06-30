@@ -63,9 +63,9 @@ install_python(image, python_version) :-
 
 % An image predicate (aka parameterised build stage) that downloads and compiles the library.
 build(image, lib_version, mode, output) :-
-    library_python(lib_version, python_version),
     from(image),
-    install_python(image, version),
+    library_python(lib_version, python_version),
+    install_python(image, python_version),
     arg("DEBIAN_FRONTEND", "noninteractive"),
     run("apt-get install -y make"),
     run(f"wget https://library.com/releases/library-v${lib_version}.tar.gz && \
