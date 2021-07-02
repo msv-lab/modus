@@ -107,7 +107,7 @@ Modus can print the build tree of a given target that shows how the target image
         ╞══ from("python:3.7-alpine")
         ├── build("ubuntu:18.04", "1.2.5", "production", "/build/release")::copy("/build/release", "/my_lib")
         │   ╞══ from("ubuntu:18.04")
-        |   ├── install_python("ubuntu:18.04", "3.7")
+        │   ├── install_python("ubuntu:18.04", "3.7")
         │   └╶╶ library_python("1.2.5", "3.7")
         └╶╶ library_python("1.2.5", "3.7")
 
@@ -119,7 +119,7 @@ Modus can also build multiple images if the target contains a variable:
         ╞══ from("python:3.7-alpine")
         ├── build("ubuntu:18.04", "1.2.5", "production", "/build/release")::copy("/build/release", "/my_lib")
         │   ╞══ from("ubuntu:18.04")
-        |   ├── install_python("ubuntu:18.04", "3.7")
+        │   ├── install_python("ubuntu:18.04", "3.7")
         │   └╶╶ library_python("1.2.5", "3.7")
         └╶╶ library_python("1.2.5", "3.7")
     app("ubuntu:18.04", "1.2.5", "development")
