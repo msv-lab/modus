@@ -48,32 +48,30 @@ install_python(image, python_version) :-
     image_repo(image, "ubuntu"),
     image_tag(image, tag),
     semver_geq(tag, "16.04"),
-    arg("DEBIAN_FRONTEND", "noninteractive"),
-    run(f"apt-get install -y python${python_version}").
+    run(f"apt-get install -y python${python_version}")
+      ::arg("DEBIAN_FRONTEND", "noninteractive").
 install_python(image, python_version) :-
     image_repo(image, "ubuntu"),
     image_tag(image, tag),
     semver_lt(tag, "16.04"),
     semver_geq(python_version, "3.7"),
-    arg("DEBIAN_FRONTEND", "noninteractive"),
     run(f"apt-get install -y software-properties-common && \
           add-apt-repository ppa:deadsnakes/ppa && \
           apt-get update && \
-          apt-get install -y python${python_version}").
+          apt-get install -y python${python_version}")
+      ::arg("DEBIAN_FRONTEND", "noninteractive").
 
 % An image predicate (aka parameterised build stage) that downloads and compiles the library.
 build(image, lib_version, mode, output) :-
     from(image),
     library_python(lib_version, python_version),
     install_python(image, python_version),
-    arg("DEBIAN_FRONTEND", "noninteractive"),
-    run("apt-get install -y make"),
+    run("apt-get install -y make")::arg("DEBIAN_FRONTEND", "noninteractive"),
     run(f"wget https://library.com/releases/library-v${lib_version}.tar.gz && \
           tar xf library-v${lib_version}.tar.gz && \
           mv library-v${lib_version}/ /build"),
-    workdir("/build"),
-    (mode = "development", run("make debug"), output = "/build/debug/";
-     mode = "production", run("make release"), output = "/build/release/").
+    (mode = "development", run("cd /build && make debug"), output = "/build/debug/";
+     mode = "production", run("cd /build && make release"), output = "/build/release/").
 
 % An image predicate for the development mode that uses the build stage
 % as the parent image, and installs development tools (Pylint):
