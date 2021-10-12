@@ -15,20 +15,26 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{collections::{HashMap, HashSet}, hash::Hash};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+};
 
 use crate::logic::{self, Atom, Clause, Literal, Signature, Term};
 
-
 /// infer image predicates, i.e. those that transitively depend on image/1
 /// check that image predicates depend on image/1 in each disjunct
-pub fn check_image_predicates<C, V>(clauses: &Vec<Clause<C,V>>) -> Result<HashSet<Signature>, HashSet<Signature>> {
+pub fn check_image_predicates<C, V>(
+    clauses: &Vec<Clause<C, V>>,
+) -> Result<HashSet<Signature>, HashSet<Signature>> {
     todo!()
 }
 
 // infer grounded variables, check if grounded variables are grounded in each rule
-//TODO: not sure what to do if there are variables inside compound terms 
-pub fn check_grounded_variables<C, V>(clauses: &Vec<Clause<C,V>>) -> Result<HashMap<Signature, Vec<bool>>, HashSet<Signature>> 
+//TODO: not sure what to do if there are variables inside compound terms
+pub fn check_grounded_variables<C, V>(
+    clauses: &Vec<Clause<C, V>>,
+) -> Result<HashMap<Signature, Vec<bool>>, HashSet<Signature>>
 where
     C: Clone,
     V: Clone + Eq + Hash,
@@ -41,13 +47,25 @@ where
         C: Clone,
         V: Clone + Eq + Hash,
     {
-        let body_vars = c.body.iter().map(|r| r.variables()).reduce(|mut l, r| { l.extend(r); l }).unwrap_or_default();
-        c.head.args.iter().map(|t| match t {
-            Term::Variable(v) => body_vars.contains(v),
-            _ => true
-        }).collect()
+        let body_vars = c
+            .body
+            .iter()
+            .map(|r| r.variables())
+            .reduce(|mut l, r| {
+                l.extend(r);
+                l
+            })
+            .unwrap_or_default();
+        c.head
+            .args
+            .iter()
+            .map(|t| match t {
+                Term::Variable(v) => body_vars.contains(v),
+                _ => true,
+            })
+            .collect()
     }
-    
+
     let signatures: HashSet<Signature> = clauses.iter().map(|c| c.head.signature()).collect();
 
     for c in clauses {
@@ -98,5 +116,4 @@ mod tests {
         let a_sig = Signature(Atom("a".into()), 2);
         assert!(result.unwrap_err().contains(&a_sig));
     }
-
 }

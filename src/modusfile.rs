@@ -15,21 +15,18 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::str;
-use std::fmt;
 use fp_core::compose::compose_two;
+use std::fmt;
+use std::str;
 
-use crate::{dockerfile, transpiler};
-use dockerfile::{
-    Copy, Run, Env, Workdir
-};
 use crate::logic;
-
+use crate::{dockerfile, transpiler};
+use dockerfile::{Copy, Env, Run, Workdir};
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Constant {
     String(String),
-    Integer(u32)  //TODO: arbitrary-precision arithmetic?
+    Integer(u32), //TODO: arbitrary-precision arithmetic?
 }
 
 pub type Rule = logic::Clause<Constant, transpiler::Variable>;
@@ -42,7 +39,7 @@ pub enum Instruction {
     Run(Run),
     Env(Env),
     Copy(Copy),
-    Workdir(Workdir)
+    Workdir(Workdir),
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -56,7 +53,6 @@ pub struct Version {
     pre_release: String,
     build: String,
 }
-
 
 impl str::FromStr for Modusfile {
     type Err = String;
@@ -95,7 +91,7 @@ impl fmt::Display for Constant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Constant::String(s) => write!(f, "i\"{}\"", s),
-            Constant::Integer(i) => write!(f, "{}", i)
+            Constant::Integer(i) => write!(f, "{}", i),
         }
     }
 }
@@ -107,15 +103,14 @@ mod parser {
     use dockerfile::Image;
 
     use nom::{
-        IResult,
         branch::alt,
-        bytes::complete::{tag_no_case, tag},
-        character::complete::{line_ending, none_of, alpha1, alphanumeric1},
+        bytes::complete::{tag, tag_no_case},
+        character::complete::{alpha1, alphanumeric1, line_ending, none_of},
         combinator::{eof, map, peek, recognize},
-        multi::{many0},
-        sequence::{pair, terminated, preceded, delimited}
+        multi::many0,
+        sequence::{delimited, pair, preceded, terminated},
+        IResult,
     };
-   
 
     //TODO: support proper string literals
     fn string_content(i: &str) -> IResult<&str, &str> {
@@ -128,48 +123,74 @@ mod parser {
 
     pub fn modus_const(i: &str) -> IResult<&str, Constant> {
         alt((
-            map(delimited(tag("\""), string_content, tag("\"")),
-                |s| Constant::String(s.into())),
-            map(image_literal,
-                |s| Constant::String(s.to_string())) //TODO: Need to construct a compound object
+            map(delimited(tag("\""), string_content, tag("\"")), |s| {
+                Constant::String(s.into())
+            }),
+            map(image_literal, |s| Constant::String(s.to_string())), //TODO: Need to construct a compound object
         ))(i)
     }
 
     //TODO: I need to think more carefully how to connect this to ARGs
     pub fn variable_identifier(i: &str) -> IResult<&str, &str> {
-        recognize(
-        pair(
-            alpha1,
-            many0(alt((alphanumeric1, tag("_"))))
-        )
-        )(i)
+        recognize(pair(alpha1, many0(alt((alphanumeric1, tag("_"))))))(i)
     }
 
     pub fn modus_var(i: &str) -> IResult<&str, transpiler::Variable> {
-        map(variable_identifier, compose!(String::from, transpiler::Variable::User))(i)
+        map(
+            variable_identifier,
+            compose!(String::from, transpiler::Variable::User),
+        )(i)
     }
 
     pub fn rule_instr(i: &str) -> IResult<&str, Rule> {
-        preceded(pair(tag_no_case("RULE"), dockerfile::parser::mandatory_space),
-                logic::parser::clause(modus_const, modus_var))(i)
+        preceded(
+            pair(tag_no_case("RULE"), dockerfile::parser::mandatory_space),
+            logic::parser::clause(modus_const, modus_var),
+        )(i)
     }
 
     //TODO: a parsing rule for an instruction should be extracted into a combinator
     fn modus_instruction(i: &str) -> IResult<&str, Instruction> {
         alt((
-            map(terminated(rule_instr, alt((line_ending, peek(eof)))), Instruction::Rule),
-            map(terminated(dockerfile::parser::copy_instr, alt((line_ending, peek(eof)))), Instruction::Copy),
-            map(terminated(dockerfile::parser::run_instr, alt((line_ending, peek(eof)))), Instruction::Run),
-            map(terminated(dockerfile::parser::env_instr, alt((line_ending, peek(eof)))), Instruction::Env),
-            map(terminated(dockerfile::parser::workdir_instr, alt((line_ending, peek(eof)))), Instruction::Workdir)
+            map(
+                terminated(rule_instr, alt((line_ending, peek(eof)))),
+                Instruction::Rule,
+            ),
+            map(
+                terminated(
+                    dockerfile::parser::copy_instr,
+                    alt((line_ending, peek(eof))),
+                ),
+                Instruction::Copy,
+            ),
+            map(
+                terminated(dockerfile::parser::run_instr, alt((line_ending, peek(eof)))),
+                Instruction::Run,
+            ),
+            map(
+                terminated(dockerfile::parser::env_instr, alt((line_ending, peek(eof)))),
+                Instruction::Env,
+            ),
+            map(
+                terminated(
+                    dockerfile::parser::workdir_instr,
+                    alt((line_ending, peek(eof))),
+                ),
+                Instruction::Workdir,
+            ),
         ))(i)
     }
 
     pub fn modusfile(i: &str) -> IResult<&str, Modusfile> {
-        map(terminated(many0(preceded(many0(dockerfile::parser::ignored_line), modus_instruction)),
-                    terminated(many0(dockerfile::parser::ignored_line), eof)), Modusfile)(i)
+        map(
+            terminated(
+                many0(preceded(
+                    many0(dockerfile::parser::ignored_line),
+                    modus_instruction,
+                )),
+                terminated(many0(dockerfile::parser::ignored_line), eof),
+            ),
+            Modusfile,
+        )(i)
     }
-
 }
-
-
