@@ -52,7 +52,7 @@ impl sld::Variable<Constant, Variable> for Variable {
     }
 }
 
-pub fn transpile(mf: Modusfile, query: Option<modusfile::Literal>) -> Dockerfile<ResolvedParent> {
+pub fn transpile(mf: Modusfile, query: modusfile::Literal) -> Dockerfile<ResolvedParent> {
     let mut rules: Vec<Clause<Constant, Variable>> = Vec::new();
     let mut instructions: Vec<Vec<modusfile::Instruction>> = Vec::new();
 
@@ -85,7 +85,7 @@ pub fn transpile(mf: Modusfile, query: Option<modusfile::Literal>) -> Dockerfile
     }
 
     let arbitrary_constant = 20;
-    let goal = &vec![query.unwrap()];
+    let goal = &vec![query];
     let result = sld::sld(&rules, &goal, arbitrary_constant);
     if result.is_none() {
         panic!("failed to resolve parameters")

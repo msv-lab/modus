@@ -19,7 +19,6 @@ mod dockerfile;
 mod logic;
 mod wellformed;
 mod modusfile;
-mod typing;
 mod unification;
 mod sld;
 mod transpiler;
@@ -42,35 +41,38 @@ use modusfile::Modusfile;
 
 
 fn main() {
-    let matches = App::new("modus-transpile")
+    let matches = App::new("modus")
         .version(crate_version!())
-        .about("Converts Modusfile to Dockerfile")
-        .arg(Arg::with_name("FILE")
-            .required(true)
-            .help("Sets the input Modusfile")
-            .index(1))
-        .arg(Arg::with_name("query")
-            .short("q")
-            .long("query")
-            .value_name("TARGET")
-            .help("Specifies the target image")
-            .takes_value(true))
-        .arg(Arg::with_name("proof")
-            .short("p")
-            .long("proof")
-            .help("Prints the proof tree of the target image"))
-        .arg(Arg::with_name("output")
-            .short("o")
-            .value_name("FILE")
-            .long("output")
-            .help("Sets the output Dockerfile")
-            .takes_value(true))
+        .about("Datalog-based container build system")
+        .subcommand(App::new("transpile")
+                    .arg(Arg::with_name("FILE")
+                         .required(true)
+                         .help("Sets the input Modusfile")
+                         .index(1))
+                    .arg(Arg::with_name("QUERY")
+                         .required(true)
+                         .help("Specifies the build target(s)")
+                         .index(2))
+                    .arg(Arg::with_name("proof")
+                         .short("p")
+                         .long("proof")
+                         .help("Prints the proof tree of the target image"))
+                    .arg(Arg::with_name("output")
+                         .short("o")
+                         .value_name("FILE")
+                         .long("output")
+                         .help("Sets the output Dockerfile")
+                         .takes_value(true)))
         .get_matches();
 
-        let input_file = matches.value_of("FILE").unwrap();
-    let content = fs::read_to_string(input_file).unwrap();
-    let mf: Modusfile = content.parse().unwrap();
-    let query: Option<modusfile::Literal> = matches.value_of("query").map(|s| s.parse().unwrap());
+    let input_file = matches.value_of("FILE").unwrap();
+    let query: modusfile::Literal =
+        matches.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
+
+    let file_content = fs::read_to_string(input_file).unwrap();
+    let mf: Modusfile = file_content.parse().unwrap();
+
     let df: ResolvedDockerfile = transpiler::transpile(mf, query);
+
     println!("{}", df);
 }
