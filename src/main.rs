@@ -65,14 +65,17 @@ fn main() {
                          .takes_value(true)))
         .get_matches();
 
-    let input_file = matches.value_of("FILE").unwrap();
-    let query: modusfile::Literal =
-        matches.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
+    if let Some(ref matches) = matches.subcommand_matches("transpile") {
+        let input_file = matches.value_of("FILE").unwrap();
+        let query: modusfile::Literal =
+            matches.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
 
-    let file_content = fs::read_to_string(input_file).unwrap();
-    let mf: Modusfile = file_content.parse().unwrap();
+        let file_content = fs::read_to_string(input_file).unwrap();
+        let mf: Modusfile = file_content.parse().unwrap();
 
-    let df: ResolvedDockerfile = transpiler::transpile(mf, query);
+        let df: ResolvedDockerfile = transpiler::transpile(mf, query);
 
-    println!("{}", df);
+        println!("{}", df);
+    }
+
 }
