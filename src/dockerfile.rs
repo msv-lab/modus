@@ -15,8 +15,8 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::str;
 use std::fmt;
+use std::str;
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Image {
@@ -29,7 +29,7 @@ pub struct Image {
 #[derive(Clone, PartialEq, Debug)]
 pub enum ResolvedParent {
     Image(Image),
-    Stage(String)
+    Stage(String),
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -38,7 +38,7 @@ pub struct UnresolvedParent(String);
 #[derive(Clone, PartialEq, Debug)]
 pub struct From<P> {
     pub parent: P,
-    pub alias: Option<String>
+    pub alias: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -86,10 +86,10 @@ pub type ResolvedDockerfile = Dockerfile<ResolvedParent>;
 impl Image {
     pub fn from_repo_tag(repo: String, tag: String) -> Image {
         Image {
-            registry: String::new(), 
+            registry: String::new(),
             namespace: String::new(),
             repo,
-            tag
+            tag,
         }
     }
 }
@@ -122,14 +122,14 @@ impl str::FromStr for Image {
     }
 }
 
-impl<P> fmt::Display for From<P> 
+impl<P> fmt::Display for From<P>
 where
     P: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.alias {
             Some(a) => write!(f, "{} AS {}", self.parent, a),
-            None => write!(f, "{}", self.parent)
+            None => write!(f, "{}", self.parent),
         }
     }
 }
@@ -190,7 +190,7 @@ impl str::FromStr for Dockerfile<UnresolvedParent> {
     }
 }
 
-impl<T> fmt::Display for Dockerfile<T> 
+impl<T> fmt::Display for Dockerfile<T>
 where
     T: fmt::Display,
 {
@@ -213,68 +213,54 @@ pub mod parser {
     use super::*;
 
     use nom::{
-        IResult,
         branch::alt,
         bytes::complete::{is_not, tag, tag_no_case},
-        character::complete::{
-            char,
-            alpha1,
-            alphanumeric1,
-            space0,
-            space1,
-            line_ending,
-            one_of
-        },
+        character::complete::{alpha1, alphanumeric1, char, line_ending, one_of, space0, space1},
         combinator::{eof, map, opt, peek, recognize, value},
         multi::{many0, many1, separated_list1},
-        sequence::{pair, delimited, terminated, preceded, tuple}
+        sequence::{delimited, pair, preceded, terminated, tuple},
+        IResult,
     };
 
     //TODO: need to double-check
     pub fn alias_identifier(i: &str) -> IResult<&str, &str> {
-        recognize(
-        pair(
+        recognize(pair(
             alpha1,
-            many0(alt((alphanumeric1, tag("_"), tag("-"))))
-        )
-        )(i)
+            many0(alt((alphanumeric1, tag("_"), tag("-")))),
+        ))(i)
     }
 
     //TODO: need to double-check
     pub fn repo_identifier(i: &str) -> IResult<&str, &str> {
-        recognize(
-        pair(
+        recognize(pair(
             alt((alphanumeric1, tag("_"))),
-            many0(alt((alphanumeric1, tag("_"), tag("-"), tag("/"))))
-        )
-        )(i)
+            many0(alt((alphanumeric1, tag("_"), tag("-"), tag("/")))),
+        ))(i)
     }
 
     //TODO: need to double-check
     pub fn tag_identifier(i: &str) -> IResult<&str, &str> {
-        recognize(
-            many0(alt((alphanumeric1, tag("_"), tag("-"), tag("."))))
-        )(i)
+        recognize(many0(alt((alphanumeric1, tag("_"), tag("-"), tag(".")))))(i)
     }
 
     fn line_continuation(i: &str) -> IResult<&str, ()> {
         value(
             (), // Output is thrown away.
-            tuple((char('\\'), space0, line_ending))
+            tuple((char('\\'), space0, line_ending)),
         )(i)
     }
 
     fn empty_line(i: &str) -> IResult<&str, ()> {
         value(
             (), // Output is thrown away.
-            alt((preceded(space0, line_ending), preceded(space1, peek(eof))))
+            alt((preceded(space0, line_ending), preceded(space1, peek(eof)))),
         )(i)
     }
 
     pub fn ignored_line(i: &str) -> IResult<&str, ()> {
         value(
             (), // Output is thrown away.
-            alt((comment_line, empty_line))
+            alt((comment_line, empty_line)),
         )(i)
     }
 
@@ -282,28 +268,28 @@ pub mod parser {
     fn continuation_with_comments(i: &str) -> IResult<&str, ()> {
         value(
             (), // Output is thrown away.
-            terminated(line_continuation, many0(comment_line))
+            terminated(line_continuation, many0(comment_line)),
         )(i)
     }
 
     fn space(i: &str) -> IResult<&str, ()> {
         value(
             (), // Output is thrown away.
-            one_of(" \t")
+            one_of(" \t"),
         )(i)
     }
 
     fn optional_space(i: &str) -> IResult<&str, ()> {
         value(
             (), // Output is thrown away.
-            many0(alt((space, continuation_with_comments)))
+            many0(alt((space, continuation_with_comments))),
         )(i)
     }
 
     pub fn mandatory_space(i: &str) -> IResult<&str, ()> {
         value(
             (), // Output is thrown away.
-            delimited(many0(continuation_with_comments), space, optional_space)
+            delimited(many0(continuation_with_comments), space, optional_space),
         )(i)
     }
 
@@ -314,10 +300,9 @@ pub mod parser {
     fn comment_line(i: &str) -> IResult<&str, ()> {
         value(
             (), // Output is thrown away.
-            delimited(space0, comment, alt((line_ending, peek(eof))))
+            delimited(space0, comment, alt((line_ending, peek(eof)))),
         )(i)
     }
-
 
     //TODO: I need to test alias parsing
 
@@ -326,17 +311,32 @@ pub mod parser {
     }
 
     fn from_content(i: &str) -> IResult<&str, From<UnresolvedParent>> {
-        map(pair(
-            parent,
-            opt(map(preceded(delimited(optional_space, tag("AS"), space), alias_identifier), String::from))
+        map(
+            pair(
+                parent,
+                opt(map(
+                    preceded(
+                        delimited(optional_space, tag("AS"), space),
+                        alias_identifier,
+                    ),
+                    String::from,
+                )),
             ),
-            |(parent, alias)| From{ parent, alias }
+            |(parent, alias)| From { parent, alias },
         )(i)
     }
 
     pub fn multiline_string(i: &str) -> IResult<&str, String> {
-        let one_line = map(many1(alt((is_not("\\\n\r"), recognize(tuple((char('\\'), many0(space), is_not(" \n\r"))))))), |s| s.join(""));
-        let body = map(separated_list1(many1(line_continuation), one_line), |s| s.join(""));
+        let one_line = map(
+            many1(alt((
+                is_not("\\\n\r"),
+                recognize(tuple((char('\\'), many0(space), is_not(" \n\r")))),
+            ))),
+            |s| s.join(""),
+        );
+        let body = map(separated_list1(many1(line_continuation), one_line), |s| {
+            s.join("")
+        });
         preceded(many0(line_continuation), body)(i)
     }
 
@@ -371,36 +371,64 @@ pub mod parser {
 
     fn docker_instruction(i: &str) -> IResult<&str, Instruction<UnresolvedParent>> {
         alt((
-            map(terminated(from_instr, alt((line_ending, peek(eof)))), Instruction::From),
-            map(terminated(copy_instr, alt((line_ending, peek(eof)))), Instruction::Copy),
-            map(terminated(arg_instr, alt((line_ending, peek(eof)))), Instruction::Arg),
-            map(terminated(run_instr, alt((line_ending, peek(eof)))), Instruction::Run),
-            map(terminated(env_instr, alt((line_ending, peek(eof)))), Instruction::Env),
-            map(terminated(workdir_instr, alt((line_ending, peek(eof)))), Instruction::Workdir)
+            map(
+                terminated(from_instr, alt((line_ending, peek(eof)))),
+                Instruction::From,
+            ),
+            map(
+                terminated(copy_instr, alt((line_ending, peek(eof)))),
+                Instruction::Copy,
+            ),
+            map(
+                terminated(arg_instr, alt((line_ending, peek(eof)))),
+                Instruction::Arg,
+            ),
+            map(
+                terminated(run_instr, alt((line_ending, peek(eof)))),
+                Instruction::Run,
+            ),
+            map(
+                terminated(env_instr, alt((line_ending, peek(eof)))),
+                Instruction::Env,
+            ),
+            map(
+                terminated(workdir_instr, alt((line_ending, peek(eof)))),
+                Instruction::Workdir,
+            ),
         ))(i)
     }
 
     pub fn dockerfile(i: &str) -> IResult<&str, Dockerfile<UnresolvedParent>> {
-        map(terminated(many0(preceded(many0(ignored_line), docker_instruction)),
-                    terminated(many0(ignored_line), eof)),
-            Dockerfile)(i)
+        map(
+            terminated(
+                many0(preceded(many0(ignored_line), docker_instruction)),
+                terminated(many0(ignored_line), eof),
+            ),
+            Dockerfile,
+        )(i)
     }
- 
+
     pub fn host_identifier(i: &str) -> IResult<&str, &str> {
-        recognize(
-            delimited(
-                many0(alt((alphanumeric1, tag("_"), tag("-")))),
-                tag("."), //needs to be at least one dot
-                many0(alt((alphanumeric1, tag("_"), tag("-"), tag("."))))
+        recognize(delimited(
+            many0(alt((alphanumeric1, tag("_"), tag("-")))),
+            tag("."), //needs to be at least one dot
+            many0(alt((alphanumeric1, tag("_"), tag("-"), tag(".")))),
         ))(i)
     }
-    
+
     //FIXME: this is very approximate
     pub fn image(i: &str) -> IResult<&str, Image> {
-        map(pair(opt(terminated(host_identifier, tag("/"))),
-                pair(opt(recognize(many1(terminated(many0(alt((alphanumeric1, tag("_"), tag("-")))), tag("/"))))),
-                     pair(repo_identifier,
-                          opt(preceded(tag(":"), tag_identifier))))),
+        map(
+            pair(
+                opt(terminated(host_identifier, tag("/"))),
+                pair(
+                    opt(recognize(many1(terminated(
+                        many0(alt((alphanumeric1, tag("_"), tag("-")))),
+                        tag("/"),
+                    )))),
+                    pair(repo_identifier, opt(preceded(tag(":"), tag_identifier))),
+                ),
+            ),
             |(registry, (namespace, (repo, tag)))| Image {
                 registry: registry.unwrap_or("").into(),
                 namespace: match namespace {
@@ -408,27 +436,32 @@ pub mod parser {
                         let mut n = s.to_string();
                         n.pop();
                         n
-                    },
-                    None => String::new()
+                    }
+                    None => String::new(),
                 },
-                repo: repo.into(), 
-                tag: tag.unwrap_or("").into()
-            }
+                repo: repo.into(),
+                tag: tag.unwrap_or("").into(),
+            },
         )(i)
     }
-      
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     fn from_ubuntu_latest() -> From<UnresolvedParent> {
-        From{ parent: UnresolvedParent("ubuntu".into()), alias: None }
+        From {
+            parent: UnresolvedParent("ubuntu".into()),
+            alias: None,
+        }
     }
 
     fn from_ubuntu_20_04() -> From<UnresolvedParent> {
-        From{ parent: UnresolvedParent("ubuntu:20.04".into()), alias: None }
+        From {
+            parent: UnresolvedParent("ubuntu:20.04".into()),
+            alias: None,
+        }
     }
 
     #[test]
@@ -517,10 +550,13 @@ mod tests {
         let i = Image {
             registry: "registry.access.redhat.com".into(),
             namespace: "rhel7".into(),
-            repo: "rhel".into(), 
-            tag: "7.3-53".into()
+            repo: "rhel".into(),
+            tag: "7.3-53".into(),
         };
-        assert_eq!(Ok(("", i)), parser::image("registry.access.redhat.com/rhel7/rhel:7.3-53"));
+        assert_eq!(
+            Ok(("", i)),
+            parser::image("registry.access.redhat.com/rhel7/rhel:7.3-53")
+        );
     }
 
     #[test]
@@ -528,10 +564,9 @@ mod tests {
         let i = Image {
             registry: "".into(),
             namespace: "a/b/c".into(),
-            repo: "r".into(), 
-            tag: "".into()
+            repo: "r".into(),
+            tag: "".into(),
         };
         assert_eq!(Ok(("", i)), parser::image("a/b/c/r"));
     }
-
 }

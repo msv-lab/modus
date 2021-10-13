@@ -15,15 +15,23 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{collections::HashMap, sync::atomic::{AtomicU32, Ordering}, thread::panicking};
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicU32, Ordering},
+    thread::panicking,
+};
 
 use nom::map;
 
-use crate::{dockerfile, dockerfile::{
-        Dockerfile, ResolvedParent,
-    }, logic::{
-        Clause, Literal, Term, Atom
-    }, modusfile, modusfile::{Constant, Modusfile}, sld, unification::{Rename, Substitute, Substitution}};
+use crate::{
+    dockerfile,
+    dockerfile::{Dockerfile, ResolvedParent},
+    logic::{Atom, Clause, Literal, Term},
+    modusfile,
+    modusfile::{Constant, Modusfile},
+    sld,
+    unification::{Rename, Substitute, Substitution},
+};
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Variable {
@@ -57,9 +65,13 @@ pub fn transpile(mf: Modusfile, query: modusfile::Literal) -> Dockerfile<Resolve
     let mut instructions: Vec<Vec<modusfile::Instruction>> = Vec::new();
 
     //TODO: image/1 should be builtin
-    rules.push(Clause { head: Literal { atom: Atom("image".into()), 
-                                        args: vec![ Term::Variable(Variable::User("X".into()))]}, 
-                        body: vec![] });
+    rules.push(Clause {
+        head: Literal {
+            atom: Atom("image".into()),
+            args: vec![Term::Variable(Variable::User("X".into()))],
+        },
+        body: vec![],
+    });
     instructions.push(vec![]);
 
     let mut last_rule: Option<Clause<Constant, Variable>> = None;
@@ -73,7 +85,7 @@ pub fn transpile(mf: Modusfile, query: modusfile::Literal) -> Dockerfile<Resolve
                 }
                 last_rule = Some(r.clone());
                 last_stage = Vec::new();
-            },
+            }
             _ => {
                 last_stage.push(instr.clone());
             }
@@ -97,76 +109,94 @@ pub fn transpile(mf: Modusfile, query: modusfile::Literal) -> Dockerfile<Resolve
 
 fn modus_to_docker(instr: &modusfile::Instruction) -> dockerfile::Instruction<ResolvedParent> {
     match instr {
-        modusfile::Instruction::Copy(c) =>
-            dockerfile::Instruction::Copy(c.clone()),
-        modusfile::Instruction::Run(r) =>
-            dockerfile::Instruction::Run(r.clone()),
-        modusfile::Instruction::Env(e) =>
-            dockerfile::Instruction::Env(e.clone()),
-        modusfile::Instruction::Workdir(e) =>
-            dockerfile::Instruction::Workdir(e.clone()),
-        _ => panic!("unsupported instruction")
+        modusfile::Instruction::Copy(c) => dockerfile::Instruction::Copy(c.clone()),
+        modusfile::Instruction::Run(r) => dockerfile::Instruction::Run(r.clone()),
+        modusfile::Instruction::Env(e) => dockerfile::Instruction::Env(e.clone()),
+        modusfile::Instruction::Workdir(e) => dockerfile::Instruction::Workdir(e.clone()),
+        _ => panic!("unsupported instruction"),
     }
 }
 
 static AVAILABLE_STAGE_INDEX: AtomicU32 = AtomicU32::new(0);
 
-fn proof_to_docker(rules: &Vec<Clause<Constant, Variable>>,
-                   instructions: &Vec<Vec<modusfile::Instruction>>,
-                   proof: &sld::Proof<Constant, Variable>,
-                   docker_instrs: &mut Vec<dockerfile::Instruction<ResolvedParent>>,
-                   cache: &mut HashMap<sld::Goal<Constant, Variable>, ResolvedParent>,
-                   goal: &sld::Goal<Constant, Variable>) -> ResolvedParent {
+fn proof_to_docker(
+    rules: &Vec<Clause<Constant, Variable>>,
+    instructions: &Vec<Vec<modusfile::Instruction>>,
+    proof: &sld::Proof<Constant, Variable>,
+    docker_instrs: &mut Vec<dockerfile::Instruction<ResolvedParent>>,
+    cache: &mut HashMap<sld::Goal<Constant, Variable>, ResolvedParent>,
+    goal: &sld::Goal<Constant, Variable>,
+) -> ResolvedParent {
     let solution: sld::Goal<Constant, Variable> = goal.substitute(&proof.valuation);
     if cache.contains_key(&solution) {
         return cache.get(&solution).unwrap().clone();
     }
     let index = AVAILABLE_STAGE_INDEX.fetch_add(1, Ordering::SeqCst);
     let name = format!("stage_{}", index);
-    let dependencies: Vec<ResolvedParent> = proof.children.iter().map(|subproof| match subproof.clause {
-        sld::ClauseId::Rule(0) => {
-            let value = subproof.valuation.get(&Variable::User("X".into())).unwrap();
-            match value {
-                Term::Constant(Constant::String(s)) => ResolvedParent::Image(s.parse().unwrap()),
-                _ => unreachable!()
+    let dependencies: Vec<ResolvedParent> = proof
+        .children
+        .iter()
+        .map(|subproof| match subproof.clause {
+            sld::ClauseId::Rule(0) => {
+                let value = subproof.valuation.get(&Variable::User("X".into())).unwrap();
+                match value {
+                    Term::Constant(Constant::String(s)) => {
+                        ResolvedParent::Image(s.parse().unwrap())
+                    }
+                    _ => unreachable!(),
+                }
             }
-        },
-        sld::ClauseId::Rule(_) => proof_to_docker(rules, instructions, subproof, docker_instrs, cache, goal),
-        _ => unreachable!() 
-    }).collect();
-    let from = dockerfile::From{ parent: dependencies[0].clone(), alias: Some(name.clone()) };
+            sld::ClauseId::Rule(_) => {
+                proof_to_docker(rules, instructions, subproof, docker_instrs, cache, goal)
+            }
+            _ => unreachable!(),
+        })
+        .collect();
+    let from = dockerfile::From {
+        parent: dependencies[0].clone(),
+        alias: Some(name.clone()),
+    };
     docker_instrs.push(dockerfile::Instruction::From(from));
     for (k, v) in &proof.valuation {
         match (k, v) {
             (Variable::User(n), Term::Constant(Constant::String(s))) => {
                 let a = dockerfile::Arg(format!("{}=\"{}\"", n, s));
                 docker_instrs.push(dockerfile::Instruction::Arg(a))
-            },
-            _ => unreachable!()
+            }
+            _ => unreachable!(),
         }
     }
     match proof.clause {
         sld::ClauseId::Rule(rid) if rid > 0 => {
             docker_instrs.append(&mut instructions[rid].iter().map(modus_to_docker).collect());
-        },
+        }
         sld::ClauseId::Query => (),
-        _ => unreachable!()
+        _ => unreachable!(),
     }
-    
+
     ResolvedParent::Stage(name)
 }
 
-fn proofs_to_docker(rules: &Vec<Clause<Constant, Variable>>,
-                    instructions: &Vec<Vec<modusfile::Instruction>>,
-                    proofs: &Vec<sld::Proof<Constant, Variable>>,
-                    goal: &sld::Goal<Constant, Variable>) -> Dockerfile<ResolvedParent> {
+fn proofs_to_docker(
+    rules: &Vec<Clause<Constant, Variable>>,
+    instructions: &Vec<Vec<modusfile::Instruction>>,
+    proofs: &Vec<sld::Proof<Constant, Variable>>,
+    goal: &sld::Goal<Constant, Variable>,
+) -> Dockerfile<ResolvedParent> {
     let mut docker_instrs: Vec<dockerfile::Instruction<ResolvedParent>> = vec![];
 
     let mut cache: HashMap<sld::Goal<Constant, Variable>, ResolvedParent> = HashMap::new();
 
     for p in proofs {
-        let _ = proof_to_docker(rules, instructions, &p, &mut docker_instrs, &mut cache, &goal);
+        let _ = proof_to_docker(
+            rules,
+            instructions,
+            &p,
+            &mut docker_instrs,
+            &mut cache,
+            &goal,
+        );
     }
 
-    Dockerfile(docker_instrs)                  
+    Dockerfile(docker_instrs)
 }
