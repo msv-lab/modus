@@ -82,12 +82,47 @@ type GoalWithHistory<C, V> = Vec<LiteralWithHistory<C, V>>;
 /// - a goal with its dependencies (at which level and from which part of body each literal was introduced)
 /// - a level, which is incremented as tree grows
 /// - a mapping from (selected literal in goal, applied rule) to (mgu after rule renaming, rule renaming, resolvent subtree)
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Tree<C, V> {
     goal: GoalWithHistory<C, V>,
     level: TreeLevel,
     resolvents:
         HashMap<(LiteralGoalId, ClauseId), (Substitution<C, V>, Substitution<C, V>, Tree<C, V>)>,
+}
+
+fn pretty_write<C: Display, V: Display>(
+    tree: &Tree<C, V>,
+    rules: &Vec<Clause<C, V>>,
+    s: &mut String,
+) {
+    s.push('\n');
+    s.push_str(&" ".repeat(tree.level));
+    s.push_str(
+        &tree
+            .goal
+            .iter()
+            .map(|lit_history| format!("{}", lit_history.literal))
+            .collect::<Vec<String>>()
+            .join(","),
+    );
+    for (_, _, tree) in tree.resolvents.values() {
+        pretty_write(tree, rules, s);
+    }
+}
+
+impl<C: Display, V: Display> Tree<C, V> {
+    pub fn pretty_print(&self, rules: &Vec<Clause<C, V>>) {
+        let mut s = self
+            .goal
+            .iter()
+            .map(|lit_history| format!("{}", lit_history.literal))
+            .collect::<Vec<String>>()
+            .join(",");
+        for (_, _, tree) in self.resolvents.values() {
+            pretty_write(tree, rules, &mut s);
+        }
+        println!("{}", s);
+    }
 }
 
 /// A proof tree consist of

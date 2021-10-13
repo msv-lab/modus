@@ -17,6 +17,7 @@
 
 use std::{
     collections::HashMap,
+    fmt::Display,
     sync::atomic::{AtomicU32, Ordering},
     thread::panicking,
 };
@@ -38,6 +39,15 @@ pub enum Variable {
     User(String),
     Auxiliary(u32),
     Renamed(u32, Box<Variable>),
+}
+
+impl Display for Variable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Variable::Renamed(u, var) => write!(f, "({},{})", u, var),
+            _ => write!(f, "{}", self.to_string()),
+        }
+    }
 }
 
 static AVAILABLE_VARIABLE_INDEX: AtomicU32 = AtomicU32::new(0);
@@ -103,6 +113,7 @@ pub fn transpile(mf: Modusfile, query: modusfile::Literal) -> Dockerfile<Resolve
         panic!("failed to resolve parameters")
     }
     let tree = result.unwrap();
+    tree.pretty_print(&rules);
     let proofs = sld::proofs(&tree, &rules, &goal);
     proofs_to_docker(&rules, &instructions, &proofs, &goal)
 }
