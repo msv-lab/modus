@@ -21,7 +21,6 @@ use std::str;
 
 use crate::logic;
 use crate::{dockerfile, transpiler};
-use dockerfile::{Copy, Env, Run, Workdir};
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Constant {
@@ -29,21 +28,13 @@ pub enum Constant {
     Integer(u32), //TODO: arbitrary-precision arithmetic?
 }
 
-pub type Rule = logic::Clause<Constant, transpiler::Variable>;
+pub type Clause = logic::Clause<Constant, transpiler::Variable>;
+pub type Rule = Clause;
 pub type Literal = logic::Literal<Constant, transpiler::Variable>;
 pub type Term = logic::Term<Constant, transpiler::Variable>;
 
 #[derive(Clone, PartialEq, Debug)]
-pub enum Instruction {
-    Rule(Rule),
-    Run(Run),
-    Env(Env),
-    Copy(Copy),
-    Workdir(Workdir),
-}
-
-#[derive(Clone, PartialEq, Debug)]
-pub struct Modusfile(pub Vec<Instruction>);
+pub struct Modusfile(pub Vec<Clause>);
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Version {
@@ -97,6 +88,7 @@ impl fmt::Display for Constant {
 }
 
 mod parser {
+    use crate::logic::parser::literal;
     use crate::transpiler;
 
     use super::*;
@@ -104,13 +96,45 @@ mod parser {
 
     use nom::{
         branch::alt,
-        bytes::complete::{tag, tag_no_case},
-        character::complete::{alpha1, alphanumeric1, line_ending, none_of},
-        combinator::{eof, map, peek, recognize},
-        multi::many0,
-        sequence::{delimited, pair, preceded, terminated},
+        bytes::complete::tag,
+        character::complete::{alpha1, alphanumeric1, none_of, space0},
+        combinator::{eof, map, recognize},
+        multi::{many0, separated_list0},
+        sequence::{delimited, pair, preceded, separated_pair, terminated},
         IResult,
     };
+
+    fn head(i: &str) -> IResult<&str, Literal> {
+        literal(modus_const, modus_var)(i)
+    }
+
+    fn body(i: &str) -> IResult<&str, Vec<Literal>> {
+        // TODO: Implement expression bodies (using an expression tree?)
+        separated_list0(
+            delimited(space0, tag(","), space0),
+            literal(modus_const, modus_var),
+        )(i)
+    }
+
+    fn fact(i: &str) -> IResult<&str, Clause> {
+        // Custom definition of fact since datalog facts are normally "head :- ", but Moduslog
+        // defines it as "head."
+        map(terminated(head, tag(".")), |h| Clause {
+            head: h,
+            body: Vec::new(),
+        })(i)
+    }
+
+    fn rule(i: &str) -> IResult<&str, Clause> {
+        map(
+            separated_pair(
+                head,
+                delimited(space0, tag(":-"), space0),
+                terminated(body, tag(".")),
+            ),
+            |(head, body)| Clause { head, body },
+        )(i)
+    }
 
     //TODO: support proper string literals
     fn string_content(i: &str) -> IResult<&str, &str> {
@@ -142,43 +166,8 @@ mod parser {
         )(i)
     }
 
-    pub fn rule_instr(i: &str) -> IResult<&str, Rule> {
-        preceded(
-            pair(tag_no_case("RULE"), dockerfile::parser::mandatory_space),
-            logic::parser::clause(modus_const, modus_var),
-        )(i)
-    }
-
-    //TODO: a parsing rule for an instruction should be extracted into a combinator
-    fn modus_instruction(i: &str) -> IResult<&str, Instruction> {
-        alt((
-            map(
-                terminated(rule_instr, alt((line_ending, peek(eof)))),
-                Instruction::Rule,
-            ),
-            map(
-                terminated(
-                    dockerfile::parser::copy_instr,
-                    alt((line_ending, peek(eof))),
-                ),
-                Instruction::Copy,
-            ),
-            map(
-                terminated(dockerfile::parser::run_instr, alt((line_ending, peek(eof)))),
-                Instruction::Run,
-            ),
-            map(
-                terminated(dockerfile::parser::env_instr, alt((line_ending, peek(eof)))),
-                Instruction::Env,
-            ),
-            map(
-                terminated(
-                    dockerfile::parser::workdir_instr,
-                    alt((line_ending, peek(eof))),
-                ),
-                Instruction::Workdir,
-            ),
-        ))(i)
+    fn modus_clause(i: &str) -> IResult<&str, Clause> {
+        alt((fact, rule))(i)
     }
 
     pub fn modusfile(i: &str) -> IResult<&str, Modusfile> {
@@ -186,11 +175,16 @@ mod parser {
             terminated(
                 many0(preceded(
                     many0(dockerfile::parser::ignored_line),
-                    modus_instruction,
+                    modus_clause,
                 )),
                 terminated(many0(dockerfile::parser::ignored_line), eof),
             ),
             Modusfile,
         )(i)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    // TODO
 }
