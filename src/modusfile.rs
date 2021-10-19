@@ -95,6 +95,7 @@ mod parser {
 
     use super::*;
 
+    use nom::character::complete::multispace0;
     use nom::{
         branch::alt,
         bytes::complete::tag,
@@ -112,7 +113,7 @@ mod parser {
     fn body(i: &str) -> IResult<&str, Vec<Literal>> {
         // TODO: Implement expression bodies (using an expression tree?)
         separated_list0(
-            delimited(space0, tag(","), space0),
+            delimited(multispace0, tag(","), multispace0),
             literal(modus_const, modus_var),
         )(i)
     }
@@ -130,7 +131,7 @@ mod parser {
         map(
             separated_pair(
                 head,
-                delimited(space0, tag(":-"), space0),
+                delimited(space0, tag(":-"), multispace0),
                 terminated(body, tag(".")),
             ),
             |(head, body)| Clause { head, body },
@@ -205,11 +206,16 @@ mod tests {
             atom: logic::Atom("l2".into()),
             args: Vec::new(),
         };
+        let l3 = Literal {
+            atom: logic::Atom("l3".into()),
+            args: Vec::new(),
+        };
         let c = Rule {
             head: l1,
-            body: vec![l2],
+            body: vec![l2, l3],
         };
-        assert_eq!("l1 :- l2.", c.to_string());
-        assert_eq!(Ok(c), "l1 :- l2.".parse());
+        assert_eq!("l1 :- l2, l3.", c.to_string());
+        assert_eq!(Ok(c.clone()), "l1 :- l2, l3.".parse());
+        assert_eq!(Ok(c.clone()), "l1 :- l2,\n\tl3.".parse());
     }
 }
