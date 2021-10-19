@@ -182,7 +182,10 @@ where
     V: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} :- {}", self.head, display_sep(&self.body, ", "))
+        match self.body.len() {
+            0 => write!(f, "{}.", self.head),
+            _ => write!(f, "{} :- {}.", self.head, display_sep(&self.body, ", ")),
+        }
     }
 }
 
@@ -380,8 +383,8 @@ mod tests {
             head: l1,
             body: vec![l2, l3],
         };
-        assert_eq!("l1(A, B) :- l2(A, c), l3(B, c)", r.to_string());
-        assert_eq!(Ok(r), "l1(A, B) :- l2(A, c), l3(B, c)".parse());
+        assert_eq!("l1(A, B) :- l2(A, c), l3(B, c).", r.to_string());
+        assert_eq!(Ok(r), "l1(A, B) :- l2(A, c), l3(B, c).".parse());
     }
 
     #[test]
@@ -399,7 +402,7 @@ mod tests {
             head: l1,
             body: vec![l2],
         };
-        assert_eq!("l1 :- l2(A)", r.to_string());
-        assert_eq!(Ok(r), "l1 :- l2(A)".parse());
+        assert_eq!("l1 :- l2(A).", r.to_string());
+        assert_eq!(Ok(r), "l1 :- l2(A).".parse());
     }
 }

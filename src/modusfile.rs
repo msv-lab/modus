@@ -20,6 +20,7 @@ use std::fmt;
 use std::str;
 
 use crate::logic;
+use crate::modusfile::parser::modus_const;
 use crate::{dockerfile, transpiler};
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -29,6 +30,7 @@ pub enum Constant {
 }
 
 pub type Clause = logic::Clause<Constant, transpiler::Variable>;
+pub type Fact = Clause;
 pub type Rule = Clause;
 pub type Literal = logic::Literal<Constant, transpiler::Variable>;
 pub type Term = logic::Term<Constant, transpiler::Variable>;
@@ -56,11 +58,11 @@ impl str::FromStr for Modusfile {
     }
 }
 
-impl str::FromStr for Rule {
+impl str::FromStr for Clause {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match logic::parser::clause(parser::modus_const, parser::modus_var)(s) {
+        match parser::modus_clause(s) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
@@ -81,26 +83,25 @@ impl str::FromStr for Literal {
 impl fmt::Display for Constant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Constant::String(s) => write!(f, "i\"{}\"", s),
+            Constant::String(s) => write!(f, "\"{}\"", s),
             Constant::Integer(i) => write!(f, "{}", i),
         }
     }
 }
 
 mod parser {
-    use crate::logic::parser::literal;
+    use crate::logic::parser::{literal, literal_identifier};
     use crate::transpiler;
 
     use super::*;
-    use dockerfile::Image;
 
     use nom::{
         branch::alt,
         bytes::complete::tag,
-        character::complete::{alpha1, alphanumeric1, none_of, space0},
+        character::complete::{none_of, space0},
         combinator::{eof, map, recognize},
         multi::{many0, separated_list0},
-        sequence::{delimited, pair, preceded, separated_pair, terminated},
+        sequence::{delimited, preceded, separated_pair, terminated},
         IResult,
     };
 
@@ -141,22 +142,14 @@ mod parser {
         recognize(many0(none_of("\\\"")))(i)
     }
 
-    pub fn image_literal(i: &str) -> IResult<&str, Image> {
-        delimited(tag("i\""), dockerfile::parser::image, tag("\""))(i)
-    }
-
     pub fn modus_const(i: &str) -> IResult<&str, Constant> {
-        alt((
-            map(delimited(tag("\""), string_content, tag("\"")), |s| {
-                Constant::String(s.into())
-            }),
-            map(image_literal, |s| Constant::String(s.to_string())), //TODO: Need to construct a compound object
-        ))(i)
+        map(delimited(tag("\""), string_content, tag("\"")), |s| {
+            Constant::String(s.into())
+        })(i)
     }
 
-    //TODO: I need to think more carefully how to connect this to ARGs
     pub fn variable_identifier(i: &str) -> IResult<&str, &str> {
-        recognize(pair(alpha1, many0(alt((alphanumeric1, tag("_"))))))(i)
+        literal_identifier(i)
     }
 
     pub fn modus_var(i: &str) -> IResult<&str, transpiler::Variable> {
@@ -166,7 +159,7 @@ mod parser {
         )(i)
     }
 
-    fn modus_clause(i: &str) -> IResult<&str, Clause> {
+    pub fn modus_clause(i: &str) -> IResult<&str, Clause> {
         alt((fact, rule))(i)
     }
 
@@ -186,5 +179,37 @@ mod parser {
 
 #[cfg(test)]
 mod tests {
-    // TODO
+    use super::*;
+
+    #[test]
+    fn fact() {
+        let l1 = Literal {
+            atom: logic::Atom("l1".into()),
+            args: Vec::new(),
+        };
+        let c = Clause {
+            head: l1,
+            body: Vec::new(),
+        };
+        assert_eq!("l1.", c.to_string());
+        assert_eq!(Ok(c), "l1.".parse());
+    }
+
+    #[test]
+    fn rule() {
+        let l1 = Literal {
+            atom: logic::Atom("l1".into()),
+            args: Vec::new(),
+        };
+        let l2 = Literal {
+            atom: logic::Atom("l2".into()),
+            args: Vec::new(),
+        };
+        let c = Rule {
+            head: l1,
+            body: vec![l2],
+        };
+        assert_eq!("l1 :- l2.", c.to_string());
+        assert_eq!(Ok(c), "l1 :- l2.".parse());
+    }
 }

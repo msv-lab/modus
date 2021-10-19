@@ -506,7 +506,7 @@ mod tests {
     fn simple_solving() {
         let goal: Goal<logic::Atom, logic::toy::Variable> = vec!["a(X)".parse().unwrap()];
         let clauses: Vec<logic::toy::Clause> = vec![
-            "a(X) :- b(X)".parse().unwrap(),
+            "a(X) :- b(X).".parse().unwrap(),
             logic::toy::Clause {
                 head: "b(c)".parse().unwrap(),
                 body: vec![],
@@ -582,7 +582,7 @@ mod tests {
     fn solving_with_binary_relations() {
         let goal: Goal<logic::Atom, logic::toy::Variable> = vec!["a(X)".parse().unwrap()];
         let clauses: Vec<logic::toy::Clause> = vec![
-            "a(X) :- b(X, Y), c(Y)".parse().unwrap(),
+            "a(X) :- b(X, Y), c(Y).".parse().unwrap(),
             logic::toy::Clause {
                 head: "b(t, f)".parse().unwrap(),
                 body: vec![],
@@ -612,8 +612,8 @@ mod tests {
     fn simple_recursion() {
         let goal: Goal<logic::Atom, logic::toy::Variable> = vec!["reach(a, X)".parse().unwrap()];
         let clauses: Vec<logic::toy::Clause> = vec![
-            "reach(X, Y) :- reach(X, Z), arc(Z, Y)".parse().unwrap(),
-            "reach(X, Y) :- arc(X, Y)".parse().unwrap(),
+            "reach(X, Y) :- reach(X, Z), arc(Z, Y).".parse().unwrap(),
+            "reach(X, Y) :- arc(X, Y).".parse().unwrap(),
             logic::toy::Clause {
                 head: "arc(a, b)".parse().unwrap(),
                 body: vec![],
