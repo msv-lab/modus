@@ -138,7 +138,7 @@ mod parser {
         )(i)
     }
 
-    //TODO: support proper string literals
+    // TODO: support proper string literals + format strings
     fn string_content(i: &str) -> IResult<&str, &str> {
         recognize(many0(none_of("\\\"")))(i)
     }
