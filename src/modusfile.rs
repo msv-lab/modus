@@ -144,7 +144,8 @@ mod parser {
     }
 
     pub fn modus_const(i: &str) -> IResult<&str, Constant> {
-        map(delimited(tag("\""), string_content, tag("\"")), |s| {
+        // naively support f-strings
+        map(delimited(alt((tag("\""), tag("f\""))), string_content, tag("\"")), |s| {
             Constant::String(s.into())
         })(i)
     }
