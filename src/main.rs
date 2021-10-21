@@ -34,6 +34,8 @@ use std::fs;
 use dockerfile::ResolvedDockerfile;
 use modusfile::Modusfile;
 
+use crate::transpiler::prove_goal;
+
 fn main() {
     let matches = App::new("modus")
         .version(crate_version!())
@@ -68,12 +70,18 @@ fn main() {
                 ),
         )
         .subcommand(
-            App::new("check").arg(
-                Arg::with_name("FILE")
-                    .required(true)
-                    .help("Sets the input Modusfile")
-                    .index(1),
-            ),
+            App::new("check")
+                .arg(
+                    Arg::with_name("FILE")
+                        .required(true)
+                        .help("Sets the input Modusfile")
+                        .index(1),
+                )
+                .arg(
+                    Arg::with_name("QUERY")
+                        .help("Specifies the target to check")
+                        .index(2),
+                ),
         )
         .get_matches();
 
@@ -92,15 +100,22 @@ fn main() {
         }
         ("check", Some(sub)) => {
             let input_file = sub.value_of("FILE").unwrap();
+            let query: Option<modusfile::Literal> =
+                sub.value_of("QUERY").map(|l| l.parse().unwrap());
 
             let file_content = fs::read_to_string(input_file).unwrap();
-            match file_content.parse::<Modusfile>() {
-                Ok(modus_f) => println!(
+            match (file_content.parse::<Modusfile>(), query) {
+                (Ok(modus_f), None) => println!(
                     "Parsed {} successfully. Found {} clauses.",
                     input_file,
                     modus_f.0.len()
                 ),
-                Err(error) => {
+                (Ok(modus_f), Some(l)) => {
+                    if let Ok(proofs) = prove_goal(&modus_f, &vec![l.clone()]) {
+                        println!("{} proof(s) found for query {}", proofs.len(), l)
+                    }
+                }
+                (Err(error), _) => {
                     println!("Didn't parse {} successfully, error: {}", input_file, error)
                 }
             }

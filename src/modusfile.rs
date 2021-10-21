@@ -31,6 +31,7 @@ pub enum Constant {
 #[derive(Clone, PartialEq, Debug)]
 pub enum Expression {
     Literal(Literal),
+    /// An assertion of the equality of two terms.
     Unification(Term, Term),
     OperatorApplication(Vec<Expression>, Operator),
 }
@@ -41,10 +42,37 @@ pub struct ModusClause {
     pub body: Vec<Expression>,
 }
 
+impl From<&crate::modusfile::ModusClause>
+    for logic::Clause<crate::modusfile::Constant, crate::modusfile::Variable>
+{
+    fn from(modus_clause: &crate::modusfile::ModusClause) -> Self {
+        fn get_literals(expr: &Expression) -> Vec<logic::Literal<Constant, Variable>> {
+            match expr {
+                Expression::Literal(l) => vec![l.clone()],
+                // for now, ignore operators
+                Expression::OperatorApplication(exprs, _) => {
+                    exprs.iter().flat_map(|e| get_literals(e)).collect()
+                }
+                Expression::Unification(_, _) => unimplemented!(),
+            }
+        }
+        let literals = modus_clause
+            .body
+            .iter()
+            .flat_map(|e| get_literals(e))
+            .collect();
+        Self {
+            head: modus_clause.head.clone(),
+            body: literals,
+        }
+    }
+}
+
 pub type Fact = ModusClause;
 pub type Rule = ModusClause;
-pub type Literal = logic::Literal<Constant, transpiler::Variable>;
-pub type Term = logic::Term<Constant, transpiler::Variable>;
+pub type Variable = transpiler::Variable;
+pub type Literal = logic::Literal<Constant, Variable>;
+pub type Term = logic::Term<Constant, Variable>;
 pub type Operator = Literal;
 
 #[derive(Clone, PartialEq, Debug)]
@@ -147,7 +175,6 @@ impl fmt::Display for Constant {
 
 mod parser {
     use crate::logic::parser::{literal, literal_identifier};
-    use crate::transpiler;
 
     use super::*;
 
@@ -226,11 +253,8 @@ mod parser {
         literal_identifier(i)
     }
 
-    pub fn modus_var(i: &str) -> IResult<&str, transpiler::Variable> {
-        map(
-            variable_identifier,
-            compose!(String::from, transpiler::Variable::User),
-        )(i)
+    pub fn modus_var(i: &str) -> IResult<&str, Variable> {
+        map(variable_identifier, compose!(String::from, Variable::User))(i)
     }
 
     pub fn modus_clause(i: &str) -> IResult<&str, ModusClause> {
@@ -319,5 +343,37 @@ mod tests {
         };
         assert_eq!("foo :- (a, b)::merge.", r.to_string());
         assert_eq!(Ok(r.clone()), "foo :- (a, b)::merge.".parse());
+    }
+
+    #[test]
+    fn modusclause_to_clause() {
+        let foo = Literal {
+            atom: logic::Atom("foo".into()),
+            args: Vec::new(),
+        };
+        let a = Literal {
+            atom: logic::Atom("a".into()),
+            args: Vec::new(),
+        };
+        let b = Literal {
+            atom: logic::Atom("b".into()),
+            args: Vec::new(),
+        };
+        let merge = Operator {
+            atom: logic::Atom("merge".into()),
+            args: Vec::new(),
+        };
+        let r = Rule {
+            head: foo,
+            body: vec![Expression::OperatorApplication(
+                vec![a.into(), b.into()],
+                merge,
+            )],
+        };
+        assert_eq!("foo :- (a, b)::merge.", r.to_string());
+
+        // Convert to the simpler syntax
+        let c: logic::Clause<Constant, Variable> = (&r).into();
+        assert_eq!("foo :- a, b", c.to_string());
     }
 }

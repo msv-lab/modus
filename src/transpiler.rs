@@ -70,7 +70,24 @@ impl sld::Variable<Constant, Variable> for Variable {
     }
 }
 
+pub fn prove_goal(
+    mf: &Modusfile,
+    goal: &Vec<modusfile::Literal>,
+) -> Result<Vec<sld::Proof<modusfile::Constant, modusfile::Variable>>, &'static str> {
+    let max_depth = 20;
+    let clauses: Vec<Clause<modusfile::Constant, modusfile::Variable>> =
+        mf.0.iter().map(|mc| mc.into()).collect();
+
+    let res = sld::sld(&clauses, goal, max_depth);
+    match res {
+        Some(t) => Ok(sld::proofs(&t, &clauses, &goal)),
+        None => Err("Failed in SLD tree construction."),
+    }
+}
+
 pub fn transpile(mf: Modusfile, query: modusfile::Literal) -> Dockerfile<ResolvedParent> {
+    let goal = vec![query];
+    let proofs = prove_goal(&mf, &goal);
     todo!()
 }
 
@@ -79,7 +96,6 @@ static AVAILABLE_STAGE_INDEX: AtomicU32 = AtomicU32::new(0);
 fn proof_to_docker(
     rules: &Vec<Clause<Constant, Variable>>,
     proof: &sld::Proof<Constant, Variable>,
-    docker_instrs: &mut Vec<dockerfile::Instruction<ResolvedParent>>,
     cache: &mut HashMap<sld::Goal<Constant, Variable>, ResolvedParent>,
     goal: &sld::Goal<Constant, Variable>,
 ) -> ResolvedParent {
