@@ -20,7 +20,6 @@ use std::fmt;
 use std::str;
 
 use crate::logic;
-use crate::modusfile::parser::modus_const;
 use crate::{dockerfile, transpiler};
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -33,7 +32,7 @@ pub enum Constant {
 pub enum Expression {
     Literal(Literal),
     Unification(Term, Term),
-    OperatorApplication(Box<Expression>, Operator),
+    OperatorApplication(Vec<Expression>, Operator),
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -74,9 +73,26 @@ impl str::FromStr for Modusfile {
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Expression::OperatorApplication(exprs, op) => write!(
+                f,
+                "({})::{}",
+                exprs
+                    .iter()
+                    .map(|e| e.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", "),
+                op
+            ),
             Expression::Unification(t1, t2) => write!(f, "{} = {}", t1, t2),
-            other => write!(f, "{}", other.to_string()),
+            Expression::Literal(l) => write!(f, "{}", l.to_string()),
         }
+    }
+}
+
+// could write a macro that generates these
+impl From<Literal> for Expression {
+    fn from(l: Literal) -> Self {
+        Expression::Literal(l)
     }
 }
 
@@ -158,11 +174,12 @@ mod parser {
             // TODO: unification
             map(
                 separated_pair(
-                    delimited(tag("("), expression, tag(")")),
+                    // implicit recursion here
+                    delimited(tag("("), body, tag(")")),
                     tag("::"),
                     literal(modus_const, modus_var),
                 ),
-                |(expr, operator)| Expression::OperatorApplication(Box::new(expr), operator),
+                |(exprs, operator)| Expression::OperatorApplication(exprs, operator),
             ),
         ))(i)
     }
@@ -268,11 +285,39 @@ mod tests {
         };
         let c = Rule {
             head: l1,
-            body: vec![Expression::Literal(l2), Expression::Literal(l3)],
+            body: vec![l2.into(), l3.into()],
         };
-        // TODO: fix tests
         assert_eq!("l1 :- l2, l3.", c.to_string());
         assert_eq!(Ok(c.clone()), "l1 :- l2, l3.".parse());
         assert_eq!(Ok(c.clone()), "l1 :- l2,\n\tl3.".parse());
+    }
+
+    #[test]
+    fn rule_with_operator() {
+        let foo = Literal {
+            atom: logic::Atom("foo".into()),
+            args: Vec::new(),
+        };
+        let a = Literal {
+            atom: logic::Atom("a".into()),
+            args: Vec::new(),
+        };
+        let b = Literal {
+            atom: logic::Atom("b".into()),
+            args: Vec::new(),
+        };
+        let merge = Operator {
+            atom: logic::Atom("merge".into()),
+            args: Vec::new(),
+        };
+        let r = Rule {
+            head: foo,
+            body: vec![Expression::OperatorApplication(
+                vec![a.into(), b.into()],
+                merge,
+            )],
+        };
+        assert_eq!("foo :- (a, b)::merge.", r.to_string());
+        assert_eq!(Ok(r.clone()), "foo :- (a, b)::merge.".parse());
     }
 }
