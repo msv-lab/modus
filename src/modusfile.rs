@@ -29,14 +29,27 @@ pub enum Constant {
     Integer(u32), //TODO: arbitrary-precision arithmetic?
 }
 
-pub type Clause = logic::Clause<Constant, transpiler::Variable>;
-pub type Fact = Clause;
-pub type Rule = Clause;
-pub type Literal = logic::Literal<Constant, transpiler::Variable>;
-pub type Term = logic::Term<Constant, transpiler::Variable>;
+#[derive(Clone, PartialEq, Debug)]
+pub enum Expression {
+    Literal(Literal),
+    Unification(Term, Term),
+    OperatorApplication(Box<Expression>, Operator),
+}
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Modusfile(pub Vec<Clause>);
+pub struct ModusClause {
+    pub head: Literal,
+    pub body: Vec<Expression>,
+}
+
+pub type Fact = ModusClause;
+pub type Rule = ModusClause;
+pub type Literal = logic::Literal<Constant, transpiler::Variable>;
+pub type Term = logic::Term<Constant, transpiler::Variable>;
+pub type Operator = Literal;
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct Modusfile(pub Vec<ModusClause>);
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Version {
@@ -58,13 +71,40 @@ impl str::FromStr for Modusfile {
     }
 }
 
-impl str::FromStr for Clause {
+impl fmt::Display for Expression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Expression::Unification(t1, t2) => write!(f, "{} = {}", t1, t2),
+            other => write!(f, "{}", other.to_string()),
+        }
+    }
+}
+
+impl str::FromStr for ModusClause {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match parser::modus_clause(s) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
+        }
+    }
+}
+
+impl fmt::Display for ModusClause {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.body.len() {
+            0 => write!(f, "{}.", self.head),
+            _ => write!(
+                f,
+                "{} :- {}.",
+                self.head,
+                self.body
+                    .iter()
+                    .map(|e| e.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            ),
         }
     }
 }
@@ -110,31 +150,45 @@ mod parser {
         literal(modus_const, modus_var)(i)
     }
 
-    fn body(i: &str) -> IResult<&str, Vec<Literal>> {
-        // TODO: Implement expression bodies (using an expression tree?)
-        separated_list0(
-            delimited(multispace0, tag(","), multispace0),
-            literal(modus_const, modus_var),
-        )(i)
+    fn expression(i: &str) -> IResult<&str, Expression> {
+        alt((
+            map(literal(modus_const, modus_var), |lit| {
+                Expression::Literal(lit)
+            }),
+            // TODO: unification
+            map(
+                separated_pair(
+                    delimited(tag("("), expression, tag(")")),
+                    tag("::"),
+                    literal(modus_const, modus_var),
+                ),
+                |(expr, operator)| Expression::OperatorApplication(Box::new(expr), operator),
+            ),
+        ))(i)
     }
 
-    fn fact(i: &str) -> IResult<&str, Clause> {
+    /// Comma-separated list of expressions
+    fn body(i: &str) -> IResult<&str, Vec<Expression>> {
+        separated_list0(delimited(multispace0, tag(","), multispace0), expression)(i)
+    }
+
+    fn fact(i: &str) -> IResult<&str, ModusClause> {
         // Custom definition of fact since datalog facts are normally "head :- ", but Moduslog
         // defines it as "head."
-        map(terminated(head, tag(".")), |h| Clause {
+        map(terminated(head, tag(".")), |h| ModusClause {
             head: h,
             body: Vec::new(),
         })(i)
     }
 
-    fn rule(i: &str) -> IResult<&str, Clause> {
+    fn rule(i: &str) -> IResult<&str, ModusClause> {
         map(
             separated_pair(
                 head,
                 delimited(space0, tag(":-"), multispace0),
                 terminated(body, tag(".")),
             ),
-            |(head, body)| Clause { head, body },
+            |(head, body)| ModusClause { head, body },
         )(i)
     }
 
@@ -145,9 +199,10 @@ mod parser {
 
     pub fn modus_const(i: &str) -> IResult<&str, Constant> {
         // naively support f-strings
-        map(delimited(alt((tag("\""), tag("f\""))), string_content, tag("\"")), |s| {
-            Constant::String(s.into())
-        })(i)
+        map(
+            delimited(alt((tag("\""), tag("f\""))), string_content, tag("\"")),
+            |s| Constant::String(s.into()),
+        )(i)
     }
 
     pub fn variable_identifier(i: &str) -> IResult<&str, &str> {
@@ -161,7 +216,7 @@ mod parser {
         )(i)
     }
 
-    pub fn modus_clause(i: &str) -> IResult<&str, Clause> {
+    pub fn modus_clause(i: &str) -> IResult<&str, ModusClause> {
         alt((fact, rule))(i)
     }
 
@@ -189,7 +244,7 @@ mod tests {
             atom: logic::Atom("l1".into()),
             args: Vec::new(),
         };
-        let c = Clause {
+        let c = ModusClause {
             head: l1,
             body: Vec::new(),
         };
@@ -213,8 +268,9 @@ mod tests {
         };
         let c = Rule {
             head: l1,
-            body: vec![l2, l3],
+            body: vec![Expression::Literal(l2), Expression::Literal(l3)],
         };
+        // TODO: fix tests
         assert_eq!("l1 :- l2, l3.", c.to_string());
         assert_eq!(Ok(c.clone()), "l1 :- l2, l3.".parse());
         assert_eq!(Ok(c.clone()), "l1 :- l2,\n\tl3.".parse());
