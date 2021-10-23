@@ -70,7 +70,7 @@ fn main() {
                 ),
         )
         .subcommand(
-            App::new("check")
+            App::new("proof")
                 .arg(
                     Arg::with_name("FILE")
                         .required(true)
@@ -79,7 +79,7 @@ fn main() {
                 )
                 .arg(
                     Arg::with_name("QUERY")
-                        .help("Specifies the target to check")
+                        .help("Specifies the target to prove")
                         .index(2),
                 ),
         )
@@ -98,7 +98,7 @@ fn main() {
 
             println!("{}", df);
         }
-        ("check", Some(sub)) => {
+        ("proof", Some(sub)) => {
             let input_file = sub.value_of("FILE").unwrap();
             let query: Option<modusfile::Literal> =
                 sub.value_of("QUERY").map(|l| l.parse().unwrap());
