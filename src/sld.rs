@@ -21,7 +21,10 @@ use std::{
     hash::Hash,
 };
 
-use crate::unification::{compose_extend, compose_no_extend, Rename, Substitution};
+use crate::{
+    builtin,
+    unification::{compose_extend, compose_no_extend, Rename, Substitution},
+};
 use crate::{
     logic::{self, Signature},
     unification::Substitute,
@@ -126,7 +129,7 @@ pub fn sld<C, V>(
     maxdepth: TreeLevel,
 ) -> Option<Tree<C, V>>
 where
-    C: Clone + PartialEq + Debug,
+    C: Clone + PartialEq + Debug + ToString,
     V: Clone + Eq + Hash + Variable<C, V> + Debug,
 {
     /// select leftmost literal with compatible groundness
@@ -135,32 +138,35 @@ where
         grounded: &HashMap<Signature, Vec<bool>>,
     ) -> Option<(LiteralGoalId, LiteralWithHistory<C, V>)>
     where
-        C: Clone,
+        C: Clone + ToString,
         V: Clone + Eq + Hash,
     {
-        let mut selected: Option<(LiteralGoalId, LiteralWithHistory<C, V>)> = None;
-        'outer: for (id, lit) in goal.iter().enumerate() {
-            let LiteralWithHistory {
-                literal,
-                introduction: _,
-                origin: _,
-            } = lit;
-            let lit_grounded = grounded.get(&literal.signature()).unwrap();
-            let mut matching = true;
-            literal
-                .args
-                .iter()
-                .enumerate()
-                .for_each(|(id, t)| match (t, lit_grounded[id]) {
-                    (Term::Variable(_), false) => matching = false,
-                    _ => (),
-                });
-            if matching {
-                selected = Some((id, lit.clone()));
-                break 'outer;
-            }
-        }
-        selected
+        goal.iter()
+            .enumerate()
+            .find(|(id, lit)| {
+                let literal = &lit.literal;
+                if builtin::select_builtin(literal).is_some() {
+                    return true;
+                }
+
+                // For any user-defined atom, we can get its groundness requirement
+                // (computed outside), and if a particular argument can not be
+                // ungrounded (grounded[arg_index] == false), variables will not be
+                // allowed there.
+                let lit_grounded = grounded.get(&literal.signature()).unwrap();
+                debug_assert_eq!(lit_grounded.len(), literal.args.len());
+                if literal
+                    .args
+                    .iter()
+                    .zip(lit_grounded.iter())
+                    .all(|pair| !matches!(pair, (Term::Variable(_), &false)))
+                {
+                    return true;
+                }
+
+                false
+            })
+            .map(|(a, b)| (a, b.clone()))
     }
 
     fn resolve<C, V>(
@@ -172,7 +178,7 @@ where
         level: TreeLevel,
     ) -> GoalWithHistory<C, V>
     where
-        C: Clone + PartialEq + Debug,
+        C: Clone + PartialEq + Debug + ToString,
         V: Clone + Eq + Hash + Variable<C, V> + Debug,
     {
         let mut g: GoalWithHistory<C, V> = goal.clone();
@@ -205,7 +211,7 @@ where
         grounded: &HashMap<Signature, Vec<bool>>,
     ) -> Option<Tree<C, V>>
     where
-        C: Clone + PartialEq + Debug,
+        C: Clone + PartialEq + Debug + ToString,
         V: Clone + Eq + Hash + Variable<C, V> + Debug,
     {
         if goal.is_empty() {
@@ -222,6 +228,16 @@ where
                 return None;
             }
             let (lid, l) = selected.unwrap();
+
+            if let Some(pred) = builtin::select_builtin(&l.literal) {
+                todo!("Resolve this builtin {}({})", pred.name(), l.literal.args.iter().map(|x| {
+                    match x {
+                        Term::Constant(c) => c.to_string(),
+                        _ => "?".to_string()
+                    }
+                }).collect::<Vec<String>>().join(", "))
+            }
+
             let resolvents: HashMap<
                 (LiteralGoalId, ClauseId),
                 (Substitution<C, V>, Substitution<C, V>, Tree<C, V>),
@@ -651,5 +667,41 @@ mod tests {
         assert!(solutions.contains(&vec!["reach(a, c)".parse().unwrap()]));
         assert!(solutions.contains(&vec!["reach(a, d)".parse().unwrap()]));
         assert!(solutions.contains(&vec!["reach(a, e)".parse().unwrap()]));
+    }
+
+    #[test]
+    fn string_concat() {
+        let goal: Goal<logic::Atom, logic::toy::Variable> =
+            vec!["string_concat(hello, world, X)".parse().unwrap()];
+        let clauses: Vec<logic::toy::Clause> = vec![];
+        let result = sld(&clauses, &goal, 10);
+        assert!(result.is_some());
+        let solutions = solutions(&result.unwrap());
+        assert_eq!(solutions.len(), 1);
+        assert!(
+            solutions.contains(&vec!["string_concat(hello, world, helloworld)"
+                .parse()
+                .unwrap()])
+        );
+    }
+
+    #[test]
+    fn string_concat_complex() {
+        let goal: Goal<logic::Atom, logic::toy::Variable> =
+            vec!["a(aaabbb)".parse().unwrap(), "a(aaabb)".parse().unwrap()];
+        let clauses: Vec<logic::toy::Clause> = vec![
+            logic::toy::Clause {
+                head: "a(ab)".parse().unwrap(),
+                body: vec![],
+            },
+            "a(X) :- string_concat(a, Y, X), string_concat(Y, b, X), a(Y)"
+                .parse()
+                .unwrap(),
+        ];
+        let result = sld(&clauses, &goal, 10);
+        assert!(result.is_some());
+        let solutions = solutions(&result.unwrap());
+        assert_eq!(solutions.len(), 1);
+        assert!(solutions.contains(&vec!["a(aaabbb)".parse().unwrap()]));
     }
 }
