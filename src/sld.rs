@@ -135,8 +135,8 @@ where
         grounded: &HashMap<Signature, Vec<bool>>,
     ) -> Option<(LiteralGoalId, LiteralWithHistory<C, V>)>
     where
-        C: Clone,
-        V: Clone + Eq + Hash,
+        C: Clone + Debug,
+        V: Clone + Eq + Hash + Debug,
     {
         let mut selected: Option<(LiteralGoalId, LiteralWithHistory<C, V>)> = None;
         'outer: for (id, lit) in goal.iter().enumerate() {
@@ -145,19 +145,22 @@ where
                 introduction: _,
                 origin: _,
             } = lit;
-            let lit_grounded = grounded.get(&literal.signature()).unwrap();
-            let mut matching = true;
-            literal
-                .args
-                .iter()
-                .enumerate()
-                .for_each(|(id, t)| match (t, lit_grounded[id]) {
-                    (Term::Variable(_), false) => matching = false,
-                    _ => (),
-                });
-            if matching {
-                selected = Some((id, lit.clone()));
-                break 'outer;
+            if let Some(lit_grounded) = grounded.get(&literal.signature()) {
+                let mut matching = true;
+                literal
+                    .args
+                    .iter()
+                    .enumerate()
+                    .for_each(|(id, t)| match (t, lit_grounded[id]) {
+                        (Term::Variable(_), false) => matching = false,
+                        _ => (),
+                    });
+                if matching {
+                    selected = Some((id, lit.clone()));
+                    break 'outer;
+                }
+            } else {
+                panic!("Couldn't get grounded for {:?}(...) from {:?}", literal, grounded);
             }
         }
         selected

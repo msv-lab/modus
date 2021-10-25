@@ -111,8 +111,9 @@ fn main() {
                     modus_f.0.len()
                 ),
                 (Ok(modus_f), Some(l)) => {
-                    if let Ok(proofs) = prove_goal(&modus_f, &vec![l.clone()]) {
-                        println!("{} proof(s) found for query {}", proofs.len(), l)
+                    match prove_goal(&modus_f, &vec![l.clone()]) {
+                        Ok(proofs) => println!("{} proof(s) found for query {}", proofs.len(), l),
+                        Err(e) => println!("{}", e),
                     }
                 }
                 (Err(error), _) => {
