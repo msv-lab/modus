@@ -70,7 +70,7 @@ fn main() {
                 ),
         )
         .subcommand(
-            App::new("check")
+            App::new("proof")
                 .arg(
                     Arg::with_name("FILE")
                         .required(true)
@@ -79,7 +79,7 @@ fn main() {
                 )
                 .arg(
                     Arg::with_name("QUERY")
-                        .help("Specifies the target to check")
+                        .help("Specifies the target to prove")
                         .index(2),
                 ),
         )
@@ -98,7 +98,7 @@ fn main() {
 
             println!("{}", df);
         }
-        ("check", Some(sub)) => {
+        ("proof", Some(sub)) => {
             let input_file = sub.value_of("FILE").unwrap();
             let query: Option<modusfile::Literal> =
                 sub.value_of("QUERY").map(|l| l.parse().unwrap());
@@ -111,8 +111,9 @@ fn main() {
                     modus_f.0.len()
                 ),
                 (Ok(modus_f), Some(l)) => {
-                    if let Ok(proofs) = prove_goal(&modus_f, &vec![l.clone()]) {
-                        println!("{} proof(s) found for query {}", proofs.len(), l)
+                    match prove_goal(&modus_f, &vec![l.clone()]) {
+                        Ok(proofs) => println!("{} proof(s) found for query {}", proofs.len(), l),
+                        Err(e) => println!("{}", e),
                     }
                 }
                 (Err(error), _) => {
