@@ -31,8 +31,6 @@ pub enum Constant {
 #[derive(Clone, PartialEq, Debug)]
 pub enum Expression {
     Literal(Literal),
-    /// An assertion of the equality of two terms.
-    Unification(Term, Term),
     OperatorApplication(Vec<Expression>, Operator),
 }
 
@@ -53,7 +51,6 @@ impl From<&crate::modusfile::ModusClause>
                 Expression::OperatorApplication(exprs, _) => {
                     exprs.iter().flat_map(|e| get_literals(e)).collect()
                 }
-                Expression::Unification(_, _) => unimplemented!(),
             }
         }
         let literals = modus_clause
@@ -111,7 +108,6 @@ impl fmt::Display for Expression {
                     .join(", "),
                 op
             ),
-            Expression::Unification(t1, t2) => write!(f, "{} = {}", t1, t2),
             Expression::Literal(l) => write!(f, "{}", l.to_string()),
         }
     }
@@ -198,7 +194,6 @@ mod parser {
             map(literal(modus_const, modus_var), |lit| {
                 Expression::Literal(lit)
             }),
-            // TODO: unification
             map(
                 separated_pair(
                     // implicit recursion here
