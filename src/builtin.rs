@@ -31,11 +31,16 @@ pub trait BuiltinPredicate<C, V> {
             .zip(self.arg_groundness().into_iter())
             .all(|pair| !matches!(pair, (Term::Variable(_), false)))
     }
+
     /// Return a new literal specifically constructed to unify with the input
-    /// literal.
+    /// literal. The returned literal will essentially be used as the head of a
+    /// new "hidden" rule, which will hopefully unify with the input literal.
+    /// The rule will contain no body literals.
     ///
     /// For example, the implementation of run should simply return the input
-    /// literal, after checking that it only contains a constant.
+    /// literal, after checking that it only contains a constant. (Returning any
+    /// unresolved variables can make the actual generation of build
+    /// instructions impossible)
     ///
     /// Renaming will not be done on this literal, so if variables are needed
     /// they must all be either auxillary or some existing variables from the
