@@ -24,6 +24,12 @@ use std::{collections::HashSet, hash::Hash};
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Atom(pub String);
 
+impl From<String> for Atom {
+    fn from(s: String) -> Self {
+        Atom(s)
+    }
+}
+
 /// C is constant, V is variable
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Term<C, V> {

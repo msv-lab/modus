@@ -29,6 +29,12 @@ pub enum Constant {
     Integer(u32), //TODO: arbitrary-precision arithmetic?
 }
 
+impl From<String> for Constant {
+    fn from(s: String) -> Self {
+        Constant::String(s)
+    }
+}
+
 pub type Rule = logic::Clause<Constant, transpiler::Variable>;
 pub type Literal = logic::Literal<Constant, transpiler::Variable>;
 pub type Term = logic::Term<Constant, transpiler::Variable>;

@@ -15,7 +15,8 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use crate::logic::{Literal, Term};
+use crate::logic::{Atom, Literal, Term};
+use crate::sld::Variable;
 
 pub trait BuiltinPredicate<C, V> {
     fn name(&self) -> &'static str;
@@ -30,10 +31,49 @@ pub trait BuiltinPredicate<C, V> {
             .zip(self.arg_groundness().into_iter())
             .all(|pair| !matches!(pair, (Term::Variable(_), false)))
     }
+    /// Return a new literal specifically constructed to unify with the input
+    /// literal.
+    ///
+    /// For example, the implementation of run should simply return the input
+    /// literal, after checking that it only contains a constant.
+    ///
+    /// Renaming will not be done on this literal, so if variables are needed
+    /// they must all be either auxillary or some existing variables from the
+    /// input.
+    fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>>;
+}
+
+trait MaybeStringConst {
+    fn as_str_const(&self) -> Option<String>;
+}
+
+impl<C: ToString, V> MaybeStringConst for Term<C, V> {
+    fn as_str_const(&self) -> Option<String> {
+        match &self {
+            Term::Constant(c) => Some(c.to_string()),
+            Term::Atom(a) => Some(a.0.clone()),
+            _ => None,
+        }
+    }
+}
+
+fn string_concat_result<C: From<String>, V>(
+    a: String,
+    b: String,
+    c: String,
+) -> Option<Literal<C, V>> {
+    Some(Literal {
+        atom: Atom("string_concat".to_owned()),
+        args: vec![
+            Term::Constant(C::from(a)),
+            Term::Constant(C::from(b)),
+            Term::Constant(C::from(c)),
+        ],
+    })
 }
 
 pub struct StringConcat1;
-impl<C: ToString, V> BuiltinPredicate<C, V> for StringConcat1 {
+impl<C: ToString + From<String>, V> BuiltinPredicate<C, V> for StringConcat1 {
     fn name(&self) -> &'static str {
         "string_concat"
     }
@@ -41,10 +81,17 @@ impl<C: ToString, V> BuiltinPredicate<C, V> for StringConcat1 {
     fn arg_groundness(&self) -> &'static [bool] {
         &[false, false, true]
     }
+
+    fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>> {
+        let a = lit.args[0].as_str_const()?;
+        let b = lit.args[1].as_str_const()?;
+        let c = a.clone() + &b;
+        string_concat_result(a, b, c)
+    }
 }
 
 pub struct StringConcat2;
-impl<C: ToString, V> BuiltinPredicate<C, V> for StringConcat2 {
+impl<C: ToString + From<String>, V> BuiltinPredicate<C, V> for StringConcat2 {
     fn name(&self) -> &'static str {
         "string_concat"
     }
@@ -52,10 +99,20 @@ impl<C: ToString, V> BuiltinPredicate<C, V> for StringConcat2 {
     fn arg_groundness(&self) -> &'static [bool] {
         &[true, false, false]
     }
+
+    fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>> {
+        let b = lit.args[1].as_str_const()?;
+        let c = lit.args[2].as_str_const()?;
+        if let Some(a) = c.strip_suffix(&b) {
+            string_concat_result(a.to_string(), b, c)
+        } else {
+            None
+        }
+    }
 }
 
 pub struct StringConcat3;
-impl<C: ToString, V> BuiltinPredicate<C, V> for StringConcat3 {
+impl<C: ToString + From<String>, V> BuiltinPredicate<C, V> for StringConcat3 {
     fn name(&self) -> &'static str {
         "string_concat"
     }
@@ -63,9 +120,19 @@ impl<C: ToString, V> BuiltinPredicate<C, V> for StringConcat3 {
     fn arg_groundness(&self) -> &'static [bool] {
         &[false, true, false]
     }
+
+    fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>> {
+        let a = lit.args[0].as_str_const()?;
+        let c = lit.args[2].as_str_const()?;
+        if let Some(b) = c.strip_prefix(&a) {
+            string_concat_result(a, b.to_string(), c)
+        } else {
+            None
+        }
+    }
 }
 
-pub fn select_builtin<'a, C: 'a + ToString, V: 'a>(
+pub fn select_builtin<'a, C: 'a + ToString + From<String>, V: 'a>(
     lit: &Literal<C, V>,
 ) -> Option<&'a dyn BuiltinPredicate<C, V>> {
     if StringConcat1.select(lit) {
