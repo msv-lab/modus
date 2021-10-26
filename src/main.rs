@@ -30,6 +30,7 @@ extern crate lazy_static;
 extern crate fp_core;
 
 use clap::{crate_version, App, Arg};
+use colored::Colorize;
 use std::fs;
 
 use dockerfile::ResolvedDockerfile;
@@ -112,7 +113,14 @@ fn main() {
                     modus_f.0.len()
                 ),
                 (Ok(modus_f), Some(l)) => match prove_goal(&modus_f, &vec![l.clone()]) {
-                    Ok(proofs) => println!("{} proof(s) found for query {}", proofs.len(), l),
+                    Ok(proofs) => {
+                        println!(
+                            "{} proof(s) found for query {}",
+                            proofs.len(),
+                            l.to_string().blue()
+                        );
+                        // TODO: pretty print proof, we could use the 'colored' library for terminal colors
+                    }
                     Err(e) => println!("{}", e),
                 },
                 (Err(error), _) => {

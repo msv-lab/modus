@@ -504,7 +504,6 @@ where
             proofs.push(p)
         }
     }
-    println!("proofs: {}", proofs.len());
     proofs
 }
 
