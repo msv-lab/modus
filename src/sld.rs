@@ -160,7 +160,10 @@ where
                     break 'outer;
                 }
             } else {
-                panic!("Couldn't get grounded for {:?}(...) from {:?}", literal, grounded);
+                panic!(
+                    "Couldn't get grounded for {:?} from {:?}",
+                    literal, grounded
+                );
             }
         }
         selected

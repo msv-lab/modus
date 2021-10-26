@@ -110,12 +110,10 @@ fn main() {
                     input_file,
                     modus_f.0.len()
                 ),
-                (Ok(modus_f), Some(l)) => {
-                    match prove_goal(&modus_f, &vec![l.clone()]) {
-                        Ok(proofs) => println!("{} proof(s) found for query {}", proofs.len(), l),
-                        Err(e) => println!("{}", e),
-                    }
-                }
+                (Ok(modus_f), Some(l)) => match prove_goal(&modus_f, &vec![l.clone()]) {
+                    Ok(proofs) => println!("{} proof(s) found for query {}", proofs.len(), l),
+                    Err(e) => println!("{}", e),
+                },
                 (Err(error), _) => {
                     println!("Didn't parse {} successfully, error: {}", input_file, error)
                 }
