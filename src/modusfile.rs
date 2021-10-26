@@ -34,6 +34,12 @@ pub enum Expression {
     OperatorApplication(Vec<Expression>, Operator),
 }
 
+impl From<String> for Constant {
+    fn from(s: String) -> Self {
+        Constant::String(s)
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub struct ModusClause {
     pub head: Literal,
