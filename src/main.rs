@@ -24,17 +24,19 @@ mod transpiler;
 mod unification;
 mod wellformed;
 
-#[macro_use]
 extern crate lazy_static;
 
 #[macro_use]
 extern crate fp_core;
 
 use clap::{crate_version, App, Arg};
+use colored::Colorize;
 use std::fs;
 
 use dockerfile::ResolvedDockerfile;
 use modusfile::Modusfile;
+
+use crate::transpiler::prove_goal;
 
 fn main() {
     let matches = App::new("modus")
@@ -69,20 +71,63 @@ fn main() {
                         .takes_value(true),
                 ),
         )
+        .subcommand(
+            App::new("proof")
+                .arg(
+                    Arg::with_name("FILE")
+                        .required(true)
+                        .help("Sets the input Modusfile")
+                        .index(1),
+                )
+                .arg(
+                    Arg::with_name("QUERY")
+                        .help("Specifies the target to prove")
+                        .index(2),
+                ),
+        )
         .get_matches();
 
-    if let Some(ref matches) = matches.subcommand_matches("transpile") {
-        let input_file = matches.value_of("FILE").unwrap();
-        let query: modusfile::Literal = matches
-            .value_of("QUERY")
-            .map(|s| s.parse().unwrap())
-            .unwrap();
+    match matches.subcommand() {
+        ("transpile", Some(sub)) => {
+            let input_file = sub.value_of("FILE").unwrap();
+            let query: modusfile::Literal =
+                sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
 
-        let file_content = fs::read_to_string(input_file).unwrap();
-        let mf: Modusfile = file_content.parse().unwrap();
+            let file_content = fs::read_to_string(input_file).unwrap();
+            let mf: Modusfile = file_content.parse().unwrap();
 
-        let df: ResolvedDockerfile = transpiler::transpile(mf, query);
+            let df: ResolvedDockerfile = transpiler::transpile(mf, query);
 
-        println!("{}", df);
+            println!("{}", df);
+        }
+        ("proof", Some(sub)) => {
+            let input_file = sub.value_of("FILE").unwrap();
+            let query: Option<modusfile::Literal> =
+                sub.value_of("QUERY").map(|l| l.parse().unwrap());
+
+            let file_content = fs::read_to_string(input_file).unwrap();
+            match (file_content.parse::<Modusfile>(), query) {
+                (Ok(modus_f), None) => println!(
+                    "Parsed {} successfully. Found {} clauses.",
+                    input_file,
+                    modus_f.0.len()
+                ),
+                (Ok(modus_f), Some(l)) => match prove_goal(&modus_f, &vec![l.clone()]) {
+                    Ok(proofs) => {
+                        println!(
+                            "{} proof(s) found for query {}",
+                            proofs.len(),
+                            l.to_string().blue()
+                        );
+                        // TODO: pretty print proof, we could use the 'colored' library for terminal colors
+                    }
+                    Err(e) => println!("{}", e),
+                },
+                (Err(error), _) => {
+                    println!("Didn't parse {} successfully, error: {}", input_file, error)
+                }
+            }
+        }
+        _ => (),
     }
 }

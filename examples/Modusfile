@@ -1,0 +1,7 @@
+pylint(python_version, "ubuntu", ubuntu_version) :-
+    python(python_version, "ubuntu", ubuntu_version),
+    run("pip install pylint").
+
+python(python_version, "ubuntu", distr_version) :-
+    from(f"ubuntu:${distr_version}"),
+    run(f"apt-get install -y python${python_version}").

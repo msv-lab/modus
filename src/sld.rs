@@ -58,21 +58,6 @@ pub struct LiteralOrigin {
 /// Literal identifier relative to the goal
 type LiteralGoalId = usize;
 
-// fn literal_by_id<C, V>(
-//     rules: &Vec<Clause<C, V>>,
-//     query: &Goal<C, V>,
-//     id: LiteralOrigin,
-// ) -> Literal<C, V>
-// where
-//     C: Clone,
-//     V: Clone,
-// {
-//     match id.clause {
-//         ClauseId::Query => query[id.body_index].clone(),
-//         ClauseId::Rule(rid) => rules[rid].body[id.body_index].clone(),
-//     }
-// }
-
 /// literal, tree level at which it was introduced if any, where it came from
 #[derive(Clone, PartialEq, Debug)]
 struct LiteralWithHistory<C, V> {
@@ -154,18 +139,15 @@ where
                 // (computed outside), and if a particular argument can not be
                 // ungrounded (grounded[arg_index] == false), variables will not be
                 // allowed there.
-                let lit_grounded = grounded.get(&literal.signature()).unwrap();
+                let lit_grounded = grounded
+                    .get(&literal.signature())
+                    .expect("should find literal with matching groundedness signature");
                 debug_assert_eq!(lit_grounded.len(), literal.args.len());
-                if literal
+                return literal
                     .args
                     .iter()
                     .zip(lit_grounded.iter())
-                    .all(|pair| !matches!(pair, (Term::Variable(_), &false)))
-                {
-                    return true;
-                }
-
-                false
+                    .all(|pair| !matches!(pair, (Term::Variable(_), &false)));
             })
             .map(|(a, b)| (a, b.clone()))
     }
@@ -522,7 +504,6 @@ where
             proofs.push(p)
         }
     }
-    println!("proofs: {}", proofs.len());
     proofs
 }
 
@@ -569,7 +550,7 @@ mod tests {
     fn simple_solving() {
         let goal: Goal<logic::Atom, logic::toy::Variable> = vec!["a(X)".parse().unwrap()];
         let clauses: Vec<logic::toy::Clause> = vec![
-            "a(X) :- b(X)".parse().unwrap(),
+            "a(X) :- b(X).".parse().unwrap(),
             logic::toy::Clause {
                 head: "b(c)".parse().unwrap(),
                 body: vec![],
@@ -645,7 +626,7 @@ mod tests {
     fn solving_with_binary_relations() {
         let goal: Goal<logic::Atom, logic::toy::Variable> = vec!["a(X)".parse().unwrap()];
         let clauses: Vec<logic::toy::Clause> = vec![
-            "a(X) :- b(X, Y), c(Y)".parse().unwrap(),
+            "a(X) :- b(X, Y), c(Y).".parse().unwrap(),
             logic::toy::Clause {
                 head: "b(t, f)".parse().unwrap(),
                 body: vec![],
@@ -675,8 +656,8 @@ mod tests {
     fn simple_recursion() {
         let goal: Goal<logic::Atom, logic::toy::Variable> = vec!["reach(a, X)".parse().unwrap()];
         let clauses: Vec<logic::toy::Clause> = vec![
-            "reach(X, Y) :- reach(X, Z), arc(Z, Y)".parse().unwrap(),
-            "reach(X, Y) :- arc(X, Y)".parse().unwrap(),
+            "reach(X, Y) :- reach(X, Z), arc(Z, Y).".parse().unwrap(),
+            "reach(X, Y) :- arc(X, Y).".parse().unwrap(),
             logic::toy::Clause {
                 head: "arc(a, b)".parse().unwrap(),
                 body: vec![],

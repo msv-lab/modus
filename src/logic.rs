@@ -201,7 +201,7 @@ pub mod parser {
         bytes::complete::tag,
         character::complete::{alpha1, alphanumeric1, one_of},
         combinator::{map, opt, recognize, value},
-        multi::{many0, separated_list1},
+        multi::{many0, separated_list0, separated_list1},
         sequence::{delimited, pair, preceded, separated_pair, terminated},
         IResult,
     };
@@ -288,7 +288,7 @@ pub mod parser {
             separated_pair(
                 literal(constant.clone(), variable.clone()),
                 ws(tag(":-")),
-                separated_list1(ws(tag(",")), literal(constant, variable)),
+                separated_list0(ws(tag(",")), literal(constant, variable)),
             ),
             |(head, body)| Clause { head, body },
         )

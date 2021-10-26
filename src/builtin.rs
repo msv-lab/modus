@@ -77,6 +77,29 @@ fn string_concat_result<C: From<String>, V>(
     })
 }
 
+/// Enforces that the three given constants match X + Y = Z
+pub struct StringConcat0;
+impl<C: ToString + From<String>, V> BuiltinPredicate<C, V> for StringConcat0 {
+    fn name(&self) -> &'static str {
+        "string_concat"
+    }
+
+    fn arg_groundness(&self) -> &'static [bool] {
+        &[false, false, false]
+    }
+
+    fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>> {
+        let a = lit.args[0].as_str_const()?;
+        let b = lit.args[1].as_str_const()?;
+        let c = lit.args[2].as_str_const()?;
+        return if a.clone() + &b == c {
+            string_concat_result(a, b, c)
+        } else {
+            None
+        };
+    }
+}
+
 pub struct StringConcat1;
 impl<C: ToString + From<String>, V> BuiltinPredicate<C, V> for StringConcat1 {
     fn name(&self) -> &'static str {
@@ -137,15 +160,85 @@ impl<C: ToString + From<String>, V> BuiltinPredicate<C, V> for StringConcat3 {
     }
 }
 
-pub fn select_builtin<'a, C: 'a + ToString + From<String>, V: 'a>(
-    lit: &Literal<C, V>,
-) -> Option<&'a dyn BuiltinPredicate<C, V>> {
-    if StringConcat1.select(lit) {
-        return Some(&StringConcat1);
-    } else if StringConcat2.select(lit) {
-        return Some(&StringConcat2);
-    } else if StringConcat3.select(lit) {
-        return Some(&StringConcat3);
+mod run {
+    use crate::logic::{Literal, Term};
+
+    use super::BuiltinPredicate;
+
+    pub struct Run;
+    impl<C: Clone, V: Clone> BuiltinPredicate<C, V> for Run {
+        fn name(&self) -> &'static str {
+            "run"
+        }
+
+        fn arg_groundness(&self) -> &'static [bool] {
+            &[false]
+        }
+
+        fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>> {
+            let l = (*lit).clone();
+            match lit.args[0] {
+                // it's valid as long as we're given a constant
+                Term::Constant(_) => Some(l),
+                _ => None,
+            }
+        }
     }
+}
+
+mod from {
+    use crate::logic::{Literal, Term};
+
+    use super::BuiltinPredicate;
+
+    pub struct From;
+    impl<C: Clone, V: Clone> BuiltinPredicate<C, V> for From {
+        fn name(&self) -> &'static str {
+            "from"
+        }
+
+        fn arg_groundness(&self) -> &'static [bool] {
+            &[false]
+        }
+
+        fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>> {
+            let l = (*lit).clone();
+            match lit.args[0] {
+                // it's valid as long as we're given a constant
+                Term::Constant(_) => Some(l),
+                _ => None,
+            }
+        }
+    }
+}
+
+/// Convenience macro that returns Some(b) for the first b that can be selected.
+macro_rules! select_builtins {
+    ( $lit:expr, $x1:expr, $( $x:expr ),* ) => {
+        if $x1.select($lit) {
+            return Some(&$x1);
+        }
+        $(
+            else if $x.select($lit) {
+                return Some(&$x);
+            }
+        )*
+    };
+}
+
+pub fn select_builtin<'a, C, V>(lit: &Literal<C, V>) -> Option<&'a dyn BuiltinPredicate<C, V>>
+where
+    C: 'a + ToString + From<String> + std::clone::Clone,
+    V: 'a + std::clone::Clone,
+{
+    select_builtins!(
+        lit,
+        StringConcat0,
+        StringConcat1,
+        StringConcat2,
+        StringConcat3,
+        run::Run,
+        from::From
+    );
     None
 }

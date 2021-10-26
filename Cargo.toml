@@ -15,3 +15,4 @@ nom = { version = "6", features = ["regexp"] }
 clap = "2.33.3"
 lazy_static = "1.4.0"
 fp-core = "0.1.9"
+colored = "2"

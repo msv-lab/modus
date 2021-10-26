@@ -93,9 +93,9 @@ mod tests {
     #[test]
     fn consistently_grounded() {
         let clauses: Vec<logic::toy::Clause> = vec![
-            "a(X, Y) :- b(X), c(X, Z)".parse().unwrap(),
-            "a(X, Y) :- d(X)".parse().unwrap(),
-            "b(X) :- d(X) ".parse().unwrap(),
+            "a(X, Y) :- b(X), c(X, Z).".parse().unwrap(),
+            "a(X, Y) :- d(X).".parse().unwrap(),
+            "b(X) :- d(X).".parse().unwrap(),
         ];
         let result = check_grounded_variables(&clauses);
         assert!(result.is_ok());
@@ -108,8 +108,8 @@ mod tests {
     #[test]
     fn inconsistently_grounded() {
         let clauses: Vec<logic::toy::Clause> = vec![
-            "a(X, Y) :- b(X), c(X, Z)".parse().unwrap(),
-            "a(X, Y) :- d(Y)".parse().unwrap(),
+            "a(X, Y) :- b(X), c(X, Z).".parse().unwrap(),
+            "a(X, Y) :- d(Y).".parse().unwrap(),
         ];
         let result = check_grounded_variables(&clauses);
         assert!(result.is_err());
