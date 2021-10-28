@@ -77,29 +77,6 @@ fn string_concat_result<C: From<String>, V>(
     })
 }
 
-/// Enforces that the three given constants match X + Y = Z
-pub struct StringConcat0;
-impl<C: ToString + From<String>, V> BuiltinPredicate<C, V> for StringConcat0 {
-    fn name(&self) -> &'static str {
-        "string_concat"
-    }
-
-    fn arg_groundness(&self) -> &'static [bool] {
-        &[false, false, false]
-    }
-
-    fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>> {
-        let a = lit.args[0].as_str_const()?;
-        let b = lit.args[1].as_str_const()?;
-        let c = lit.args[2].as_str_const()?;
-        return if a.clone() + &b == c {
-            string_concat_result(a, b, c)
-        } else {
-            None
-        };
-    }
-}
-
 pub struct StringConcat1;
 impl<C: ToString + From<String>, V> BuiltinPredicate<C, V> for StringConcat1 {
     fn name(&self) -> &'static str {
@@ -233,7 +210,6 @@ where
 {
     select_builtins!(
         lit,
-        StringConcat0,
         StringConcat1,
         StringConcat2,
         StringConcat3,
