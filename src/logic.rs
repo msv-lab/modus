@@ -338,9 +338,17 @@ pub mod parser {
 pub mod toy {
     use super::Predicate;
     use fp_core::compose::compose_two;
-    use std::str;
+    use std::{
+        collections::HashMap,
+        str,
+        sync::atomic::{AtomicU32, Ordering},
+    };
 
-    use crate::logic::{ModusConstant, ModusVariable};
+    use crate::{
+        logic::{ModusConstant, ModusVariable},
+        sld,
+        unification::Rename,
+    };
     use nom::{
         branch::alt,
         bytes::complete::tag,
@@ -360,6 +368,27 @@ pub mod toy {
 
     impl ModusConstant for Predicate {}
     impl ModusVariable for Variable {}
+
+    static AVAILABLE_INDEX: AtomicU32 = AtomicU32::new(0);
+
+    /// Assume that underscore is not used in normal variables
+    impl Rename<Variable> for Variable {
+        fn rename(&self) -> Variable {
+            let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
+            let prefix = self.split('_').next().unwrap();
+            let renamed = format!("{}_{}", prefix, index);
+            let mut s = HashMap::<Variable, Term>::new();
+            s.insert(self.clone(), Term::Variable(renamed.clone()));
+            renamed
+        }
+    }
+
+    impl sld::Variable<Predicate, Variable> for Variable {
+        fn aux() -> Variable {
+            let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
+            format!("Aux{}", index)
+        }
+    }
 
     fn toy_var(i: &str) -> IResult<&str, Variable> {
         map(

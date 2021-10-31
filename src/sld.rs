@@ -482,30 +482,6 @@ mod tests {
 
     use super::*;
 
-    static AVAILABLE_INDEX: AtomicU32 = AtomicU32::new(0);
-
-    /// Assume that underscore is not used in normal variables
-    impl Rename<logic::toy::Variable> for logic::toy::Variable {
-        fn rename(&self) -> logic::toy::Variable {
-            let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
-            let prefix = self.split('_').next().unwrap();
-            let renamed = format!("{}_{}", prefix, index);
-            let mut s = HashMap::<
-                logic::toy::Variable,
-                logic::Term<logic::Predicate, logic::toy::Variable>,
-            >::new();
-            s.insert(self.clone(), logic::Term::Variable(renamed.clone()));
-            renamed
-        }
-    }
-
-    impl Variable<logic::Predicate, logic::toy::Variable> for logic::toy::Variable {
-        fn aux() -> logic::toy::Variable {
-            let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
-            format!("Aux{}", index)
-        }
-    }
-
     #[test]
     fn simple_solving() {
         let goal: Goal<logic::Predicate, logic::toy::Variable> = vec!["a(X)".parse().unwrap()];
