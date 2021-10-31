@@ -45,7 +45,7 @@ pub struct From<P> {
 pub struct Copy(String);
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Run(String);
+pub struct Run(pub String);
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Env(String);

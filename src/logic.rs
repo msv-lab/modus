@@ -15,7 +15,6 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use fp_core::compose::compose_two;
 use std::convert::TryInto;
 use std::fmt;
 use std::str;
@@ -37,6 +36,15 @@ pub enum Term<C, V> {
     Atom(Atom),
     Variable(V),
     Compound(Atom, Vec<Term<C, V>>),
+}
+
+impl<C, V> Term<C, V> {
+    pub fn as_constant(&self) -> Option<&C> {
+        match self {
+            Term::Constant(c) => Some(c),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]

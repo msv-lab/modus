@@ -18,6 +18,7 @@
 use core::fmt;
 use std::{
     collections::HashMap,
+    str::FromStr,
     sync::atomic::{AtomicU32, Ordering},
     thread::panicking,
 };
@@ -26,11 +27,11 @@ use nom::map;
 
 use crate::{
     dockerfile,
-    dockerfile::{Dockerfile, ResolvedParent},
+    dockerfile::{Dockerfile, Image, Instruction, ResolvedDockerfile, ResolvedParent, Run},
     logic::{Atom, Clause, Literal, Term},
     modusfile,
     modusfile::{Constant, Modusfile},
-    sld,
+    sld::{self, ClauseId},
     unification::{Rename, Substitute, Substitution},
 };
 
@@ -85,27 +86,55 @@ pub fn prove_goal(
     }
 }
 
-pub fn transpile(mf: Modusfile, query: modusfile::Literal) -> Dockerfile<ResolvedParent> {
+pub fn transpile(mf: Modusfile, query: modusfile::Literal) -> ResolvedDockerfile {
     let goal = vec![query];
-    let proofs = prove_goal(&mf, &goal);
-    todo!()
+    let proofs = prove_goal(&mf, &goal).unwrap();
+    assert_eq!(proofs.len(), 1);
+    let proof = proofs.into_iter().next().unwrap();
+    proof_to_docker(proof)
 }
 
 static AVAILABLE_STAGE_INDEX: AtomicU32 = AtomicU32::new(0);
-
-fn proof_to_docker(
-    rules: &Vec<Clause<Constant, Variable>>,
-    proof: &sld::Proof<Constant, Variable>,
-    cache: &mut HashMap<sld::Goal<Constant, Variable>, ResolvedParent>,
-    goal: &sld::Goal<Constant, Variable>,
-) -> ResolvedParent {
-    todo!()
+pub fn new_stage() -> ResolvedParent {
+    ResolvedParent::Stage(format!(
+        "_t{}",
+        AVAILABLE_STAGE_INDEX.fetch_add(1, Ordering::SeqCst)
+    ))
 }
 
-fn proofs_to_docker(
-    rules: &Vec<Clause<Constant, Variable>>,
-    proofs: &Vec<sld::Proof<Constant, Variable>>,
-    goal: &sld::Goal<Constant, Variable>,
-) -> Dockerfile<ResolvedParent> {
-    todo!()
+pub fn proof_to_docker(proof: sld::Proof<Constant, Variable>) -> ResolvedDockerfile {
+    let mut instructions = Vec::new();
+    fn dfs(
+        proof: &sld::Proof<Constant, Variable>,
+        instructions: &mut Vec<Instruction<ResolvedParent>>,
+    ) {
+        match &proof.clause {
+            ClauseId::Builtin(lit) => match &lit.atom.0[..] {
+                "run" => {
+                    let arg = match lit.args[0].as_constant().unwrap() {
+                        Constant::String(s) => s,
+                        _ => panic!("Expected string"),
+                    };
+                    instructions.push(Instruction::Run(Run(arg.clone())));
+                }
+                "from" => {
+                    let arg = match lit.args[0].as_constant().unwrap() {
+                        Constant::String(s) => s,
+                        _ => panic!("Expected string"),
+                    };
+                    instructions.push(Instruction::From(crate::dockerfile::From {
+                        parent: ResolvedParent::Image(Image::from_str(arg).unwrap()),
+                        alias: None,
+                    }));
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+        for c in proof.children.iter() {
+            dfs(c, instructions);
+        }
+    }
+    dfs(&proof, &mut instructions);
+    Dockerfile::<ResolvedParent>(instructions)
 }

@@ -54,7 +54,18 @@ trait MaybeStringConst {
 impl<C: ToString, V> MaybeStringConst for Term<C, V> {
     fn as_str_const(&self) -> Option<String> {
         match &self {
-            Term::Constant(c) => Some(c.to_string()),
+            // FIXME: ugly hack, the Display impl of Constant adds a quote.
+            // Remove this once we stabilize C and V
+            Term::Constant(c) => {
+                let c = c.to_string();
+                Some(
+                    c.strip_prefix("\"")
+                        .unwrap_or(&c)
+                        .strip_suffix("\"")
+                        .unwrap_or(&c)
+                        .to_string(),
+                )
+            }
             Term::Atom(a) => Some(a.0.clone()),
             _ => None,
         }
