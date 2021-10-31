@@ -20,7 +20,7 @@ use std::{
     hash::Hash,
 };
 
-use crate::logic::{self, Atom, Clause, Literal, Signature, Term};
+use crate::logic::{self, Predicate, Clause, Literal, Signature, Term};
 
 /// infer image predicates, i.e. those that transitively depend on image/1
 /// check that image predicates depend on image/1 in each disjunct
@@ -99,7 +99,7 @@ mod tests {
         ];
         let result = check_grounded_variables(&clauses);
         assert!(result.is_ok());
-        let a_sig = Signature(Atom("a".into()), 2);
+        let a_sig = Signature(Predicate("a".into()), 2);
         let a_grounded = result.unwrap().get(&a_sig).unwrap().clone();
         assert!(a_grounded[0]);
         assert!(!a_grounded[1]);
@@ -113,7 +113,7 @@ mod tests {
         ];
         let result = check_grounded_variables(&clauses);
         assert!(result.is_err());
-        let a_sig = Signature(Atom("a".into()), 2);
+        let a_sig = Signature(Predicate("a".into()), 2);
         assert!(result.unwrap_err().contains(&a_sig));
     }
 }

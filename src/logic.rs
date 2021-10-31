@@ -22,11 +22,11 @@ use std::str;
 use std::{collections::HashSet, hash::Hash};
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct Atom(pub String);
+pub struct Predicate(pub String);
 
-impl From<String> for Atom {
+impl From<String> for Predicate {
     fn from(s: String) -> Self {
-        Atom(s)
+        Predicate(s)
     }
 }
 
@@ -34,19 +34,19 @@ impl From<String> for Atom {
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Term<C, V> {
     Constant(C),
-    Atom(Atom),
+    Atom(Predicate),
     Variable(V),
-    Compound(Atom, Vec<Term<C, V>>),
+    Compound(Predicate, Vec<Term<C, V>>),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Literal<C, V> {
-    pub atom: Atom,
+    pub atom: Predicate,
     pub args: Vec<Term<C, V>>,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct Signature(pub Atom, pub u32);
+pub struct Signature(pub Predicate, pub u32);
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Clause<C, V> {
@@ -136,7 +136,7 @@ impl fmt::Display for Signature {
     }
 }
 
-impl fmt::Display for Atom {
+impl fmt::Display for Predicate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -265,11 +265,11 @@ pub mod parser {
             ),
             |(name, args)| match args {
                 Some(args) => Literal {
-                    atom: Atom(name.into()),
+                    atom: Predicate(name.into()),
                     args,
                 },
                 None => Literal {
-                    atom: Atom(name.into()),
+                    atom: Predicate(name.into()),
                     args: Vec::new(),
                 },
             },
@@ -296,7 +296,7 @@ pub mod parser {
 }
 
 pub mod toy {
-    use super::Atom;
+    use super::Predicate;
     use fp_core::compose::compose_two;
     use std::str;
 
@@ -313,9 +313,9 @@ pub mod toy {
     // define a toy language with only atoms for testing
 
     pub type Variable = String;
-    pub type Term = super::Term<Atom, Variable>;
-    pub type Literal = super::Literal<Atom, Variable>;
-    pub type Clause = super::Clause<Atom, Variable>;
+    pub type Term = super::Term<Predicate, Variable>;
+    pub type Literal = super::Literal<Predicate, Variable>;
+    pub type Clause = super::Clause<Predicate, Variable>;
 
     fn toy_var(i: &str) -> IResult<&str, Variable> {
         map(
@@ -327,13 +327,13 @@ pub mod toy {
         )(i)
     }
 
-    fn toy_const(i: &str) -> IResult<&str, Atom> {
+    fn toy_const(i: &str) -> IResult<&str, Predicate> {
         map(
             recognize(pair(
                 one_of("abcdefghijklmnopqrstuvwxyz"),
                 many0(alt((alphanumeric1, tag("_")))),
             )),
-            compose!(String::from, Atom),
+            compose!(String::from, Predicate),
         )(i)
     }
 
@@ -367,19 +367,19 @@ mod tests {
 
     #[test]
     fn simple_rule() {
-        let c = toy::Term::Constant(Atom("c".into()));
+        let c = toy::Term::Constant(Predicate("c".into()));
         let va = toy::Term::Variable("A".into());
         let vb = toy::Term::Variable("B".into());
         let l1 = toy::Literal {
-            atom: Atom("l1".into()),
+            atom: Predicate("l1".into()),
             args: vec![va.clone(), vb.clone()],
         };
         let l2 = toy::Literal {
-            atom: Atom("l2".into()),
+            atom: Predicate("l2".into()),
             args: vec![va.clone(), c.clone()],
         };
         let l3 = toy::Literal {
-            atom: Atom("l3".into()),
+            atom: Predicate("l3".into()),
             args: vec![vb.clone(), c.clone()],
         };
         let r = Clause {
@@ -394,11 +394,11 @@ mod tests {
     fn nullary_predicate() {
         let va = toy::Term::Variable("A".into());
         let l1 = toy::Literal {
-            atom: Atom("l1".into()),
+            atom: Predicate("l1".into()),
             args: Vec::new(),
         };
         let l2 = toy::Literal {
-            atom: Atom("l2".into()),
+            atom: Predicate("l2".into()),
             args: vec![va.clone()],
         };
         let r = Clause {

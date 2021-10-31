@@ -15,7 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use crate::logic::{Atom, Literal, Term};
+use crate::logic::{Predicate, Literal, Term};
 use crate::sld::Variable;
 
 pub trait BuiltinPredicate<C, V> {
@@ -68,7 +68,7 @@ fn string_concat_result<C: From<String>, V>(
     c: String,
 ) -> Option<Literal<C, V>> {
     Some(Literal {
-        atom: Atom("string_concat".to_owned()),
+        atom: Predicate("string_concat".to_owned()),
         args: vec![
             Term::Constant(C::from(a)),
             Term::Constant(C::from(b)),

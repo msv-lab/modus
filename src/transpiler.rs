@@ -27,7 +27,7 @@ use nom::map;
 use crate::{
     dockerfile,
     dockerfile::{Dockerfile, ResolvedParent},
-    logic::{Atom, Clause, Literal, Term},
+    logic::{Predicate, Clause, Literal, Term},
     modusfile,
     modusfile::{Constant, Modusfile},
     sld,

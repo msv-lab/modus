@@ -30,7 +30,7 @@ use crate::{
     unification::Substitute,
     wellformed,
 };
-use logic::{Atom, Clause, Literal, Term};
+use logic::{Predicate, Clause, Literal, Term};
 
 pub trait Variable<C, V>: Rename<C, V> {
     fn aux() -> Self;
@@ -519,27 +519,27 @@ mod tests {
     static AVAILABLE_INDEX: AtomicU32 = AtomicU32::new(0);
 
     /// Assume that underscore is not used in normal variables
-    impl Rename<logic::Atom, logic::toy::Variable> for logic::toy::Variable {
+    impl Rename<logic::Predicate, logic::toy::Variable> for logic::toy::Variable {
         type Output = logic::toy::Variable;
         fn rename(
             &self,
         ) -> (
             Self::Output,
-            Substitution<logic::Atom, logic::toy::Variable>,
+            Substitution<logic::Predicate, logic::toy::Variable>,
         ) {
             let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
             let prefix = self.split('_').next().unwrap();
             let renamed = format!("{}_{}", prefix, index);
             let mut s = HashMap::<
                 logic::toy::Variable,
-                logic::Term<logic::Atom, logic::toy::Variable>,
+                logic::Term<logic::Predicate, logic::toy::Variable>,
             >::new();
             s.insert(self.clone(), logic::Term::Variable(renamed.clone()));
             (renamed, s)
         }
     }
 
-    impl Variable<logic::Atom, logic::toy::Variable> for logic::toy::Variable {
+    impl Variable<logic::Predicate, logic::toy::Variable> for logic::toy::Variable {
         fn aux() -> logic::toy::Variable {
             let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
             format!("Aux{}", index)
@@ -548,7 +548,7 @@ mod tests {
 
     #[test]
     fn simple_solving() {
-        let goal: Goal<logic::Atom, logic::toy::Variable> = vec!["a(X)".parse().unwrap()];
+        let goal: Goal<logic::Predicate, logic::toy::Variable> = vec!["a(X)".parse().unwrap()];
         let clauses: Vec<logic::toy::Clause> = vec![
             "a(X) :- b(X).".parse().unwrap(),
             logic::toy::Clause {
@@ -570,7 +570,7 @@ mod tests {
 
     #[test]
     fn simple_nongrounded() {
-        let goal: Goal<logic::Atom, logic::toy::Variable> = vec!["a(b)".parse().unwrap()];
+        let goal: Goal<logic::Predicate, logic::toy::Variable> = vec!["a(b)".parse().unwrap()];
         let clauses: Vec<logic::toy::Clause> = vec![logic::toy::Clause {
             head: "a(X)".parse().unwrap(),
             body: vec![],
@@ -584,7 +584,7 @@ mod tests {
 
     #[test]
     fn simple_nongrounded_invalid() {
-        let goal: Goal<logic::Atom, logic::toy::Variable> = vec!["a(X)".parse().unwrap()];
+        let goal: Goal<logic::Predicate, logic::toy::Variable> = vec!["a(X)".parse().unwrap()];
         let clauses: Vec<logic::toy::Clause> = vec![logic::toy::Clause {
             head: "a(X)".parse().unwrap(),
             body: vec![],
@@ -595,7 +595,7 @@ mod tests {
 
     #[test]
     fn complex_goal() {
-        let goal: Goal<logic::Atom, logic::toy::Variable> =
+        let goal: Goal<logic::Predicate, logic::toy::Variable> =
             vec!["a(X)".parse().unwrap(), "b(X)".parse().unwrap()];
         let clauses: Vec<logic::toy::Clause> = vec![
             logic::toy::Clause {
@@ -624,7 +624,7 @@ mod tests {
 
     #[test]
     fn solving_with_binary_relations() {
-        let goal: Goal<logic::Atom, logic::toy::Variable> = vec!["a(X)".parse().unwrap()];
+        let goal: Goal<logic::Predicate, logic::toy::Variable> = vec!["a(X)".parse().unwrap()];
         let clauses: Vec<logic::toy::Clause> = vec![
             "a(X) :- b(X, Y), c(Y).".parse().unwrap(),
             logic::toy::Clause {
@@ -654,7 +654,7 @@ mod tests {
 
     #[test]
     fn simple_recursion() {
-        let goal: Goal<logic::Atom, logic::toy::Variable> = vec!["reach(a, X)".parse().unwrap()];
+        let goal: Goal<logic::Predicate, logic::toy::Variable> = vec!["reach(a, X)".parse().unwrap()];
         let clauses: Vec<logic::toy::Clause> = vec![
             "reach(X, Y) :- reach(X, Z), arc(Z, Y).".parse().unwrap(),
             "reach(X, Y) :- arc(X, Y).".parse().unwrap(),
@@ -699,7 +699,7 @@ mod tests {
 
     #[test]
     fn string_concat() {
-        let goal: Goal<logic::Atom, logic::toy::Variable> =
+        let goal: Goal<logic::Predicate, logic::toy::Variable> =
             vec!["string_concat(hello, world, X)".parse().unwrap()];
         let clauses: Vec<logic::toy::Clause> = vec![];
         let result = sld(&clauses, &goal, 10);
@@ -723,7 +723,7 @@ mod tests {
             .map(|x| (*x, true))
             .chain(bad.iter().map(|x| (*x, false)))
         {
-            let goal: Goal<logic::Atom, logic::toy::Variable> =
+            let goal: Goal<logic::Predicate, logic::toy::Variable> =
                 vec![format!("a({})", s).parse().unwrap()];
             let clauses: Vec<logic::toy::Clause> = vec![
                 logic::toy::Clause {

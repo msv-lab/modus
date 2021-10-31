@@ -21,7 +21,7 @@ use std::{
 };
 
 use crate::logic;
-use logic::{Atom, Clause, Ground, Literal, Term};
+use logic::{Predicate, Clause, Ground, Literal, Term};
 
 pub type Substitution<C, V> = HashMap<V, Term<C, V>>;
 
@@ -243,7 +243,7 @@ mod tests {
         assert_eq!(l.substitute(&mgu), m.substitute(&mgu));
         assert_eq!(mgu.get("Y".into()), Some(&Term::Variable("Z".into())));
         assert_eq!(mgu.get("X".into()), Some(&Term::Variable("Z".into())));
-        assert_eq!(mgu.get("V".into()), Some(&Term::Constant(Atom("a".into()))));
+        assert_eq!(mgu.get("V".into()), Some(&Term::Constant(Predicate("a".into()))));
         assert_eq!(mgu.get("W".into()), Some(&Term::Variable("U".into())));
     }
 

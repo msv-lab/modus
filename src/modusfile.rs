@@ -283,7 +283,7 @@ mod tests {
     #[test]
     fn fact() {
         let l1 = Literal {
-            atom: logic::Atom("l1".into()),
+            atom: logic::Predicate("l1".into()),
             args: Vec::new(),
         };
         let c = ModusClause {
@@ -297,15 +297,15 @@ mod tests {
     #[test]
     fn rule() {
         let l1 = Literal {
-            atom: logic::Atom("l1".into()),
+            atom: logic::Predicate("l1".into()),
             args: Vec::new(),
         };
         let l2 = Literal {
-            atom: logic::Atom("l2".into()),
+            atom: logic::Predicate("l2".into()),
             args: Vec::new(),
         };
         let l3 = Literal {
-            atom: logic::Atom("l3".into()),
+            atom: logic::Predicate("l3".into()),
             args: Vec::new(),
         };
         let c = Rule {
@@ -320,19 +320,19 @@ mod tests {
     #[test]
     fn rule_with_operator() {
         let foo = Literal {
-            atom: logic::Atom("foo".into()),
+            atom: logic::Predicate("foo".into()),
             args: Vec::new(),
         };
         let a = Literal {
-            atom: logic::Atom("a".into()),
+            atom: logic::Predicate("a".into()),
             args: Vec::new(),
         };
         let b = Literal {
-            atom: logic::Atom("b".into()),
+            atom: logic::Predicate("b".into()),
             args: Vec::new(),
         };
         let merge = Operator {
-            atom: logic::Atom("merge".into()),
+            atom: logic::Predicate("merge".into()),
             args: Vec::new(),
         };
         let r = Rule {
@@ -349,19 +349,19 @@ mod tests {
     #[test]
     fn modusclause_to_clause() {
         let foo = Literal {
-            atom: logic::Atom("foo".into()),
+            atom: logic::Predicate("foo".into()),
             args: Vec::new(),
         };
         let a = Literal {
-            atom: logic::Atom("a".into()),
+            atom: logic::Predicate("a".into()),
             args: Vec::new(),
         };
         let b = Literal {
-            atom: logic::Atom("b".into()),
+            atom: logic::Predicate("b".into()),
             args: Vec::new(),
         };
         let merge = Operator {
-            atom: logic::Atom("merge".into()),
+            atom: logic::Predicate("merge".into()),
             args: Vec::new(),
         };
         let r = Rule {
