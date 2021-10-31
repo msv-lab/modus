@@ -20,11 +20,13 @@ use std::{
     hash::Hash,
 };
 
-use crate::logic::{self, Predicate, Clause, Literal, Signature, Term};
+use crate::logic::{
+    self, Clause, Literal, ModusConstant, ModusVariable, Predicate, Signature, Term,
+};
 
 /// infer image predicates, i.e. those that transitively depend on image/1
 /// check that image predicates depend on image/1 in each disjunct
-pub fn check_image_predicates<C, V>(
+pub fn check_image_predicates<C: ModusConstant, V: ModusVariable>(
     clauses: &Vec<Clause<C, V>>,
 ) -> Result<HashSet<Signature>, HashSet<Signature>> {
     todo!()
@@ -32,21 +34,13 @@ pub fn check_image_predicates<C, V>(
 
 // infer grounded variables, check if grounded variables are grounded in each rule
 //TODO: not sure what to do if there are variables inside compound terms
-pub fn check_grounded_variables<C, V>(
+pub fn check_grounded_variables<C: ModusConstant, V: ModusVariable>(
     clauses: &Vec<Clause<C, V>>,
-) -> Result<HashMap<Signature, Vec<bool>>, HashSet<Signature>>
-where
-    C: Clone,
-    V: Clone + Eq + Hash,
-{
+) -> Result<HashMap<Signature, Vec<bool>>, HashSet<Signature>> {
     let mut errors: HashSet<Signature> = HashSet::new();
     let mut result: HashMap<Signature, Vec<bool>> = HashMap::new();
 
-    fn infer<C, V>(c: &Clause<C, V>) -> Vec<bool>
-    where
-        C: Clone,
-        V: Clone + Eq + Hash,
-    {
+    fn infer<C: ModusConstant, V: ModusVariable>(c: &Clause<C, V>) -> Vec<bool> {
         let body_vars = c
             .body
             .iter()

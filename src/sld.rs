@@ -21,6 +21,8 @@ use std::{
     hash::Hash,
 };
 
+use crate::logic::{ModusConstant, ModusVariable};
+use crate::unification::RenameWithSubstitution;
 use crate::{
     builtin,
     unification::{compose_extend, compose_no_extend, Rename, Substitution},
@@ -30,15 +32,15 @@ use crate::{
     unification::Substitute,
     wellformed,
 };
-use logic::{Predicate, Clause, Literal, Term};
+use logic::{Clause, Literal, Term};
 
-pub trait Variable<C, V>: Rename<C, V> {
+pub trait Variable<C: ModusConstant, V: ModusVariable>: Rename<V> {
     fn aux() -> Self;
 }
 
 type RuleId = usize;
 type TreeLevel = usize;
-pub(crate) type Goal<C, V> = Vec<Literal<C, V>>;
+pub(crate) type Goal<C: ModusConstant, V: ModusVariable> = Vec<Literal<C, V>>;
 
 /// A clause is either a rule, or a query
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -60,19 +62,19 @@ type LiteralGoalId = usize;
 
 /// literal, tree level at which it was introduced if any, where it came from
 #[derive(Clone, PartialEq, Debug)]
-struct LiteralWithHistory<C, V> {
+struct LiteralWithHistory<C: ModusConstant, V: ModusVariable> {
     literal: Literal<C, V>,
     introduction: TreeLevel,
     origin: LiteralOrigin,
 }
-type GoalWithHistory<C, V> = Vec<LiteralWithHistory<C, V>>;
+type GoalWithHistory<C: ModusConstant, V: ModusVariable> = Vec<LiteralWithHistory<C, V>>;
 
 /// An SLD tree consists of
 /// - a goal with its dependencies (at which level and from which part of body each literal was introduced)
 /// - a level, which is incremented as tree grows
 /// - a mapping from (selected literal in goal, applied rule) to (mgu after rule renaming, rule renaming, resolvent subtree)
 #[derive(Clone)]
-pub struct Tree<C, V> {
+pub struct Tree<C: ModusConstant, V: ModusVariable> {
     goal: GoalWithHistory<C, V>,
     level: TreeLevel,
     resolvents:
@@ -84,13 +86,13 @@ pub struct Tree<C, V> {
 /// - a valuation for this clause
 /// - proofs for parts of the clause body
 #[derive(Clone, Debug)]
-pub struct Proof<C, V> {
+pub struct Proof<C: ModusConstant, V: ModusVariable> {
     pub clause: ClauseId,
     pub valuation: Substitution<C, V>,
     pub children: Vec<Proof<C, V>>,
 }
 
-impl<C: Clone, V: Eq + Hash + Clone> Substitute<C, V> for GoalWithHistory<C, V> {
+impl<C: ModusConstant, V: ModusVariable> Substitute<C, V> for GoalWithHistory<C, V> {
     type Output = GoalWithHistory<C, V>;
     fn substitute(&self, s: &Substitution<C, V>) -> Self::Output {
         self.iter()
@@ -109,24 +111,16 @@ impl<C: Clone, V: Eq + Hash + Clone> Substitute<C, V> for GoalWithHistory<C, V> 
     }
 }
 
-pub fn sld<C, V>(
+pub fn sld<C: ModusConstant, V: ModusVariable>(
     rules: &Vec<Clause<C, V>>,
     goal: &Goal<C, V>,
     maxdepth: TreeLevel,
-) -> Option<Tree<C, V>>
-where
-    C: Clone + PartialEq + Debug + ToString + From<String>,
-    V: Clone + Eq + Hash + Variable<C, V> + Debug,
-{
+) -> Option<Tree<C, V>> {
     /// select leftmost literal with compatible groundness
-    fn select<C, V>(
+    fn select<C: ModusConstant, V: ModusVariable>(
         goal: &GoalWithHistory<C, V>,
         grounded: &HashMap<Signature, Vec<bool>>,
-    ) -> Option<(LiteralGoalId, LiteralWithHistory<C, V>)>
-    where
-        C: Clone + ToString + From<String>,
-        V: Clone + Eq + Hash,
-    {
+    ) -> Option<(LiteralGoalId, LiteralWithHistory<C, V>)> {
         goal.iter()
             .enumerate()
             .find(|(id, lit)| {
@@ -152,18 +146,14 @@ where
             .map(|(a, b)| (a, b.clone()))
     }
 
-    fn resolve<C, V>(
+    fn resolve<C: ModusConstant, V: ModusVariable>(
         lid: LiteralGoalId,
         rid: ClauseId,
         goal: &GoalWithHistory<C, V>,
         mgu: &Substitution<C, V>,
         rule: &Clause<C, V>,
         level: TreeLevel,
-    ) -> GoalWithHistory<C, V>
-    where
-        C: Clone + PartialEq + Debug + ToString,
-        V: Clone + Eq + Hash + Variable<C, V> + Debug,
-    {
+    ) -> GoalWithHistory<C, V> {
         let mut g: GoalWithHistory<C, V> = goal.clone();
         g.remove(lid);
         g.extend(
@@ -186,17 +176,13 @@ where
         g.substitute(mgu)
     }
 
-    fn inner<C, V>(
+    fn inner<C: ModusConstant, V: ModusVariable>(
         rules: &Vec<Clause<C, V>>,
         goal: &GoalWithHistory<C, V>,
         maxdepth: TreeLevel,
         level: TreeLevel,
         grounded: &HashMap<Signature, Vec<bool>>,
-    ) -> Option<Tree<C, V>>
-    where
-        C: Clone + PartialEq + Debug + ToString + From<String>,
-        V: Clone + Eq + Hash + Variable<C, V> + Debug,
-    {
+    ) -> Option<Tree<C, V>> {
         #[cfg(debug_assertions)]
         {
             // FIXME: move this ad-hoc debug code elsewhere
@@ -321,16 +307,8 @@ where
     inner(rules, &goal_with_history, maxdepth, 0, &grounded)
 }
 
-pub fn solutions<C, V>(tree: &Tree<C, V>) -> HashSet<Goal<C, V>>
-where
-    C: Clone + Eq + Hash + Debug + Display,
-    V: Clone + Eq + Hash + Variable<C, V> + Debug + Display,
-{
-    fn inner<C, V>(tree: &Tree<C, V>) -> Vec<Substitution<C, V>>
-    where
-        C: Clone,
-        V: Clone + Eq + Hash + Debug,
-    {
+pub fn solutions<C: ModusConstant, V: ModusVariable>(tree: &Tree<C, V>) -> HashSet<Goal<C, V>> {
+    fn inner<C: ModusConstant, V: ModusVariable>(tree: &Tree<C, V>) -> Vec<Substitution<C, V>> {
         if tree.goal.is_empty() {
             let s = Substitution::<C, V>::new();
             return vec![s];
@@ -364,7 +342,7 @@ where
 }
 
 #[derive(Clone)]
-struct PathNode<C, V> {
+struct PathNode<C: ModusConstant, V: ModusVariable> {
     resolvent: GoalWithHistory<C, V>,
     applied: ClauseId,
     selected: LiteralGoalId,
@@ -372,28 +350,20 @@ struct PathNode<C, V> {
 }
 
 // sequence of nodes and global mgu
-type Path<C, V> = (Vec<PathNode<C, V>>, Substitution<C, V>);
+type Path<C: ModusConstant, V: ModusVariable> = (Vec<PathNode<C, V>>, Substitution<C, V>);
 
-pub fn proofs<C, V>(
+pub fn proofs<C: ModusConstant, V: ModusVariable>(
     tree: &Tree<C, V>,
     rules: &Vec<Clause<C, V>>,
     goal: &Goal<C, V>,
-) -> Vec<Proof<C, V>>
-where
-    C: Clone + Eq + Hash + Debug,
-    V: Clone + Eq + Hash + Variable<C, V> + Debug,
-{
-    fn flatten_compose<C, V>(
+) -> Vec<Proof<C, V>> {
+    fn flatten_compose<C: ModusConstant, V: ModusVariable>(
         lid: &LiteralGoalId,
         cid: &ClauseId,
         mgu: &Substitution<C, V>,
         renaming: &Substitution<C, V>,
         tree: &Tree<C, V>,
-    ) -> Vec<Path<C, V>>
-    where
-        C: Clone + Eq + Hash,
-        V: Clone + Eq + Hash,
-    {
+    ) -> Vec<Path<C, V>> {
         if tree.goal.is_empty() {
             return vec![(
                 vec![PathNode {
@@ -427,16 +397,12 @@ where
             .collect()
     }
     // reconstruct proof for a given tree level
-    fn proof_for_level<C, V>(
+    fn proof_for_level<C: ModusConstant, V: ModusVariable>(
         path: &Vec<PathNode<C, V>>,
         mgu: &Substitution<C, V>,
         rules: &Vec<Clause<C, V>>,
         level: TreeLevel,
-    ) -> Proof<C, V>
-    where
-        C: Clone + Eq + Hash,
-        V: Clone + Eq + Hash,
-    {
+    ) -> Proof<C, V> {
         let mut sublevels_map: HashMap<usize, TreeLevel> = HashMap::new();
         for l in 0..path.len() {
             if !path[l].resolvent.is_empty() {
@@ -519,14 +485,8 @@ mod tests {
     static AVAILABLE_INDEX: AtomicU32 = AtomicU32::new(0);
 
     /// Assume that underscore is not used in normal variables
-    impl Rename<logic::Predicate, logic::toy::Variable> for logic::toy::Variable {
-        type Output = logic::toy::Variable;
-        fn rename(
-            &self,
-        ) -> (
-            Self::Output,
-            Substitution<logic::Predicate, logic::toy::Variable>,
-        ) {
+    impl Rename<logic::toy::Variable> for logic::toy::Variable {
+        fn rename(&self) -> logic::toy::Variable {
             let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
             let prefix = self.split('_').next().unwrap();
             let renamed = format!("{}_{}", prefix, index);
@@ -535,7 +495,7 @@ mod tests {
                 logic::Term<logic::Predicate, logic::toy::Variable>,
             >::new();
             s.insert(self.clone(), logic::Term::Variable(renamed.clone()));
-            (renamed, s)
+            renamed
         }
     }
 
@@ -654,7 +614,8 @@ mod tests {
 
     #[test]
     fn simple_recursion() {
-        let goal: Goal<logic::Predicate, logic::toy::Variable> = vec!["reach(a, X)".parse().unwrap()];
+        let goal: Goal<logic::Predicate, logic::toy::Variable> =
+            vec!["reach(a, X)".parse().unwrap()];
         let clauses: Vec<logic::toy::Clause> = vec![
             "reach(X, Y) :- reach(X, Z), arc(Z, Y).".parse().unwrap(),
             "reach(X, Y) :- arc(X, Y).".parse().unwrap(),

@@ -27,55 +27,18 @@ use nom::map;
 use crate::{
     dockerfile,
     dockerfile::{Dockerfile, ResolvedParent},
-    logic::{Predicate, Clause, Literal, Term},
-    modusfile,
-    modusfile::{Constant, Modusfile},
+    logic::{self, Clause, Constant, Literal, Predicate, Term, Variable},
+    modusfile::Modusfile,
     sld,
     unification::{Rename, Substitute, Substitution},
 };
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum Variable {
-    User(String),
-    Auxiliary(u32),
-    Renamed(u32, Box<Variable>),
-}
-
-impl fmt::Display for Variable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Variable::User(s) => write!(f, "{}", s),
-            _ => unimplemented!(),
-        }
-    }
-}
-
-static AVAILABLE_VARIABLE_INDEX: AtomicU32 = AtomicU32::new(0);
-
-impl Rename<Constant, Variable> for Variable {
-    type Output = Variable;
-    fn rename(&self) -> (Variable, Substitution<Constant, Variable>) {
-        let index = AVAILABLE_VARIABLE_INDEX.fetch_add(1, Ordering::SeqCst);
-        let renamed = Variable::Renamed(index, Box::new((*self).clone()));
-        let mut s = HashMap::<Variable, Term<Constant, Variable>>::new();
-        s.insert(self.clone(), Term::Variable(renamed.clone()));
-        (renamed, s)
-    }
-}
-
-impl sld::Variable<Constant, Variable> for Variable {
-    fn aux() -> Variable {
-        let index = AVAILABLE_VARIABLE_INDEX.fetch_add(1, Ordering::SeqCst);
-        Variable::Auxiliary(index)
-    }
-}
-
 pub fn prove_goal(
     mf: &Modusfile,
-    goal: &Vec<modusfile::Literal>,
-) -> Result<Vec<sld::Proof<modusfile::Constant, modusfile::Variable>>, &'static str> {
+    goal: &Vec<logic::Literal>,
+) -> Result<Vec<sld::Proof<logic::Constant, logic::Variable>>, &'static str> {
     let max_depth = 20;
-    let clauses: Vec<Clause<modusfile::Constant, modusfile::Variable>> =
+    let clauses: Vec<Clause<logic::Constant, logic::Variable>> =
         mf.0.iter().map(|mc| mc.into()).collect();
 
     let res = sld::sld(&clauses, goal, max_depth);
@@ -85,7 +48,7 @@ pub fn prove_goal(
     }
 }
 
-pub fn transpile(mf: Modusfile, query: modusfile::Literal) -> Dockerfile<ResolvedParent> {
+pub fn transpile(mf: Modusfile, query: logic::Literal) -> Dockerfile<ResolvedParent> {
     let goal = vec![query];
     let proofs = prove_goal(&mf, &goal);
     todo!()
@@ -94,7 +57,7 @@ pub fn transpile(mf: Modusfile, query: modusfile::Literal) -> Dockerfile<Resolve
 static AVAILABLE_STAGE_INDEX: AtomicU32 = AtomicU32::new(0);
 
 fn proof_to_docker(
-    rules: &Vec<Clause<Constant, Variable>>,
+    rules: &Vec<Clause>,
     proof: &sld::Proof<Constant, Variable>,
     cache: &mut HashMap<sld::Goal<Constant, Variable>, ResolvedParent>,
     goal: &sld::Goal<Constant, Variable>,
@@ -103,7 +66,7 @@ fn proof_to_docker(
 }
 
 fn proofs_to_docker(
-    rules: &Vec<Clause<Constant, Variable>>,
+    rules: &Vec<Clause>,
     proofs: &Vec<sld::Proof<Constant, Variable>>,
     goal: &sld::Goal<Constant, Variable>,
 ) -> Dockerfile<ResolvedParent> {

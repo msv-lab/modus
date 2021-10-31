@@ -19,25 +19,13 @@ use fp_core::compose::compose_two;
 use std::fmt;
 use std::str;
 
+use crate::dockerfile;
 use crate::logic;
-use crate::{dockerfile, transpiler};
-
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum Constant {
-    String(String),
-    Integer(u32), //TODO: arbitrary-precision arithmetic?
-}
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Expression {
     Literal(Literal),
     OperatorApplication(Vec<Expression>, Operator),
-}
-
-impl From<String> for Constant {
-    fn from(s: String) -> Self {
-        Constant::String(s)
-    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -71,11 +59,12 @@ impl From<&crate::modusfile::ModusClause>
     }
 }
 
-pub type Fact = ModusClause;
-pub type Rule = ModusClause;
-pub type Variable = transpiler::Variable;
-pub type Literal = logic::Literal<Constant, Variable>;
-pub type Term = logic::Term<Constant, Variable>;
+type Constant = logic::Constant;
+type Variable = logic::Variable;
+type Fact = ModusClause;
+type Rule = ModusClause;
+type Literal = logic::Literal;
+type Term = logic::Term;
 pub type Operator = Literal;
 
 #[derive(Clone, PartialEq, Debug)]

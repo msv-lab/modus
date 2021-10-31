@@ -15,12 +15,73 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use fp_core::compose::compose_two;
+//! This module contains logical structures that define the intermediate language used by Modus.
+//!
+//! Currently, these structures are generic, parameterized over the types they may use for constants
+//! or variables.
+
+use crate::sld;
+use crate::unification::{Rename, Substitution};
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
+use std::fmt::{Debug, Display};
 use std::str;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::{collections::HashSet, hash::Hash};
 
+pub trait ModusConstant: Clone + PartialEq + Eq + Hash + Debug + Display + From<String> {}
+pub trait ModusVariable: Clone + PartialEq + Eq + Hash + Debug + Display + Rename<Self> {}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Constant {
+    String(String),
+    Integer(u32), //TODO: arbitrary-precision arithmetic?
+}
+
+impl From<String> for Constant {
+    fn from(s: String) -> Self {
+        Constant::String(s)
+    }
+}
+
+impl ModusConstant for Constant {}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Variable {
+    User(String),
+    Auxiliary(u32),
+    Renamed(u32, Box<Variable>),
+}
+
+impl fmt::Display for Variable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Variable::User(s) => write!(f, "{}", s),
+            _ => unimplemented!(),
+        }
+    }
+}
+
+static AVAILABLE_VARIABLE_INDEX: AtomicU32 = AtomicU32::new(0);
+
+impl Rename<Variable> for Variable {
+    fn rename(&self) -> Variable {
+        let index = AVAILABLE_VARIABLE_INDEX.fetch_add(1, Ordering::SeqCst);
+        Variable::Renamed(index, Box::new((*self).clone()))
+    }
+}
+
+impl sld::Variable<Constant, Variable> for Variable {
+    fn aux() -> Variable {
+        let index = AVAILABLE_VARIABLE_INDEX.fetch_add(1, Ordering::SeqCst);
+        Variable::Auxiliary(index)
+    }
+}
+
+impl ModusVariable for Variable {}
+
+/// A predicate symbol
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Predicate(pub String);
 
@@ -32,15 +93,13 @@ impl From<String> for Predicate {
 
 /// C is constant, V is variable
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum Term<C, V> {
+pub enum Term<C: ModusConstant = Constant, V: ModusVariable = Variable> {
     Constant(C),
-    Atom(Predicate),
     Variable(V),
-    Compound(Predicate, Vec<Term<C, V>>),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct Literal<C, V> {
+pub struct Literal<C: ModusConstant = Constant, V: ModusVariable = Variable> {
     pub atom: Predicate,
     pub args: Vec<Term<C, V>>,
 }
@@ -49,7 +108,7 @@ pub struct Literal<C, V> {
 pub struct Signature(pub Predicate, pub u32);
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Clause<C, V> {
+pub struct Clause<C: ModusConstant = Constant, V: ModusVariable = Variable> {
     pub head: Literal<C, V>,
     pub body: Vec<Literal<C, V>>,
 }
@@ -58,7 +117,7 @@ pub trait Ground {
     fn is_ground(&self) -> bool;
 }
 
-impl<C, V: Clone + Eq + Hash> Term<C, V> {
+impl<C: ModusConstant, V: ModusVariable> Term<C, V> {
     pub fn variables(&self) -> HashSet<V> {
         let mut s = HashSet::<V>::new();
         match self {
@@ -71,7 +130,7 @@ impl<C, V: Clone + Eq + Hash> Term<C, V> {
     }
 }
 
-impl<C, V: Clone + Eq + Hash> Literal<C, V> {
+impl<C: ModusConstant, V: ModusVariable> Literal<C, V> {
     pub fn signature(&self) -> Signature {
         Signature(self.atom.clone(), self.args.len().try_into().unwrap())
     }
@@ -87,7 +146,7 @@ impl<C, V: Clone + Eq + Hash> Literal<C, V> {
     }
 }
 
-impl<C, V: Clone + Eq + Hash> Clause<C, V> {
+impl<C: ModusConstant, V: ModusVariable> Clause<C, V> {
     pub fn variables(&self) -> HashSet<V> {
         let mut body = self
             .body
@@ -103,28 +162,19 @@ impl<C, V: Clone + Eq + Hash> Clause<C, V> {
     }
 }
 
-impl<C, V> Ground for Term<C, V>
-where
-    V: Clone + Eq + Hash,
-{
+impl<C: ModusConstant, V: ModusVariable> Ground for Term<C, V> {
     fn is_ground(&self) -> bool {
         self.variables().is_empty()
     }
 }
 
-impl<C, V> Ground for Literal<C, V>
-where
-    V: Clone + Eq + Hash,
-{
+impl<C: ModusConstant, V: ModusVariable> Ground for Literal<C, V> {
     fn is_ground(&self) -> bool {
         self.variables().is_empty()
     }
 }
 
-impl<C, V> Ground for Clause<C, V>
-where
-    V: Clone + Eq + Hash,
-{
+impl<C: ModusConstant, V: ModusVariable> Ground for Clause<C, V> {
     fn is_ground(&self) -> bool {
         self.variables().is_empty()
     }
@@ -142,37 +192,27 @@ impl fmt::Display for Predicate {
     }
 }
 
-impl<C, V> fmt::Display for Term<C, V>
-where
-    C: fmt::Display,
-    V: fmt::Display,
-{
+impl<C: ModusConstant, V: ModusVariable> fmt::Display for Term<C, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
             Term::Constant(s) => write!(f, "{}", s),
             Term::Variable(s) => write!(f, "{}", s),
-            Term::Atom(s) => write!(f, "{}", s),
-            Term::Compound(a, l) => write!(f, "{}({})", a, display_sep(l, ", ")),
         }
     }
 }
 
 fn display_sep<T: fmt::Display>(seq: &[T], sep: &str) -> String {
-    let mut result = String::new();
-    if let Some((last, elements)) = seq.split_last() {
-        for el in elements {
-            result += &el.to_string();
-            result.push_str(sep);
-        }
-        result += &last.to_string();
-    }
-    result
+    return seq
+        .iter()
+        .map(|t| t.to_string())
+        .collect::<Vec<String>>()
+        .join(sep);
 }
 
 impl<C, V> fmt::Display for Literal<C, V>
 where
-    C: fmt::Display,
-    V: fmt::Display,
+    C: ModusConstant,
+    V: ModusVariable,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &*self.args {
@@ -184,8 +224,8 @@ where
 
 impl<C, V> fmt::Display for Clause<C, V>
 where
-    C: fmt::Display,
-    V: fmt::Display,
+    C: ModusConstant,
+    V: ModusVariable,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} :- {}", self.head, display_sep(&self.body, ", "))
@@ -235,7 +275,7 @@ pub mod parser {
         ))(i)
     }
 
-    pub fn term<'a, FC: 'a, FV: 'a, C, V>(
+    pub fn term<'a, FC: 'a, FV: 'a, C: ModusConstant, V: ModusVariable>(
         constant: FC,
         variable: FV,
     ) -> impl FnMut(&'a str) -> IResult<&'a str, Term<C, V>>
@@ -246,7 +286,7 @@ pub mod parser {
         alt((map(constant, Term::Constant), map(variable, Term::Variable)))
     }
 
-    pub fn literal<'a, FC: 'a, FV: 'a, C, V>(
+    pub fn literal<'a, FC: 'a, FV: 'a, C: ModusConstant, V: ModusVariable>(
         constant: FC,
         variable: FV,
     ) -> impl FnMut(&'a str) -> IResult<&'a str, Literal<C, V>>
@@ -276,7 +316,7 @@ pub mod parser {
         )
     }
 
-    pub fn clause<'a, FC: 'a, FV: 'a, C, V>(
+    pub fn clause<'a, FC: 'a, FV: 'a, C: ModusConstant, V: ModusVariable>(
         constant: FC,
         variable: FV,
     ) -> impl FnMut(&'a str) -> IResult<&'a str, Clause<C, V>>
@@ -300,6 +340,7 @@ pub mod toy {
     use fp_core::compose::compose_two;
     use std::str;
 
+    use crate::logic::{ModusConstant, ModusVariable};
     use nom::{
         branch::alt,
         bytes::complete::tag,
@@ -316,6 +357,9 @@ pub mod toy {
     pub type Term = super::Term<Predicate, Variable>;
     pub type Literal = super::Literal<Predicate, Variable>;
     pub type Clause = super::Clause<Predicate, Variable>;
+
+    impl ModusConstant for Predicate {}
+    impl ModusVariable for Variable {}
 
     fn toy_var(i: &str) -> IResult<&str, Variable> {
         map(

@@ -21,15 +21,12 @@ use std::{
 };
 
 use crate::logic;
-use logic::{Predicate, Clause, Ground, Literal, Term};
+use crate::logic::{ModusConstant, ModusVariable};
+use logic::{Clause, Ground, Literal, Predicate, Term};
 
 pub type Substitution<C, V> = HashMap<V, Term<C, V>>;
 
-impl<C, V> Ground for Substitution<C, V>
-where
-    C: Clone,
-    V: Clone + Eq + Hash,
-{
+impl<C: ModusConstant, V: ModusVariable> Ground for Substitution<C, V> {
     fn is_ground(&self) -> bool {
         let mut result = true;
         for v in self.values() {
@@ -41,36 +38,44 @@ where
     }
 }
 
-pub trait Substitute<C, V> {
+pub trait Substitute<C: ModusConstant, V: ModusVariable> {
     type Output;
 
     fn substitute(&self, s: &Substitution<C, V>) -> Self::Output;
 }
 
-pub trait Rename<C, V> {
+pub trait Rename<V: ModusVariable> {
+    fn rename(&self) -> V;
+}
+
+pub trait RenameWithSubstitution<C: ModusConstant, V: ModusVariable> {
     type Output;
 
     fn rename(&self) -> (Self::Output, Substitution<C, V>);
 }
 
-impl<C: Clone, V: Eq + Hash + Clone> Substitute<C, V> for Term<C, V> {
+impl<C: ModusConstant, V: ModusVariable> Substitute<C, V> for Term<C, V> {
     type Output = Term<C, V>;
     fn substitute(&self, s: &Substitution<C, V>) -> Self::Output {
         match &self {
             Term::Variable(v) => s.get(v).unwrap_or(self).clone(),
-            Term::Compound(atom, args) => todo!(),
             _ => self.clone(),
         }
     }
 }
 
-impl<C: Clone, V: Eq + Hash + Clone + Rename<C, V>> Rename<C, V> for Term<C, V> {
+impl<C: ModusConstant, V: ModusVariable> RenameWithSubstitution<C, V> for Term<C, V> {
     type Output = Term<C, V>;
     fn rename(&self) -> (Self::Output, Substitution<C, V>) {
         let s: Substitution<C, V> = self
             .variables()
             .iter()
-            .map(|r| r.rename().1)
+            .map(|r| {
+                [(r.clone(), Term::Variable(r.rename()))]
+                    .iter()
+                    .cloned()
+                    .collect::<Substitution<C, V>>()
+            })
             .reduce(|mut l, r| {
                 l.extend(r);
                 l
@@ -80,7 +85,7 @@ impl<C: Clone, V: Eq + Hash + Clone + Rename<C, V>> Rename<C, V> for Term<C, V> 
     }
 }
 
-impl<C: Clone, V: Eq + Hash + Clone> Substitute<C, V> for Literal<C, V> {
+impl<C: ModusConstant, V: ModusVariable> Substitute<C, V> for Literal<C, V> {
     type Output = Literal<C, V>;
     fn substitute(&self, s: &Substitution<C, V>) -> Self::Output {
         Literal {
@@ -90,13 +95,18 @@ impl<C: Clone, V: Eq + Hash + Clone> Substitute<C, V> for Literal<C, V> {
     }
 }
 
-impl<C: Clone, V: Eq + Hash + Clone + Rename<C, V>> Rename<C, V> for Literal<C, V> {
+impl<C: ModusConstant, V: ModusVariable> RenameWithSubstitution<C, V> for Literal<C, V> {
     type Output = Literal<C, V>;
     fn rename(&self) -> (Self::Output, Substitution<C, V>) {
         let s: Substitution<C, V> = self
             .variables()
             .iter()
-            .map(|r| r.rename().1)
+            .map(|r| {
+                [(r.clone(), Term::Variable(r.rename()))]
+                    .iter()
+                    .cloned()
+                    .collect::<Substitution<C, V>>()
+            })
             .reduce(|mut l, r| {
                 l.extend(r);
                 l
@@ -106,20 +116,25 @@ impl<C: Clone, V: Eq + Hash + Clone + Rename<C, V>> Rename<C, V> for Literal<C, 
     }
 }
 
-impl<C: Clone, V: Eq + Hash + Clone> Substitute<C, V> for Vec<Literal<C, V>> {
+impl<C: ModusConstant, V: ModusVariable> Substitute<C, V> for Vec<Literal<C, V>> {
     type Output = Vec<Literal<C, V>>;
     fn substitute(&self, s: &Substitution<C, V>) -> Self::Output {
         self.iter().map(|l| l.substitute(s)).collect()
     }
 }
 
-impl<C: Clone, V: Eq + Hash + Clone + Rename<C, V>> Rename<C, V> for Vec<Literal<C, V>> {
+impl<C: ModusConstant, V: ModusVariable> RenameWithSubstitution<C, V> for Vec<Literal<C, V>> {
     type Output = Vec<Literal<C, V>>;
     fn rename(&self) -> (Self::Output, Substitution<C, V>) {
         let s: Substitution<C, V> = self
             .iter()
             .flat_map(|e| e.variables())
-            .map(|r| r.rename().1)
+            .map(|r| {
+                [(r.clone(), Term::Variable(r.rename()))]
+                    .iter()
+                    .cloned()
+                    .collect::<Substitution<C, V>>()
+            })
             .reduce(|mut l, r| {
                 l.extend(r);
                 l
@@ -129,7 +144,7 @@ impl<C: Clone, V: Eq + Hash + Clone + Rename<C, V>> Rename<C, V> for Vec<Literal
     }
 }
 
-impl<C: Clone, V: Eq + Hash + Clone> Substitute<C, V> for Clause<C, V> {
+impl<C: ModusConstant, V: ModusVariable> Substitute<C, V> for Clause<C, V> {
     type Output = Clause<C, V>;
     fn substitute(&self, s: &Substitution<C, V>) -> Self::Output {
         Clause {
@@ -139,13 +154,18 @@ impl<C: Clone, V: Eq + Hash + Clone> Substitute<C, V> for Clause<C, V> {
     }
 }
 
-impl<C: Clone, V: Eq + Hash + Clone + Rename<C, V>> Rename<C, V> for Clause<C, V> {
+impl<C: ModusConstant, V: ModusVariable> RenameWithSubstitution<C, V> for Clause<C, V> {
     type Output = Clause<C, V>;
     fn rename(&self) -> (Self::Output, Substitution<C, V>) {
         let s: Substitution<C, V> = self
             .variables()
             .iter()
-            .map(|r| r.rename().1)
+            .map(|r| {
+                [(r.clone(), Term::Variable(r.rename()))]
+                    .iter()
+                    .cloned()
+                    .collect::<Substitution<C, V>>()
+            })
             .reduce(|mut l, r| {
                 l.extend(r);
                 l
@@ -155,11 +175,10 @@ impl<C: Clone, V: Eq + Hash + Clone + Rename<C, V>> Rename<C, V> for Clause<C, V
     }
 }
 
-pub fn compose_no_extend<C, V>(l: &Substitution<C, V>, r: &Substitution<C, V>) -> Substitution<C, V>
-where
-    C: Clone,
-    V: Eq + Hash + Clone,
-{
+pub fn compose_no_extend<C: ModusConstant, V: ModusVariable>(
+    l: &Substitution<C, V>,
+    r: &Substitution<C, V>,
+) -> Substitution<C, V> {
     let mut result = HashMap::<V, Term<C, V>>::new();
     for (k, v) in l {
         result.insert(k.clone(), v.substitute(r));
@@ -167,21 +186,16 @@ where
     result
 }
 
-pub fn compose_extend<C, V>(l: &Substitution<C, V>, r: &Substitution<C, V>) -> Substitution<C, V>
-where
-    C: Clone,
-    V: Eq + Hash + Clone,
-{
+pub fn compose_extend<C: ModusConstant, V: ModusVariable>(
+    l: &Substitution<C, V>,
+    r: &Substitution<C, V>,
+) -> Substitution<C, V> {
     let mut result = compose_no_extend(l, r);
     result.extend(r.clone());
     result
 }
 
-impl<C, V> Literal<C, V>
-where
-    C: PartialEq + Clone,
-    V: PartialEq + Eq + Hash + Clone,
-{
+impl<C: ModusConstant, V: ModusVariable> Literal<C, V> {
     pub fn unify(&self, other: &Literal<C, V>) -> Option<Substitution<C, V>> {
         if self.signature() != other.signature() {
             return None;
@@ -189,12 +203,6 @@ where
         let mut s = HashMap::<V, Term<C, V>>::new();
         for (i, self_term) in self.args.iter().enumerate() {
             let other_term = &other.args[i];
-            match (self_term, other_term) {
-                (Term::Compound(_, _), _) | (_, Term::Compound(_, _)) => {
-                    panic!("compound terms are not supported in unification")
-                }
-                _ => (),
-            }
             let self_term_subs = self_term.substitute(&s);
             let other_term_subs = other_term.substitute(&s);
             if self_term_subs != other_term_subs {
@@ -243,7 +251,10 @@ mod tests {
         assert_eq!(l.substitute(&mgu), m.substitute(&mgu));
         assert_eq!(mgu.get("Y".into()), Some(&Term::Variable("Z".into())));
         assert_eq!(mgu.get("X".into()), Some(&Term::Variable("Z".into())));
-        assert_eq!(mgu.get("V".into()), Some(&Term::Constant(Predicate("a".into()))));
+        assert_eq!(
+            mgu.get("V".into()),
+            Some(&Term::Constant(Predicate("a".into())))
+        );
         assert_eq!(mgu.get("W".into()), Some(&Term::Variable("U".into())));
     }
 
