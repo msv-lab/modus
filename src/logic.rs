@@ -21,8 +21,8 @@
 //! or variables.
 
 use crate::sld;
-use crate::unification::{Rename, Substitution};
-use std::collections::HashMap;
+use crate::unification::{Rename};
+
 use std::convert::TryInto;
 use std::fmt;
 use std::fmt::{Debug, Display};

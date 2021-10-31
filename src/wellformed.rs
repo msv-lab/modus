@@ -15,14 +15,9 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{
-    collections::{HashMap, HashSet},
-    hash::Hash,
-};
+use std::collections::{HashMap, HashSet};
 
-use crate::logic::{
-    self, Clause, Literal, ModusConstant, ModusVariable, Predicate, Signature, Term,
-};
+use crate::logic::{Clause, ModusConstant, ModusVariable, Signature, Term};
 
 /// infer image predicates, i.e. those that transitively depend on image/1
 /// check that image predicates depend on image/1 in each disjunct
@@ -83,10 +78,12 @@ pub fn check_grounded_variables<C: ModusConstant, V: ModusVariable>(
 
 #[cfg(test)]
 mod tests {
+    use crate::logic::{Predicate, toy};
+
     use super::*;
     #[test]
     fn consistently_grounded() {
-        let clauses: Vec<logic::toy::Clause> = vec![
+        let clauses: Vec<toy::Clause> = vec![
             "a(X, Y) :- b(X), c(X, Z).".parse().unwrap(),
             "a(X, Y) :- d(X).".parse().unwrap(),
             "b(X) :- d(X).".parse().unwrap(),
@@ -101,7 +98,7 @@ mod tests {
 
     #[test]
     fn inconsistently_grounded() {
-        let clauses: Vec<logic::toy::Clause> = vec![
+        let clauses: Vec<toy::Clause> = vec![
             "a(X, Y) :- b(X), c(X, Z).".parse().unwrap(),
             "a(X, Y) :- d(Y).".parse().unwrap(),
         ];

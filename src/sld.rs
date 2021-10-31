@@ -17,7 +17,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fmt::{Debug, Display},
+    fmt::{Debug},
     hash::Hash,
 };
 
@@ -40,7 +40,7 @@ pub trait Variable<C: ModusConstant, V: ModusVariable>: Rename<V> {
 
 type RuleId = usize;
 type TreeLevel = usize;
-pub(crate) type Goal<C: ModusConstant, V: ModusVariable> = Vec<Literal<C, V>>;
+pub(crate) type Goal<C, V> = Vec<Literal<C, V>>;
 
 /// A clause is either a rule, or a query
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -67,7 +67,7 @@ struct LiteralWithHistory<C: ModusConstant, V: ModusVariable> {
     introduction: TreeLevel,
     origin: LiteralOrigin,
 }
-type GoalWithHistory<C: ModusConstant, V: ModusVariable> = Vec<LiteralWithHistory<C, V>>;
+type GoalWithHistory<C, V> = Vec<LiteralWithHistory<C, V>>;
 
 /// An SLD tree consists of
 /// - a goal with its dependencies (at which level and from which part of body each literal was introduced)
@@ -123,7 +123,7 @@ pub fn sld<C: ModusConstant, V: ModusVariable>(
     ) -> Option<(LiteralGoalId, LiteralWithHistory<C, V>)> {
         goal.iter()
             .enumerate()
-            .find(|(id, lit)| {
+            .find(|(_id, lit)| {
                 let literal = &lit.literal;
                 if builtin::select_builtin(literal).is_some() {
                     return true;
@@ -350,7 +350,7 @@ struct PathNode<C: ModusConstant, V: ModusVariable> {
 }
 
 // sequence of nodes and global mgu
-type Path<C: ModusConstant, V: ModusVariable> = (Vec<PathNode<C, V>>, Substitution<C, V>);
+type Path<C, V> = (Vec<PathNode<C, V>>, Substitution<C, V>);
 
 pub fn proofs<C: ModusConstant, V: ModusVariable>(
     tree: &Tree<C, V>,

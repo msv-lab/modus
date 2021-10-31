@@ -15,22 +15,19 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use core::fmt;
+
 use std::{
     collections::HashMap,
-    sync::atomic::{AtomicU32, Ordering},
-    thread::panicking,
+    sync::atomic::{AtomicU32},
 };
 
-use nom::map;
+
 
 use crate::{
-    dockerfile,
     dockerfile::{Dockerfile, ResolvedParent},
-    logic::{self, Clause, Constant, Literal, Predicate, Term, Variable},
+    logic::{self, Clause, Constant, Variable},
     modusfile::Modusfile,
     sld,
-    unification::{Rename, Substitute, Substitution},
 };
 
 pub fn prove_goal(

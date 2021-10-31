@@ -15,14 +15,11 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{
-    collections::{HashMap, HashSet},
-    hash::Hash,
-};
+use std::collections::HashMap;
 
 use crate::logic;
 use crate::logic::{ModusConstant, ModusVariable};
-use logic::{Clause, Ground, Literal, Predicate, Term};
+use logic::{Clause, Ground, Literal, Term, Predicate};
 
 pub type Substitution<C, V> = HashMap<V, Term<C, V>>;
 
