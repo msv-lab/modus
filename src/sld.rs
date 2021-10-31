@@ -41,17 +41,17 @@ type TreeLevel = usize;
 pub(crate) type Goal<C, V> = Vec<Literal<C, V>>;
 
 /// A clause is either a rule, or a query
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-pub enum ClauseId {
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum ClauseId<C, V> {
     Rule(RuleId),
     Query,
-    Builtin,
+    Builtin(Literal<C, V>),
 }
 
 /// A literal origin can be uniquely identified through its source clause and its index in the clause body
 #[derive(Clone, PartialEq, Debug)]
-pub struct LiteralOrigin {
-    clause: ClauseId,
+pub struct LiteralOrigin<C, V> {
+    clause: ClauseId<C, V>,
     body_index: usize,
 }
 
@@ -63,7 +63,7 @@ type LiteralGoalId = usize;
 struct LiteralWithHistory<C, V> {
     literal: Literal<C, V>,
     introduction: TreeLevel,
-    origin: LiteralOrigin,
+    origin: LiteralOrigin<C, V>,
 }
 type GoalWithHistory<C, V> = Vec<LiteralWithHistory<C, V>>;
 
@@ -76,7 +76,7 @@ pub struct Tree<C, V> {
     goal: GoalWithHistory<C, V>,
     level: TreeLevel,
     resolvents:
-        HashMap<(LiteralGoalId, ClauseId), (Substitution<C, V>, Substitution<C, V>, Tree<C, V>)>,
+        HashMap<(LiteralGoalId, ClauseId<C, V>), (Substitution<C, V>, Substitution<C, V>, Tree<C, V>)>,
 }
 
 /// A proof tree consist of
@@ -85,7 +85,7 @@ pub struct Tree<C, V> {
 /// - proofs for parts of the clause body
 #[derive(Clone, Debug)]
 pub struct Proof<C, V> {
-    pub clause: ClauseId,
+    pub clause: ClauseId<C, V>,
     pub valuation: Substitution<C, V>,
     pub children: Vec<Proof<C, V>>,
 }
@@ -115,7 +115,7 @@ pub fn sld<C, V>(
     maxdepth: TreeLevel,
 ) -> Option<Tree<C, V>>
 where
-    C: Clone + PartialEq + Debug + ToString + From<String>,
+    C: Clone + PartialEq + Debug + ToString + From<String> + Eq + Hash,
     V: Clone + Eq + Hash + Variable<C, V> + Debug,
 {
     /// select leftmost literal with compatible groundness
@@ -154,7 +154,7 @@ where
 
     fn resolve<C, V>(
         lid: LiteralGoalId,
-        rid: ClauseId,
+        rid: ClauseId<C, V>,
         goal: &GoalWithHistory<C, V>,
         mgu: &Substitution<C, V>,
         rule: &Clause<C, V>,
@@ -172,7 +172,7 @@ where
                 .enumerate()
                 .map(|(id, l)| {
                     let origin = LiteralOrigin {
-                        clause: rid,
+                        clause: rid.clone(),
                         body_index: id,
                     };
                     LiteralWithHistory {
@@ -194,7 +194,7 @@ where
         grounded: &HashMap<Signature, Vec<bool>>,
     ) -> Option<Tree<C, V>>
     where
-        C: Clone + PartialEq + Debug + ToString + From<String>,
+        C: Clone + PartialEq + Debug + ToString + From<String> + Eq + Hash,
         V: Clone + Eq + Hash + Variable<C, V> + Debug,
     {
         #[cfg(debug_assertions)]
@@ -245,12 +245,12 @@ where
                 .and_then(|unify_cand| {
                     unify_cand.unify(&l.literal).map(|mgu| {
                         (
-                            ClauseId::Builtin,
+                            ClauseId::Builtin(unify_cand.clone()),
                             mgu.clone(),
                             Substitution::<C, V>::new(),
                             resolve(
                                 lid,
-                                ClauseId::Builtin,
+                                ClauseId::Builtin(unify_cand.clone()),
                                 &goal,
                                 &mgu,
                                 &Clause {
@@ -271,7 +271,7 @@ where
                 .filter_map(|(rid, (c, renaming))| {
                     c.head.unify(&l.literal).map(|mgu| {
                         (
-                            rid,
+                            rid.clone(),
                             mgu.clone(),
                             renaming,
                             resolve(lid, rid, &goal, &mgu, &c, level + 1),
@@ -280,7 +280,7 @@ where
                 });
 
             let resolvents: HashMap<
-                (LiteralGoalId, ClauseId),
+                (LiteralGoalId, ClauseId<C, V>),
                 (Substitution<C, V>, Substitution<C, V>, Tree<C, V>),
             > = builtin_resolves
                 .chain(user_rules_resolves)
@@ -366,7 +366,7 @@ where
 #[derive(Clone)]
 struct PathNode<C, V> {
     resolvent: GoalWithHistory<C, V>,
-    applied: ClauseId,
+    applied: ClauseId<C, V>,
     selected: LiteralGoalId,
     renaming: Substitution<C, V>,
 }
@@ -385,7 +385,7 @@ where
 {
     fn flatten_compose<C, V>(
         lid: &LiteralGoalId,
-        cid: &ClauseId,
+        cid: &ClauseId<C, V>,
         mgu: &Substitution<C, V>,
         renaming: &Substitution<C, V>,
         tree: &Tree<C, V>,
@@ -450,7 +450,7 @@ where
         match path[level].applied {
             ClauseId::Query => assert_eq!(children_length, path[0].resolvent.len()),
             ClauseId::Rule(rid) => assert_eq!(children_length, rules[rid].body.len()),
-            ClauseId::Builtin => assert_eq!(children_length, 0),
+            ClauseId::Builtin(_) => assert_eq!(children_length, 0),
         };
 
         let mut sublevels = Vec::<TreeLevel>::with_capacity(sublevels_map.len());
