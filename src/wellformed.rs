@@ -17,11 +17,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::logic::{Clause, ModusConstant, ModusVariable, Signature, Term};
+use crate::logic::{Clause, IRConstant, IRVariable, Signature, Term};
 
 /// infer image predicates, i.e. those that transitively depend on image/1
 /// check that image predicates depend on image/1 in each disjunct
-pub fn check_image_predicates<C: ModusConstant, V: ModusVariable>(
+pub fn check_image_predicates<C: IRConstant, V: IRVariable>(
     clauses: &Vec<Clause<C, V>>,
 ) -> Result<HashSet<Signature>, HashSet<Signature>> {
     todo!()
@@ -29,13 +29,13 @@ pub fn check_image_predicates<C: ModusConstant, V: ModusVariable>(
 
 // infer grounded variables, check if grounded variables are grounded in each rule
 //TODO: not sure what to do if there are variables inside compound terms
-pub fn check_grounded_variables<C: ModusConstant, V: ModusVariable>(
+pub fn check_grounded_variables<C: IRConstant, V: IRVariable>(
     clauses: &Vec<Clause<C, V>>,
 ) -> Result<HashMap<Signature, Vec<bool>>, HashSet<Signature>> {
     let mut errors: HashSet<Signature> = HashSet::new();
     let mut result: HashMap<Signature, Vec<bool>> = HashMap::new();
 
-    fn infer<C: ModusConstant, V: ModusVariable>(c: &Clause<C, V>) -> Vec<bool> {
+    fn infer<C: IRConstant, V: IRVariable>(c: &Clause<C, V>) -> Vec<bool> {
         let body_vars = c
             .body
             .iter()
@@ -78,7 +78,7 @@ pub fn check_grounded_variables<C: ModusConstant, V: ModusVariable>(
 
 #[cfg(test)]
 mod tests {
-    use crate::logic::{Predicate, toy};
+    use crate::logic::{toy, Predicate};
 
     use super::*;
     #[test]

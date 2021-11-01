@@ -30,8 +30,11 @@ use std::str;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::{collections::HashSet, hash::Hash};
 
-pub trait ModusConstant: Clone + PartialEq + Eq + Hash + Debug + Display + From<String> {}
-pub trait ModusVariable: Clone + PartialEq + Eq + Hash + Debug + Display + Rename<Self> {}
+/// trait for intermediate representation constants
+pub trait IRConstant: Clone + PartialEq + Eq + Hash + Debug + Display + From<String> {}
+
+/// trait for intermediate representation variables
+pub trait IRVariable: Clone + PartialEq + Eq + Hash + Debug + Display + Rename<Self> {}
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Constant {
@@ -44,7 +47,7 @@ impl From<String> for Constant {
     }
 }
 
-impl ModusConstant for Constant {}
+impl IRConstant for Constant {}
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Variable {
@@ -78,7 +81,7 @@ impl sld::Variable<Constant, Variable> for Variable {
     }
 }
 
-impl ModusVariable for Variable {}
+impl IRVariable for Variable {}
 
 /// A predicate symbol
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -92,13 +95,13 @@ impl From<String> for Predicate {
 
 /// C is constant, V is variable
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum Term<C: ModusConstant = Constant, V: ModusVariable = Variable> {
+pub enum Term<C: IRConstant = Constant, V: IRVariable = Variable> {
     Constant(C),
     Variable(V),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct Literal<C: ModusConstant = Constant, V: ModusVariable = Variable> {
+pub struct Literal<C: IRConstant = Constant, V: IRVariable = Variable> {
     pub atom: Predicate,
     pub args: Vec<Term<C, V>>,
 }
@@ -107,7 +110,7 @@ pub struct Literal<C: ModusConstant = Constant, V: ModusVariable = Variable> {
 pub struct Signature(pub Predicate, pub u32);
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Clause<C: ModusConstant = Constant, V: ModusVariable = Variable> {
+pub struct Clause<C: IRConstant = Constant, V: IRVariable = Variable> {
     pub head: Literal<C, V>,
     pub body: Vec<Literal<C, V>>,
 }
@@ -116,7 +119,7 @@ pub trait Ground {
     fn is_ground(&self) -> bool;
 }
 
-impl<C: ModusConstant, V: ModusVariable> Term<C, V> {
+impl<C: IRConstant, V: IRVariable> Term<C, V> {
     pub fn variables(&self) -> HashSet<V> {
         let mut s = HashSet::<V>::new();
         match self {
@@ -129,7 +132,7 @@ impl<C: ModusConstant, V: ModusVariable> Term<C, V> {
     }
 }
 
-impl<C: ModusConstant, V: ModusVariable> Literal<C, V> {
+impl<C: IRConstant, V: IRVariable> Literal<C, V> {
     pub fn signature(&self) -> Signature {
         Signature(self.atom.clone(), self.args.len().try_into().unwrap())
     }
@@ -145,7 +148,7 @@ impl<C: ModusConstant, V: ModusVariable> Literal<C, V> {
     }
 }
 
-impl<C: ModusConstant, V: ModusVariable> Clause<C, V> {
+impl<C: IRConstant, V: IRVariable> Clause<C, V> {
     pub fn variables(&self) -> HashSet<V> {
         let mut body = self
             .body
@@ -161,19 +164,19 @@ impl<C: ModusConstant, V: ModusVariable> Clause<C, V> {
     }
 }
 
-impl<C: ModusConstant, V: ModusVariable> Ground for Term<C, V> {
+impl<C: IRConstant, V: IRVariable> Ground for Term<C, V> {
     fn is_ground(&self) -> bool {
         self.variables().is_empty()
     }
 }
 
-impl<C: ModusConstant, V: ModusVariable> Ground for Literal<C, V> {
+impl<C: IRConstant, V: IRVariable> Ground for Literal<C, V> {
     fn is_ground(&self) -> bool {
         self.variables().is_empty()
     }
 }
 
-impl<C: ModusConstant, V: ModusVariable> Ground for Clause<C, V> {
+impl<C: IRConstant, V: IRVariable> Ground for Clause<C, V> {
     fn is_ground(&self) -> bool {
         self.variables().is_empty()
     }
@@ -191,7 +194,7 @@ impl fmt::Display for Predicate {
     }
 }
 
-impl<C: ModusConstant, V: ModusVariable> fmt::Display for Term<C, V> {
+impl<C: IRConstant, V: IRVariable> fmt::Display for Term<C, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
             Term::Constant(s) => write!(f, "{}", s),
@@ -210,8 +213,8 @@ fn display_sep<T: fmt::Display>(seq: &[T], sep: &str) -> String {
 
 impl<C, V> fmt::Display for Literal<C, V>
 where
-    C: ModusConstant,
-    V: ModusVariable,
+    C: IRConstant,
+    V: IRVariable,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &*self.args {
@@ -223,8 +226,8 @@ where
 
 impl<C, V> fmt::Display for Clause<C, V>
 where
-    C: ModusConstant,
-    V: ModusVariable,
+    C: IRConstant,
+    V: IRVariable,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} :- {}", self.head, display_sep(&self.body, ", "))
@@ -274,7 +277,7 @@ pub mod parser {
         ))(i)
     }
 
-    pub fn term<'a, FC: 'a, FV: 'a, C: ModusConstant, V: ModusVariable>(
+    pub fn term<'a, FC: 'a, FV: 'a, C: IRConstant, V: IRVariable>(
         constant: FC,
         variable: FV,
     ) -> impl FnMut(&'a str) -> IResult<&'a str, Term<C, V>>
@@ -285,7 +288,7 @@ pub mod parser {
         alt((map(constant, Term::Constant), map(variable, Term::Variable)))
     }
 
-    pub fn literal<'a, FC: 'a, FV: 'a, C: ModusConstant, V: ModusVariable>(
+    pub fn literal<'a, FC: 'a, FV: 'a, C: IRConstant, V: IRVariable>(
         constant: FC,
         variable: FV,
     ) -> impl FnMut(&'a str) -> IResult<&'a str, Literal<C, V>>
@@ -315,7 +318,7 @@ pub mod parser {
         )
     }
 
-    pub fn clause<'a, FC: 'a, FV: 'a, C: ModusConstant, V: ModusVariable>(
+    pub fn clause<'a, FC: 'a, FV: 'a, C: IRConstant, V: IRVariable>(
         constant: FC,
         variable: FV,
     ) -> impl FnMut(&'a str) -> IResult<&'a str, Clause<C, V>>
@@ -344,7 +347,7 @@ pub mod toy {
     };
 
     use crate::{
-        logic::{ModusConstant, ModusVariable},
+        logic::{IRConstant, IRVariable},
         sld,
         unification::Rename,
     };
@@ -365,8 +368,8 @@ pub mod toy {
     pub type Literal = super::Literal<Predicate, Variable>;
     pub type Clause = super::Clause<Predicate, Variable>;
 
-    impl ModusConstant for Predicate {}
-    impl ModusVariable for Variable {}
+    impl IRConstant for Predicate {}
+    impl IRVariable for Variable {}
 
     static AVAILABLE_INDEX: AtomicU32 = AtomicU32::new(0);
 

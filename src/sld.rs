@@ -17,11 +17,11 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fmt::{Debug},
+    fmt::Debug,
     hash::Hash,
 };
 
-use crate::logic::{ModusConstant, ModusVariable};
+use crate::logic::{IRConstant, IRVariable};
 use crate::unification::RenameWithSubstitution;
 use crate::{
     builtin,
@@ -34,7 +34,7 @@ use crate::{
 };
 use logic::{Clause, Literal, Term};
 
-pub trait Variable<C: ModusConstant, V: ModusVariable>: Rename<V> {
+pub trait Variable<C: IRConstant, V: IRVariable>: Rename<V> {
     fn aux() -> Self;
 }
 
@@ -62,7 +62,7 @@ type LiteralGoalId = usize;
 
 /// literal, tree level at which it was introduced if any, where it came from
 #[derive(Clone, PartialEq, Debug)]
-struct LiteralWithHistory<C: ModusConstant, V: ModusVariable> {
+struct LiteralWithHistory<C: IRConstant, V: IRVariable> {
     literal: Literal<C, V>,
     introduction: TreeLevel,
     origin: LiteralOrigin,
@@ -74,7 +74,7 @@ type GoalWithHistory<C, V> = Vec<LiteralWithHistory<C, V>>;
 /// - a level, which is incremented as tree grows
 /// - a mapping from (selected literal in goal, applied rule) to (mgu after rule renaming, rule renaming, resolvent subtree)
 #[derive(Clone)]
-pub struct Tree<C: ModusConstant, V: ModusVariable> {
+pub struct Tree<C: IRConstant, V: IRVariable> {
     goal: GoalWithHistory<C, V>,
     level: TreeLevel,
     resolvents:
@@ -86,13 +86,13 @@ pub struct Tree<C: ModusConstant, V: ModusVariable> {
 /// - a valuation for this clause
 /// - proofs for parts of the clause body
 #[derive(Clone, Debug)]
-pub struct Proof<C: ModusConstant, V: ModusVariable> {
+pub struct Proof<C: IRConstant, V: IRVariable> {
     pub clause: ClauseId,
     pub valuation: Substitution<C, V>,
     pub children: Vec<Proof<C, V>>,
 }
 
-impl<C: ModusConstant, V: ModusVariable> Substitute<C, V> for GoalWithHistory<C, V> {
+impl<C: IRConstant, V: IRVariable> Substitute<C, V> for GoalWithHistory<C, V> {
     type Output = GoalWithHistory<C, V>;
     fn substitute(&self, s: &Substitution<C, V>) -> Self::Output {
         self.iter()
@@ -111,13 +111,13 @@ impl<C: ModusConstant, V: ModusVariable> Substitute<C, V> for GoalWithHistory<C,
     }
 }
 
-pub fn sld<C: ModusConstant, V: ModusVariable>(
+pub fn sld<C: IRConstant, V: IRVariable>(
     rules: &Vec<Clause<C, V>>,
     goal: &Goal<C, V>,
     maxdepth: TreeLevel,
 ) -> Option<Tree<C, V>> {
     /// select leftmost literal with compatible groundness
-    fn select<C: ModusConstant, V: ModusVariable>(
+    fn select<C: IRConstant, V: IRVariable>(
         goal: &GoalWithHistory<C, V>,
         grounded: &HashMap<Signature, Vec<bool>>,
     ) -> Option<(LiteralGoalId, LiteralWithHistory<C, V>)> {
@@ -146,7 +146,7 @@ pub fn sld<C: ModusConstant, V: ModusVariable>(
             .map(|(a, b)| (a, b.clone()))
     }
 
-    fn resolve<C: ModusConstant, V: ModusVariable>(
+    fn resolve<C: IRConstant, V: IRVariable>(
         lid: LiteralGoalId,
         rid: ClauseId,
         goal: &GoalWithHistory<C, V>,
@@ -176,7 +176,7 @@ pub fn sld<C: ModusConstant, V: ModusVariable>(
         g.substitute(mgu)
     }
 
-    fn inner<C: ModusConstant, V: ModusVariable>(
+    fn inner<C: IRConstant, V: IRVariable>(
         rules: &Vec<Clause<C, V>>,
         goal: &GoalWithHistory<C, V>,
         maxdepth: TreeLevel,
@@ -307,8 +307,8 @@ pub fn sld<C: ModusConstant, V: ModusVariable>(
     inner(rules, &goal_with_history, maxdepth, 0, &grounded)
 }
 
-pub fn solutions<C: ModusConstant, V: ModusVariable>(tree: &Tree<C, V>) -> HashSet<Goal<C, V>> {
-    fn inner<C: ModusConstant, V: ModusVariable>(tree: &Tree<C, V>) -> Vec<Substitution<C, V>> {
+pub fn solutions<C: IRConstant, V: IRVariable>(tree: &Tree<C, V>) -> HashSet<Goal<C, V>> {
+    fn inner<C: IRConstant, V: IRVariable>(tree: &Tree<C, V>) -> Vec<Substitution<C, V>> {
         if tree.goal.is_empty() {
             let s = Substitution::<C, V>::new();
             return vec![s];
@@ -342,7 +342,7 @@ pub fn solutions<C: ModusConstant, V: ModusVariable>(tree: &Tree<C, V>) -> HashS
 }
 
 #[derive(Clone)]
-struct PathNode<C: ModusConstant, V: ModusVariable> {
+struct PathNode<C: IRConstant, V: IRVariable> {
     resolvent: GoalWithHistory<C, V>,
     applied: ClauseId,
     selected: LiteralGoalId,
@@ -352,12 +352,12 @@ struct PathNode<C: ModusConstant, V: ModusVariable> {
 // sequence of nodes and global mgu
 type Path<C, V> = (Vec<PathNode<C, V>>, Substitution<C, V>);
 
-pub fn proofs<C: ModusConstant, V: ModusVariable>(
+pub fn proofs<C: IRConstant, V: IRVariable>(
     tree: &Tree<C, V>,
     rules: &Vec<Clause<C, V>>,
     goal: &Goal<C, V>,
 ) -> Vec<Proof<C, V>> {
-    fn flatten_compose<C: ModusConstant, V: ModusVariable>(
+    fn flatten_compose<C: IRConstant, V: IRVariable>(
         lid: &LiteralGoalId,
         cid: &ClauseId,
         mgu: &Substitution<C, V>,
@@ -397,7 +397,7 @@ pub fn proofs<C: ModusConstant, V: ModusVariable>(
             .collect()
     }
     // reconstruct proof for a given tree level
-    fn proof_for_level<C: ModusConstant, V: ModusVariable>(
+    fn proof_for_level<C: IRConstant, V: IRVariable>(
         path: &Vec<PathNode<C, V>>,
         mgu: &Substitution<C, V>,
         rules: &Vec<Clause<C, V>>,

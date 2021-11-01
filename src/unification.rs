@@ -18,12 +18,12 @@
 use std::collections::HashMap;
 
 use crate::logic;
-use crate::logic::{ModusConstant, ModusVariable};
-use logic::{Clause, Ground, Literal, Term, Predicate};
+use crate::logic::{IRConstant, IRVariable};
+use logic::{Clause, Ground, Literal, Predicate, Term};
 
 pub type Substitution<C, V> = HashMap<V, Term<C, V>>;
 
-impl<C: ModusConstant, V: ModusVariable> Ground for Substitution<C, V> {
+impl<C: IRConstant, V: IRVariable> Ground for Substitution<C, V> {
     fn is_ground(&self) -> bool {
         let mut result = true;
         for v in self.values() {
@@ -35,23 +35,23 @@ impl<C: ModusConstant, V: ModusVariable> Ground for Substitution<C, V> {
     }
 }
 
-pub trait Substitute<C: ModusConstant, V: ModusVariable> {
+pub trait Substitute<C: IRConstant, V: IRVariable> {
     type Output;
 
     fn substitute(&self, s: &Substitution<C, V>) -> Self::Output;
 }
 
-pub trait Rename<V: ModusVariable> {
+pub trait Rename<V: IRVariable> {
     fn rename(&self) -> V;
 }
 
-pub trait RenameWithSubstitution<C: ModusConstant, V: ModusVariable> {
+pub trait RenameWithSubstitution<C: IRConstant, V: IRVariable> {
     type Output;
 
     fn rename(&self) -> (Self::Output, Substitution<C, V>);
 }
 
-impl<C: ModusConstant, V: ModusVariable> Substitute<C, V> for Term<C, V> {
+impl<C: IRConstant, V: IRVariable> Substitute<C, V> for Term<C, V> {
     type Output = Term<C, V>;
     fn substitute(&self, s: &Substitution<C, V>) -> Self::Output {
         match &self {
@@ -61,7 +61,7 @@ impl<C: ModusConstant, V: ModusVariable> Substitute<C, V> for Term<C, V> {
     }
 }
 
-impl<C: ModusConstant, V: ModusVariable> RenameWithSubstitution<C, V> for Term<C, V> {
+impl<C: IRConstant, V: IRVariable> RenameWithSubstitution<C, V> for Term<C, V> {
     type Output = Term<C, V>;
     fn rename(&self) -> (Self::Output, Substitution<C, V>) {
         let s: Substitution<C, V> = self
@@ -82,7 +82,7 @@ impl<C: ModusConstant, V: ModusVariable> RenameWithSubstitution<C, V> for Term<C
     }
 }
 
-impl<C: ModusConstant, V: ModusVariable> Substitute<C, V> for Literal<C, V> {
+impl<C: IRConstant, V: IRVariable> Substitute<C, V> for Literal<C, V> {
     type Output = Literal<C, V>;
     fn substitute(&self, s: &Substitution<C, V>) -> Self::Output {
         Literal {
@@ -92,7 +92,7 @@ impl<C: ModusConstant, V: ModusVariable> Substitute<C, V> for Literal<C, V> {
     }
 }
 
-impl<C: ModusConstant, V: ModusVariable> RenameWithSubstitution<C, V> for Literal<C, V> {
+impl<C: IRConstant, V: IRVariable> RenameWithSubstitution<C, V> for Literal<C, V> {
     type Output = Literal<C, V>;
     fn rename(&self) -> (Self::Output, Substitution<C, V>) {
         let s: Substitution<C, V> = self
@@ -113,14 +113,14 @@ impl<C: ModusConstant, V: ModusVariable> RenameWithSubstitution<C, V> for Litera
     }
 }
 
-impl<C: ModusConstant, V: ModusVariable> Substitute<C, V> for Vec<Literal<C, V>> {
+impl<C: IRConstant, V: IRVariable> Substitute<C, V> for Vec<Literal<C, V>> {
     type Output = Vec<Literal<C, V>>;
     fn substitute(&self, s: &Substitution<C, V>) -> Self::Output {
         self.iter().map(|l| l.substitute(s)).collect()
     }
 }
 
-impl<C: ModusConstant, V: ModusVariable> RenameWithSubstitution<C, V> for Vec<Literal<C, V>> {
+impl<C: IRConstant, V: IRVariable> RenameWithSubstitution<C, V> for Vec<Literal<C, V>> {
     type Output = Vec<Literal<C, V>>;
     fn rename(&self) -> (Self::Output, Substitution<C, V>) {
         let s: Substitution<C, V> = self
@@ -141,7 +141,7 @@ impl<C: ModusConstant, V: ModusVariable> RenameWithSubstitution<C, V> for Vec<Li
     }
 }
 
-impl<C: ModusConstant, V: ModusVariable> Substitute<C, V> for Clause<C, V> {
+impl<C: IRConstant, V: IRVariable> Substitute<C, V> for Clause<C, V> {
     type Output = Clause<C, V>;
     fn substitute(&self, s: &Substitution<C, V>) -> Self::Output {
         Clause {
@@ -151,7 +151,7 @@ impl<C: ModusConstant, V: ModusVariable> Substitute<C, V> for Clause<C, V> {
     }
 }
 
-impl<C: ModusConstant, V: ModusVariable> RenameWithSubstitution<C, V> for Clause<C, V> {
+impl<C: IRConstant, V: IRVariable> RenameWithSubstitution<C, V> for Clause<C, V> {
     type Output = Clause<C, V>;
     fn rename(&self) -> (Self::Output, Substitution<C, V>) {
         let s: Substitution<C, V> = self
@@ -172,7 +172,7 @@ impl<C: ModusConstant, V: ModusVariable> RenameWithSubstitution<C, V> for Clause
     }
 }
 
-pub fn compose_no_extend<C: ModusConstant, V: ModusVariable>(
+pub fn compose_no_extend<C: IRConstant, V: IRVariable>(
     l: &Substitution<C, V>,
     r: &Substitution<C, V>,
 ) -> Substitution<C, V> {
@@ -183,7 +183,7 @@ pub fn compose_no_extend<C: ModusConstant, V: ModusVariable>(
     result
 }
 
-pub fn compose_extend<C: ModusConstant, V: ModusVariable>(
+pub fn compose_extend<C: IRConstant, V: IRVariable>(
     l: &Substitution<C, V>,
     r: &Substitution<C, V>,
 ) -> Substitution<C, V> {
@@ -192,7 +192,7 @@ pub fn compose_extend<C: ModusConstant, V: ModusVariable>(
     result
 }
 
-impl<C: ModusConstant, V: ModusVariable> Literal<C, V> {
+impl<C: IRConstant, V: IRVariable> Literal<C, V> {
     pub fn unify(&self, other: &Literal<C, V>) -> Option<Substitution<C, V>> {
         if self.signature() != other.signature() {
             return None;

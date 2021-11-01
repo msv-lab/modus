@@ -15,9 +15,9 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use crate::logic::{Literal, ModusConstant, ModusVariable, Predicate, Term};
+use crate::logic::{IRConstant, IRVariable, Literal, Predicate, Term};
 
-pub trait BuiltinPredicate<C: ModusConstant, V: ModusVariable> {
+pub trait BuiltinPredicate<C: IRConstant, V: IRVariable> {
     fn name(&self) -> &'static str;
     fn arg_groundness(&self) -> &'static [bool];
 
@@ -51,7 +51,7 @@ trait MaybeStringConst {
     fn as_str_const(&self) -> Option<String>;
 }
 
-impl<C: ModusConstant, V: ModusVariable> MaybeStringConst for Term<C, V> {
+impl<C: IRConstant, V: IRVariable> MaybeStringConst for Term<C, V> {
     fn as_str_const(&self) -> Option<String> {
         match &self {
             Term::Constant(c) => Some(c.to_string()),
@@ -60,7 +60,7 @@ impl<C: ModusConstant, V: ModusVariable> MaybeStringConst for Term<C, V> {
     }
 }
 
-fn string_concat_result<C: ModusConstant, V: ModusVariable>(
+fn string_concat_result<C: IRConstant, V: IRVariable>(
     a: String,
     b: String,
     c: String,
@@ -76,7 +76,7 @@ fn string_concat_result<C: ModusConstant, V: ModusVariable>(
 }
 
 pub struct StringConcat1;
-impl<C: ModusConstant, V: ModusVariable> BuiltinPredicate<C, V> for StringConcat1 {
+impl<C: IRConstant, V: IRVariable> BuiltinPredicate<C, V> for StringConcat1 {
     fn name(&self) -> &'static str {
         "string_concat"
     }
@@ -94,7 +94,7 @@ impl<C: ModusConstant, V: ModusVariable> BuiltinPredicate<C, V> for StringConcat
 }
 
 pub struct StringConcat2;
-impl<C: ModusConstant, V: ModusVariable> BuiltinPredicate<C, V> for StringConcat2 {
+impl<C: IRConstant, V: IRVariable> BuiltinPredicate<C, V> for StringConcat2 {
     fn name(&self) -> &'static str {
         "string_concat"
     }
@@ -115,7 +115,7 @@ impl<C: ModusConstant, V: ModusVariable> BuiltinPredicate<C, V> for StringConcat
 }
 
 pub struct StringConcat3;
-impl<C: ModusConstant, V: ModusVariable> BuiltinPredicate<C, V> for StringConcat3 {
+impl<C: IRConstant, V: IRVariable> BuiltinPredicate<C, V> for StringConcat3 {
     fn name(&self) -> &'static str {
         "string_concat"
     }
@@ -136,12 +136,12 @@ impl<C: ModusConstant, V: ModusVariable> BuiltinPredicate<C, V> for StringConcat
 }
 
 mod run {
-    use crate::logic::{Literal, ModusConstant, ModusVariable, Term};
+    use crate::logic::{IRConstant, IRVariable, Literal, Term};
 
     use super::BuiltinPredicate;
 
     pub struct Run;
-    impl<C: ModusConstant, V: ModusVariable> BuiltinPredicate<C, V> for Run {
+    impl<C: IRConstant, V: IRVariable> BuiltinPredicate<C, V> for Run {
         fn name(&self) -> &'static str {
             "run"
         }
@@ -162,12 +162,12 @@ mod run {
 }
 
 mod from {
-    use crate::logic::{Literal, ModusConstant, ModusVariable, Term};
+    use crate::logic::{IRConstant, IRVariable, Literal, Term};
 
     use super::BuiltinPredicate;
 
     pub struct From;
-    impl<C: ModusConstant, V: ModusVariable> BuiltinPredicate<C, V> for From {
+    impl<C: IRConstant, V: IRVariable> BuiltinPredicate<C, V> for From {
         fn name(&self) -> &'static str {
             "from"
         }
@@ -201,7 +201,7 @@ macro_rules! select_builtins {
     };
 }
 
-pub fn select_builtin<'a, C: ModusConstant, V: ModusVariable>(
+pub fn select_builtin<'a, C: IRConstant, V: IRVariable>(
     lit: &Literal<C, V>,
 ) -> Option<&'a dyn BuiltinPredicate<C, V>> {
     select_builtins!(
