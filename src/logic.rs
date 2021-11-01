@@ -21,7 +21,7 @@
 //! or variables.
 
 use crate::sld;
-use crate::unification::{Rename};
+use crate::unification::Rename;
 
 use std::convert::TryInto;
 use std::fmt;
@@ -36,7 +36,6 @@ pub trait ModusVariable: Clone + PartialEq + Eq + Hash + Debug + Display + Renam
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Constant {
     String(String),
-    Integer(u32), //TODO: arbitrary-precision arithmetic?
 }
 
 impl From<String> for Constant {
