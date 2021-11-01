@@ -3,5 +3,7 @@ pylint(python_version, "ubuntu", ubuntu_version) :-
     run("pip install pylint").
 
 python(python_version, "ubuntu", distr_version) :-
-    from(f"ubuntu:${distr_version}"),
-    run(f"apt-get install -y python${python_version}").
+    # Below we use a format string to vary which version of ubuntu we use.
+    # This makes image tags easier to work with.
+    from(f"ubuntu:${distr_version}"), # comments are allowed after an expression's comma
+    run(f"apt-get install -y python${python_version}"). # comments are allowed here
