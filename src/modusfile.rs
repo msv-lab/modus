@@ -19,25 +19,13 @@ use fp_core::compose::compose_two;
 use std::fmt;
 use std::str;
 
+use crate::dockerfile;
 use crate::logic;
-use crate::{dockerfile, transpiler};
-
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum Constant {
-    String(String),
-    Integer(u32), //TODO: arbitrary-precision arithmetic?
-}
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Expression {
     Literal(Literal),
     OperatorApplication(Vec<Expression>, Operator),
-}
-
-impl From<String> for Constant {
-    fn from(s: String) -> Self {
-        Constant::String(s)
-    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -71,11 +59,12 @@ impl From<&crate::modusfile::ModusClause>
     }
 }
 
-pub type Fact = ModusClause;
-pub type Rule = ModusClause;
-pub type Variable = transpiler::Variable;
-pub type Literal = logic::Literal<Constant, Variable>;
-pub type Term = logic::Term<Constant, Variable>;
+type Constant = logic::Constant;
+type Variable = logic::Variable;
+type Fact = ModusClause;
+type Rule = ModusClause;
+type Literal = logic::Literal;
+type Term = logic::Term;
 pub type Operator = Literal;
 
 #[derive(Clone, PartialEq, Debug)]
@@ -170,7 +159,6 @@ impl fmt::Display for Constant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Constant::String(s) => write!(f, "\"{}\"", s),
-            Constant::Integer(i) => write!(f, "{}", i),
         }
     }
 }
@@ -283,7 +271,7 @@ mod tests {
     #[test]
     fn fact() {
         let l1 = Literal {
-            atom: logic::Atom("l1".into()),
+            atom: logic::Predicate("l1".into()),
             args: Vec::new(),
         };
         let c = ModusClause {
@@ -297,15 +285,15 @@ mod tests {
     #[test]
     fn rule() {
         let l1 = Literal {
-            atom: logic::Atom("l1".into()),
+            atom: logic::Predicate("l1".into()),
             args: Vec::new(),
         };
         let l2 = Literal {
-            atom: logic::Atom("l2".into()),
+            atom: logic::Predicate("l2".into()),
             args: Vec::new(),
         };
         let l3 = Literal {
-            atom: logic::Atom("l3".into()),
+            atom: logic::Predicate("l3".into()),
             args: Vec::new(),
         };
         let c = Rule {
@@ -320,19 +308,19 @@ mod tests {
     #[test]
     fn rule_with_operator() {
         let foo = Literal {
-            atom: logic::Atom("foo".into()),
+            atom: logic::Predicate("foo".into()),
             args: Vec::new(),
         };
         let a = Literal {
-            atom: logic::Atom("a".into()),
+            atom: logic::Predicate("a".into()),
             args: Vec::new(),
         };
         let b = Literal {
-            atom: logic::Atom("b".into()),
+            atom: logic::Predicate("b".into()),
             args: Vec::new(),
         };
         let merge = Operator {
-            atom: logic::Atom("merge".into()),
+            atom: logic::Predicate("merge".into()),
             args: Vec::new(),
         };
         let r = Rule {
@@ -349,19 +337,19 @@ mod tests {
     #[test]
     fn modusclause_to_clause() {
         let foo = Literal {
-            atom: logic::Atom("foo".into()),
+            atom: logic::Predicate("foo".into()),
             args: Vec::new(),
         };
         let a = Literal {
-            atom: logic::Atom("a".into()),
+            atom: logic::Predicate("a".into()),
             args: Vec::new(),
         };
         let b = Literal {
-            atom: logic::Atom("b".into()),
+            atom: logic::Predicate("b".into()),
             args: Vec::new(),
         };
         let merge = Operator {
-            atom: logic::Atom("merge".into()),
+            atom: logic::Predicate("merge".into()),
             args: Vec::new(),
         };
         let r = Rule {

@@ -15,41 +15,102 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use fp_core::compose::compose_two;
+//! This module contains logical structures that define the intermediate language used by Modus.
+//!
+//! Currently, these structures are generic, parameterized over the types they may use for constants
+//! or variables.
+
+use crate::sld;
+use crate::unification::Rename;
+
 use std::convert::TryInto;
 use std::fmt;
+use std::fmt::{Debug, Display};
 use std::str;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::{collections::HashSet, hash::Hash};
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct Atom(pub String);
+/// trait for intermediate representation constants
+pub trait IRConstant: Clone + PartialEq + Eq + Hash + Debug + Display + From<String> {}
 
-impl From<String> for Atom {
+/// trait for intermediate representation variables
+pub trait IRVariable: Clone + PartialEq + Eq + Hash + Debug + Display + Rename<Self> {}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Constant {
+    String(String),
+}
+
+impl From<String> for Constant {
     fn from(s: String) -> Self {
-        Atom(s)
+        Constant::String(s)
+    }
+}
+
+impl IRConstant for Constant {}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Variable {
+    User(String),
+    Auxiliary(u32),
+    Renamed(u32, Box<Variable>),
+}
+
+impl fmt::Display for Variable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Variable::User(s) => write!(f, "{}", s),
+            _ => unimplemented!(),
+        }
+    }
+}
+
+static AVAILABLE_VARIABLE_INDEX: AtomicU32 = AtomicU32::new(0);
+
+impl Rename<Variable> for Variable {
+    fn rename(&self) -> Variable {
+        let index = AVAILABLE_VARIABLE_INDEX.fetch_add(1, Ordering::SeqCst);
+        Variable::Renamed(index, Box::new((*self).clone()))
+    }
+}
+
+impl sld::Variable<Constant, Variable> for Variable {
+    fn aux() -> Variable {
+        let index = AVAILABLE_VARIABLE_INDEX.fetch_add(1, Ordering::SeqCst);
+        Variable::Auxiliary(index)
+    }
+}
+
+impl IRVariable for Variable {}
+
+/// A predicate symbol
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Predicate(pub String);
+
+impl From<String> for Predicate {
+    fn from(s: String) -> Self {
+        Predicate(s)
     }
 }
 
 /// C is constant, V is variable
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum Term<C, V> {
+pub enum Term<C: IRConstant = Constant, V: IRVariable = Variable> {
     Constant(C),
-    Atom(Atom),
     Variable(V),
-    Compound(Atom, Vec<Term<C, V>>),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct Literal<C, V> {
-    pub atom: Atom,
+pub struct Literal<C: IRConstant = Constant, V: IRVariable = Variable> {
+    pub atom: Predicate,
     pub args: Vec<Term<C, V>>,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct Signature(pub Atom, pub u32);
+pub struct Signature(pub Predicate, pub u32);
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Clause<C, V> {
+pub struct Clause<C: IRConstant = Constant, V: IRVariable = Variable> {
     pub head: Literal<C, V>,
     pub body: Vec<Literal<C, V>>,
 }
@@ -58,7 +119,7 @@ pub trait Ground {
     fn is_ground(&self) -> bool;
 }
 
-impl<C, V: Clone + Eq + Hash> Term<C, V> {
+impl<C: IRConstant, V: IRVariable> Term<C, V> {
     pub fn variables(&self) -> HashSet<V> {
         let mut s = HashSet::<V>::new();
         match self {
@@ -71,7 +132,7 @@ impl<C, V: Clone + Eq + Hash> Term<C, V> {
     }
 }
 
-impl<C, V: Clone + Eq + Hash> Literal<C, V> {
+impl<C: IRConstant, V: IRVariable> Literal<C, V> {
     pub fn signature(&self) -> Signature {
         Signature(self.atom.clone(), self.args.len().try_into().unwrap())
     }
@@ -87,7 +148,7 @@ impl<C, V: Clone + Eq + Hash> Literal<C, V> {
     }
 }
 
-impl<C, V: Clone + Eq + Hash> Clause<C, V> {
+impl<C: IRConstant, V: IRVariable> Clause<C, V> {
     pub fn variables(&self) -> HashSet<V> {
         let mut body = self
             .body
@@ -103,28 +164,19 @@ impl<C, V: Clone + Eq + Hash> Clause<C, V> {
     }
 }
 
-impl<C, V> Ground for Term<C, V>
-where
-    V: Clone + Eq + Hash,
-{
+impl<C: IRConstant, V: IRVariable> Ground for Term<C, V> {
     fn is_ground(&self) -> bool {
         self.variables().is_empty()
     }
 }
 
-impl<C, V> Ground for Literal<C, V>
-where
-    V: Clone + Eq + Hash,
-{
+impl<C: IRConstant, V: IRVariable> Ground for Literal<C, V> {
     fn is_ground(&self) -> bool {
         self.variables().is_empty()
     }
 }
 
-impl<C, V> Ground for Clause<C, V>
-where
-    V: Clone + Eq + Hash,
-{
+impl<C: IRConstant, V: IRVariable> Ground for Clause<C, V> {
     fn is_ground(&self) -> bool {
         self.variables().is_empty()
     }
@@ -136,43 +188,33 @@ impl fmt::Display for Signature {
     }
 }
 
-impl fmt::Display for Atom {
+impl fmt::Display for Predicate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl<C, V> fmt::Display for Term<C, V>
-where
-    C: fmt::Display,
-    V: fmt::Display,
-{
+impl<C: IRConstant, V: IRVariable> fmt::Display for Term<C, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
             Term::Constant(s) => write!(f, "{}", s),
             Term::Variable(s) => write!(f, "{}", s),
-            Term::Atom(s) => write!(f, "{}", s),
-            Term::Compound(a, l) => write!(f, "{}({})", a, display_sep(l, ", ")),
         }
     }
 }
 
 fn display_sep<T: fmt::Display>(seq: &[T], sep: &str) -> String {
-    let mut result = String::new();
-    if let Some((last, elements)) = seq.split_last() {
-        for el in elements {
-            result += &el.to_string();
-            result.push_str(sep);
-        }
-        result += &last.to_string();
-    }
-    result
+    return seq
+        .iter()
+        .map(|t| t.to_string())
+        .collect::<Vec<String>>()
+        .join(sep);
 }
 
 impl<C, V> fmt::Display for Literal<C, V>
 where
-    C: fmt::Display,
-    V: fmt::Display,
+    C: IRConstant,
+    V: IRVariable,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &*self.args {
@@ -184,8 +226,8 @@ where
 
 impl<C, V> fmt::Display for Clause<C, V>
 where
-    C: fmt::Display,
-    V: fmt::Display,
+    C: IRConstant,
+    V: IRVariable,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} :- {}", self.head, display_sep(&self.body, ", "))
@@ -235,7 +277,7 @@ pub mod parser {
         ))(i)
     }
 
-    pub fn term<'a, FC: 'a, FV: 'a, C, V>(
+    pub fn term<'a, FC: 'a, FV: 'a, C: IRConstant, V: IRVariable>(
         constant: FC,
         variable: FV,
     ) -> impl FnMut(&'a str) -> IResult<&'a str, Term<C, V>>
@@ -246,7 +288,7 @@ pub mod parser {
         alt((map(constant, Term::Constant), map(variable, Term::Variable)))
     }
 
-    pub fn literal<'a, FC: 'a, FV: 'a, C, V>(
+    pub fn literal<'a, FC: 'a, FV: 'a, C: IRConstant, V: IRVariable>(
         constant: FC,
         variable: FV,
     ) -> impl FnMut(&'a str) -> IResult<&'a str, Literal<C, V>>
@@ -265,18 +307,18 @@ pub mod parser {
             ),
             |(name, args)| match args {
                 Some(args) => Literal {
-                    atom: Atom(name.into()),
+                    atom: Predicate(name.into()),
                     args,
                 },
                 None => Literal {
-                    atom: Atom(name.into()),
+                    atom: Predicate(name.into()),
                     args: Vec::new(),
                 },
             },
         )
     }
 
-    pub fn clause<'a, FC: 'a, FV: 'a, C, V>(
+    pub fn clause<'a, FC: 'a, FV: 'a, C: IRConstant, V: IRVariable>(
         constant: FC,
         variable: FV,
     ) -> impl FnMut(&'a str) -> IResult<&'a str, Clause<C, V>>
@@ -296,10 +338,19 @@ pub mod parser {
 }
 
 pub mod toy {
-    use super::Atom;
+    use super::Predicate;
     use fp_core::compose::compose_two;
-    use std::str;
+    use std::{
+        collections::HashMap,
+        str,
+        sync::atomic::{AtomicU32, Ordering},
+    };
 
+    use crate::{
+        logic::{IRConstant, IRVariable},
+        sld,
+        unification::Rename,
+    };
     use nom::{
         branch::alt,
         bytes::complete::tag,
@@ -313,9 +364,33 @@ pub mod toy {
     // define a toy language with only atoms for testing
 
     pub type Variable = String;
-    pub type Term = super::Term<Atom, Variable>;
-    pub type Literal = super::Literal<Atom, Variable>;
-    pub type Clause = super::Clause<Atom, Variable>;
+    pub type Term = super::Term<Predicate, Variable>;
+    pub type Literal = super::Literal<Predicate, Variable>;
+    pub type Clause = super::Clause<Predicate, Variable>;
+
+    impl IRConstant for Predicate {}
+    impl IRVariable for Variable {}
+
+    static AVAILABLE_INDEX: AtomicU32 = AtomicU32::new(0);
+
+    /// Assume that underscore is not used in normal variables
+    impl Rename<Variable> for Variable {
+        fn rename(&self) -> Variable {
+            let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
+            let prefix = self.split('_').next().unwrap();
+            let renamed = format!("{}_{}", prefix, index);
+            let mut s = HashMap::<Variable, Term>::new();
+            s.insert(self.clone(), Term::Variable(renamed.clone()));
+            renamed
+        }
+    }
+
+    impl sld::Variable<Predicate, Variable> for Variable {
+        fn aux() -> Variable {
+            let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
+            format!("Aux{}", index)
+        }
+    }
 
     fn toy_var(i: &str) -> IResult<&str, Variable> {
         map(
@@ -327,13 +402,13 @@ pub mod toy {
         )(i)
     }
 
-    fn toy_const(i: &str) -> IResult<&str, Atom> {
+    fn toy_const(i: &str) -> IResult<&str, Predicate> {
         map(
             recognize(pair(
                 one_of("abcdefghijklmnopqrstuvwxyz"),
                 many0(alt((alphanumeric1, tag("_")))),
             )),
-            compose!(String::from, Atom),
+            compose!(String::from, Predicate),
         )(i)
     }
 
@@ -367,19 +442,19 @@ mod tests {
 
     #[test]
     fn simple_rule() {
-        let c = toy::Term::Constant(Atom("c".into()));
+        let c = toy::Term::Constant(Predicate("c".into()));
         let va = toy::Term::Variable("A".into());
         let vb = toy::Term::Variable("B".into());
         let l1 = toy::Literal {
-            atom: Atom("l1".into()),
+            atom: Predicate("l1".into()),
             args: vec![va.clone(), vb.clone()],
         };
         let l2 = toy::Literal {
-            atom: Atom("l2".into()),
+            atom: Predicate("l2".into()),
             args: vec![va.clone(), c.clone()],
         };
         let l3 = toy::Literal {
-            atom: Atom("l3".into()),
+            atom: Predicate("l3".into()),
             args: vec![vb.clone(), c.clone()],
         };
         let r = Clause {
@@ -394,11 +469,11 @@ mod tests {
     fn nullary_predicate() {
         let va = toy::Term::Variable("A".into());
         let l1 = toy::Literal {
-            atom: Atom("l1".into()),
+            atom: Predicate("l1".into()),
             args: Vec::new(),
         };
         let l2 = toy::Literal {
-            atom: Atom("l2".into()),
+            atom: Predicate("l2".into()),
             args: vec![va.clone()],
         };
         let r = Clause {

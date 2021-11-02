@@ -15,16 +15,13 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{
-    collections::{HashMap, HashSet},
-    hash::Hash,
-};
+use std::collections::{HashMap, HashSet};
 
-use crate::logic::{self, Atom, Clause, Literal, Signature, Term};
+use crate::logic::{Clause, IRConstant, IRVariable, Signature, Term};
 
 /// infer image predicates, i.e. those that transitively depend on image/1
 /// check that image predicates depend on image/1 in each disjunct
-pub fn check_image_predicates<C, V>(
+pub fn check_image_predicates<C: IRConstant, V: IRVariable>(
     clauses: &Vec<Clause<C, V>>,
 ) -> Result<HashSet<Signature>, HashSet<Signature>> {
     todo!()
@@ -32,21 +29,13 @@ pub fn check_image_predicates<C, V>(
 
 // infer grounded variables, check if grounded variables are grounded in each rule
 //TODO: not sure what to do if there are variables inside compound terms
-pub fn check_grounded_variables<C, V>(
+pub fn check_grounded_variables<C: IRConstant, V: IRVariable>(
     clauses: &Vec<Clause<C, V>>,
-) -> Result<HashMap<Signature, Vec<bool>>, HashSet<Signature>>
-where
-    C: Clone,
-    V: Clone + Eq + Hash,
-{
+) -> Result<HashMap<Signature, Vec<bool>>, HashSet<Signature>> {
     let mut errors: HashSet<Signature> = HashSet::new();
     let mut result: HashMap<Signature, Vec<bool>> = HashMap::new();
 
-    fn infer<C, V>(c: &Clause<C, V>) -> Vec<bool>
-    where
-        C: Clone,
-        V: Clone + Eq + Hash,
-    {
+    fn infer<C: IRConstant, V: IRVariable>(c: &Clause<C, V>) -> Vec<bool> {
         let body_vars = c
             .body
             .iter()
@@ -89,17 +78,19 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::logic::{toy, Predicate};
+
     use super::*;
     #[test]
     fn consistently_grounded() {
-        let clauses: Vec<logic::toy::Clause> = vec![
+        let clauses: Vec<toy::Clause> = vec![
             "a(X, Y) :- b(X), c(X, Z).".parse().unwrap(),
             "a(X, Y) :- d(X).".parse().unwrap(),
             "b(X) :- d(X).".parse().unwrap(),
         ];
         let result = check_grounded_variables(&clauses);
         assert!(result.is_ok());
-        let a_sig = Signature(Atom("a".into()), 2);
+        let a_sig = Signature(Predicate("a".into()), 2);
         let a_grounded = result.unwrap().get(&a_sig).unwrap().clone();
         assert!(a_grounded[0]);
         assert!(!a_grounded[1]);
@@ -107,13 +98,13 @@ mod tests {
 
     #[test]
     fn inconsistently_grounded() {
-        let clauses: Vec<logic::toy::Clause> = vec![
+        let clauses: Vec<toy::Clause> = vec![
             "a(X, Y) :- b(X), c(X, Z).".parse().unwrap(),
             "a(X, Y) :- d(Y).".parse().unwrap(),
         ];
         let result = check_grounded_variables(&clauses);
         assert!(result.is_err());
-        let a_sig = Signature(Atom("a".into()), 2);
+        let a_sig = Signature(Predicate("a".into()), 2);
         assert!(result.unwrap_err().contains(&a_sig));
     }
 }
