@@ -237,9 +237,8 @@ mod parser {
                     ),
                 ),
                 expression,
-            )
-        )
-            (i)
+            ),
+        )(i)
     }
 
     fn fact(i: &str) -> IResult<&str, ModusClause> {
