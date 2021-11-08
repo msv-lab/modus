@@ -19,7 +19,7 @@ use std::{collections::HashMap, sync::atomic::AtomicU32};
 
 use crate::{
     dockerfile::{Dockerfile, ResolvedParent},
-    logic::{self, Clause, Constant, Variable},
+    logic::{self, Clause},
     modusfile::Modusfile,
     sld,
 };
@@ -27,10 +27,9 @@ use crate::{
 pub fn prove_goal(
     mf: &Modusfile,
     goal: &Vec<logic::Literal>,
-) -> Result<Vec<sld::Proof<logic::Constant, logic::Variable>>, &'static str> {
+) -> Result<Vec<sld::Proof>, &'static str> {
     let max_depth = 20;
-    let clauses: Vec<Clause<logic::Constant, logic::Variable>> =
-        mf.0.iter().map(|mc| mc.into()).collect();
+    let clauses: Vec<Clause> = mf.0.iter().map(|mc| mc.into()).collect();
 
     let res = sld::sld(&clauses, goal, max_depth);
     match res {
@@ -49,17 +48,17 @@ static AVAILABLE_STAGE_INDEX: AtomicU32 = AtomicU32::new(0);
 
 fn proof_to_docker(
     rules: &Vec<Clause>,
-    proof: &sld::Proof<Constant, Variable>,
-    cache: &mut HashMap<sld::Goal<Constant, Variable>, ResolvedParent>,
-    goal: &sld::Goal<Constant, Variable>,
+    proof: &sld::Proof,
+    cache: &mut HashMap<sld::Goal, ResolvedParent>,
+    goal: &sld::Goal,
 ) -> ResolvedParent {
     todo!()
 }
 
 fn proofs_to_docker(
     rules: &Vec<Clause>,
-    proofs: &Vec<sld::Proof<Constant, Variable>>,
-    goal: &sld::Goal<Constant, Variable>,
+    proofs: &Vec<sld::Proof>,
+    goal: &sld::Goal,
 ) -> Dockerfile<ResolvedParent> {
     todo!()
 }

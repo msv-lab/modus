@@ -20,8 +20,8 @@
 //! Currently, these structures are generic, parameterized over the types they may use for constants
 //! or variables.
 
-use crate::sld;
 use crate::unification::Rename;
+use crate::{modusfile, sld};
 
 use std::convert::TryInto;
 use std::fmt;
@@ -30,36 +30,11 @@ use std::str;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::{collections::HashSet, hash::Hash};
 
-/// trait for intermediate representation constants
-pub trait IRConstant: Clone + PartialEq + Eq + Hash + Debug + Display + From<String> {}
-
-/// trait for intermediate representation variables
-pub trait IRVariable: Clone + PartialEq + Eq + Hash + Debug + Display + Rename<Self> {}
-
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum Constant {
-    String(String),
-}
-
-impl From<String> for Constant {
-    fn from(s: String) -> Self {
-        Constant::String(s)
-    }
-}
-
-impl IRConstant for Constant {}
-
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum Variable {
-    User(String),
-    Auxiliary(u32),
-    Renamed(u32, Box<Variable>),
-}
-
-impl fmt::Display for Variable {
+impl fmt::Display for IRTerm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Variable::User(s) => write!(f, "{}", s),
+            IRTerm::Constant(s) => write!(f, "\"{}\"", s),
+            IRTerm::UserVariable(s) => write!(f, "{}", s),
             _ => unimplemented!(),
         }
     }
@@ -67,21 +42,24 @@ impl fmt::Display for Variable {
 
 static AVAILABLE_VARIABLE_INDEX: AtomicU32 = AtomicU32::new(0);
 
-impl Rename<Variable> for Variable {
-    fn rename(&self) -> Variable {
-        let index = AVAILABLE_VARIABLE_INDEX.fetch_add(1, Ordering::SeqCst);
-        Variable::Renamed(index, Box::new((*self).clone()))
+impl Rename<IRTerm> for IRTerm {
+    fn rename(&self) -> IRTerm {
+        match self {
+            IRTerm::Constant(_) => (*self).clone(),
+            _ => {
+                let index = AVAILABLE_VARIABLE_INDEX.fetch_add(1, Ordering::SeqCst);
+                IRTerm::RenamedVariable(index, Box::new((*self).clone()))
+            }
+        }
     }
 }
 
-impl sld::Variable<Constant, Variable> for Variable {
-    fn aux() -> Variable {
+impl sld::Auxiliary for IRTerm {
+    fn aux() -> IRTerm {
         let index = AVAILABLE_VARIABLE_INDEX.fetch_add(1, Ordering::SeqCst);
-        Variable::Auxiliary(index)
+        IRTerm::AuxiliaryVariable(index)
     }
 }
-
-impl IRVariable for Variable {}
 
 /// A predicate symbol
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -93,50 +71,50 @@ impl From<String> for Predicate {
     }
 }
 
-/// C is constant, V is variable
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum Term<C: IRConstant = Constant, V: IRVariable = Variable> {
-    Constant(C),
-    Variable(V),
+pub enum IRTerm {
+    Constant(String),
+    UserVariable(String),
+    AuxiliaryVariable(u32),
+    RenamedVariable(u32, Box<IRTerm>),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct Literal<C: IRConstant = Constant, V: IRVariable = Variable> {
+pub struct Literal<T = IRTerm> {
     pub atom: Predicate,
-    pub args: Vec<Term<C, V>>,
+    pub args: Vec<T>,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Signature(pub Predicate, pub u32);
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Clause<C: IRConstant = Constant, V: IRVariable = Variable> {
-    pub head: Literal<C, V>,
-    pub body: Vec<Literal<C, V>>,
+pub struct Clause<T = IRTerm> {
+    pub head: Literal<T>,
+    pub body: Vec<Literal<T>>,
 }
 
 pub trait Ground {
     fn is_ground(&self) -> bool;
 }
 
-impl<C: IRConstant, V: IRVariable> Term<C, V> {
-    pub fn variables(&self) -> HashSet<V> {
-        let mut s = HashSet::<V>::new();
-        match self {
-            Term::Variable(v) => {
-                s.insert(v.clone());
-            }
-            _ => (),
-        };
-        s
+impl IRTerm {
+    pub fn variables(&self) -> HashSet<IRTerm> {
+        // the 'variables' of an IRTerm is just itself, if it's not a constant
+        let mut set = HashSet::<IRTerm>::new();
+        if let IRTerm::Constant(_) = self {
+        } else {
+            set.insert(self.clone());
+        }
+        set
     }
 }
 
-impl<C: IRConstant, V: IRVariable> Literal<C, V> {
+impl Literal {
     pub fn signature(&self) -> Signature {
         Signature(self.atom.clone(), self.args.len().try_into().unwrap())
     }
-    pub fn variables(&self) -> HashSet<V> {
+    pub fn variables(&self) -> HashSet<IRTerm> {
         self.args
             .iter()
             .map(|r| r.variables())
@@ -148,8 +126,8 @@ impl<C: IRConstant, V: IRVariable> Literal<C, V> {
     }
 }
 
-impl<C: IRConstant, V: IRVariable> Clause<C, V> {
-    pub fn variables(&self) -> HashSet<V> {
+impl Clause {
+    pub fn variables(&self) -> HashSet<IRTerm> {
         let mut body = self
             .body
             .iter()
@@ -164,19 +142,23 @@ impl<C: IRConstant, V: IRVariable> Clause<C, V> {
     }
 }
 
-impl<C: IRConstant, V: IRVariable> Ground for Term<C, V> {
+impl Ground for IRTerm {
+    fn is_ground(&self) -> bool {
+        return if let IRTerm::Constant(_) = self {
+            true
+        } else {
+            false
+        };
+    }
+}
+
+impl Ground for Literal {
     fn is_ground(&self) -> bool {
         self.variables().is_empty()
     }
 }
 
-impl<C: IRConstant, V: IRVariable> Ground for Literal<C, V> {
-    fn is_ground(&self) -> bool {
-        self.variables().is_empty()
-    }
-}
-
-impl<C: IRConstant, V: IRVariable> Ground for Clause<C, V> {
+impl Ground for Clause {
     fn is_ground(&self) -> bool {
         self.variables().is_empty()
     }
@@ -194,15 +176,6 @@ impl fmt::Display for Predicate {
     }
 }
 
-impl<C: IRConstant, V: IRVariable> fmt::Display for Term<C, V> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self {
-            Term::Constant(s) => write!(f, "{}", s),
-            Term::Variable(s) => write!(f, "{}", s),
-        }
-    }
-}
-
 fn display_sep<T: fmt::Display>(seq: &[T], sep: &str) -> String {
     return seq
         .iter()
@@ -211,11 +184,7 @@ fn display_sep<T: fmt::Display>(seq: &[T], sep: &str) -> String {
         .join(sep);
 }
 
-impl<C, V> fmt::Display for Literal<C, V>
-where
-    C: IRConstant,
-    V: IRVariable,
-{
+impl fmt::Display for Literal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &*self.args {
             [] => write!(f, "{}", self.atom),
@@ -224,13 +193,20 @@ where
     }
 }
 
-impl<C, V> fmt::Display for Clause<C, V>
-where
-    C: IRConstant,
-    V: IRVariable,
-{
+impl fmt::Display for Clause {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} :- {}", self.head, display_sep(&self.body, ", "))
+    }
+}
+
+impl str::FromStr for Clause {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match parser::clause(modusfile::parser::modus_const, modusfile::parser::modus_var)(s) {
+            Result::Ok((_, o)) => Ok(o),
+            Result::Err(e) => Result::Err(format!("{}", e)),
+        }
     }
 }
 
@@ -277,24 +253,27 @@ pub mod parser {
         ))(i)
     }
 
-    pub fn term<'a, FC: 'a, FV: 'a, C: IRConstant, V: IRVariable>(
+    pub fn term<'a, FC: 'a, FV: 'a>(
         constant: FC,
         variable: FV,
-    ) -> impl FnMut(&'a str) -> IResult<&'a str, Term<C, V>>
+    ) -> impl FnMut(&'a str) -> IResult<&'a str, IRTerm>
     where
-        FC: FnMut(&'a str) -> IResult<&'a str, C>,
-        FV: FnMut(&'a str) -> IResult<&'a str, V>,
+        FC: FnMut(&str) -> IResult<&str, &str>,
+        FV: FnMut(&str) -> IResult<&str, &str>,
     {
-        alt((map(constant, Term::Constant), map(variable, Term::Variable)))
+        alt((
+            map(constant, |c| IRTerm::Constant(c.to_string())),
+            map(variable, |v| IRTerm::UserVariable(v.to_string())),
+        ))
     }
 
-    pub fn literal<'a, FC: 'a, FV: 'a, C: IRConstant, V: IRVariable>(
+    pub fn literal<'a, FC: 'a, FV: 'a>(
         constant: FC,
         variable: FV,
-    ) -> impl FnMut(&'a str) -> IResult<&'a str, Literal<C, V>>
+    ) -> impl FnMut(&'a str) -> IResult<&'a str, Literal>
     where
-        FC: FnMut(&'a str) -> IResult<&'a str, C>,
-        FV: FnMut(&'a str) -> IResult<&'a str, V>,
+        FC: FnMut(&str) -> IResult<&str, &str>,
+        FV: FnMut(&str) -> IResult<&str, &str>,
     {
         map(
             pair(
@@ -318,13 +297,13 @@ pub mod parser {
         )
     }
 
-    pub fn clause<'a, FC: 'a, FV: 'a, C: IRConstant, V: IRVariable>(
+    pub fn clause<'a, FC: 'a, FV: 'a>(
         constant: FC,
         variable: FV,
-    ) -> impl FnMut(&'a str) -> IResult<&'a str, Clause<C, V>>
+    ) -> impl FnMut(&'a str) -> IResult<&'a str, Clause>
     where
-        FC: FnMut(&'a str) -> IResult<&'a str, C> + Clone,
-        FV: FnMut(&'a str) -> IResult<&'a str, V> + Clone,
+        FC: FnMut(&str) -> IResult<&str, &str> + Clone,
+        FV: FnMut(&str) -> IResult<&str, &str> + Clone,
     {
         map(
             separated_pair(
@@ -337,123 +316,24 @@ pub mod parser {
     }
 }
 
-pub mod toy {
-    use super::Predicate;
-    use fp_core::compose::compose_two;
-    use std::{
-        collections::HashMap,
-        str,
-        sync::atomic::{AtomicU32, Ordering},
-    };
-
-    use crate::{
-        logic::{IRConstant, IRVariable},
-        sld,
-        unification::Rename,
-    };
-    use nom::{
-        branch::alt,
-        bytes::complete::tag,
-        character::complete::{alphanumeric1, one_of},
-        combinator::{map, recognize},
-        multi::many0,
-        sequence::pair,
-        IResult,
-    };
-
-    // define a toy language with only atoms for testing
-
-    pub type Variable = String;
-    pub type Term = super::Term<Predicate, Variable>;
-    pub type Literal = super::Literal<Predicate, Variable>;
-    pub type Clause = super::Clause<Predicate, Variable>;
-
-    impl IRConstant for Predicate {}
-    impl IRVariable for Variable {}
-
-    static AVAILABLE_INDEX: AtomicU32 = AtomicU32::new(0);
-
-    /// Assume that underscore is not used in normal variables
-    impl Rename<Variable> for Variable {
-        fn rename(&self) -> Variable {
-            let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
-            let prefix = self.split('_').next().unwrap();
-            let renamed = format!("{}_{}", prefix, index);
-            let mut s = HashMap::<Variable, Term>::new();
-            s.insert(self.clone(), Term::Variable(renamed.clone()));
-            renamed
-        }
-    }
-
-    impl sld::Variable<Predicate, Variable> for Variable {
-        fn aux() -> Variable {
-            let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
-            format!("Aux{}", index)
-        }
-    }
-
-    fn toy_var(i: &str) -> IResult<&str, Variable> {
-        map(
-            recognize(pair(
-                one_of("_ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
-                many0(alt((alphanumeric1, tag("_")))),
-            )),
-            String::from,
-        )(i)
-    }
-
-    fn toy_const(i: &str) -> IResult<&str, Predicate> {
-        map(
-            recognize(pair(
-                one_of("abcdefghijklmnopqrstuvwxyz"),
-                many0(alt((alphanumeric1, tag("_")))),
-            )),
-            compose!(String::from, Predicate),
-        )(i)
-    }
-
-    impl str::FromStr for Clause {
-        type Err = String;
-
-        fn from_str(s: &str) -> Result<Self, Self::Err> {
-            match super::parser::clause(toy_const, toy_var)(s) {
-                Result::Ok((_, o)) => Ok(o),
-                Result::Err(e) => Result::Err(format!("{}", e)),
-            }
-        }
-    }
-
-    impl str::FromStr for Literal {
-        type Err = String;
-
-        fn from_str(s: &str) -> Result<Self, Self::Err> {
-            match super::parser::literal(toy_const, toy_var)(s) {
-                Result::Ok((_, o)) => Ok(o),
-                Result::Err(e) => Result::Err(format!("{}", e)),
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::toy;
     use super::*;
 
     #[test]
     fn simple_rule() {
-        let c = toy::Term::Constant(Predicate("c".into()));
-        let va = toy::Term::Variable("A".into());
-        let vb = toy::Term::Variable("B".into());
-        let l1 = toy::Literal {
+        let c = IRTerm::Constant("c".into());
+        let va = IRTerm::UserVariable("A".into());
+        let vb = IRTerm::UserVariable("B".into());
+        let l1 = Literal {
             atom: Predicate("l1".into()),
             args: vec![va.clone(), vb.clone()],
         };
-        let l2 = toy::Literal {
+        let l2 = Literal {
             atom: Predicate("l2".into()),
             args: vec![va.clone(), c.clone()],
         };
-        let l3 = toy::Literal {
+        let l3 = Literal {
             atom: Predicate("l3".into()),
             args: vec![vb.clone(), c.clone()],
         };
@@ -461,18 +341,18 @@ mod tests {
             head: l1,
             body: vec![l2, l3],
         };
-        assert_eq!("l1(A, B) :- l2(A, c), l3(B, c)", r.to_string());
-        assert_eq!(Ok(r), "l1(A, B) :- l2(A, c), l3(B, c)".parse());
+        assert_eq!("l1(A, B) :- l2(A, \"c\"), l3(B, \"c\")", r.to_string());
+        assert_eq!(Ok(r), "l1(A, B) :- l2(A, \"c\"), l3(B, \"c\")".parse());
     }
 
     #[test]
     fn nullary_predicate() {
-        let va = toy::Term::Variable("A".into());
-        let l1 = toy::Literal {
+        let va = IRTerm::UserVariable("A".into());
+        let l1 = Literal {
             atom: Predicate("l1".into()),
             args: Vec::new(),
         };
-        let l2 = toy::Literal {
+        let l2 = Literal {
             atom: Predicate("l2".into()),
             args: vec![va.clone()],
         };
