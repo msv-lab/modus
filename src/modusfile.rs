@@ -16,6 +16,8 @@
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
 use fp_core::compose::compose_two;
+use nom::character::complete::line_ending;
+use nom::character::complete::not_line_ending;
 use std::fmt;
 use std::str;
 
@@ -179,6 +181,10 @@ mod parser {
         IResult,
     };
 
+    fn comment(s: &str) -> IResult<&str, &str> {
+        delimited(tag("#"), not_line_ending, line_ending)(s)
+    }
+
     fn head(i: &str) -> IResult<&str, Literal> {
         literal(modus_const, modus_var)(i)
     }
@@ -200,9 +206,27 @@ mod parser {
         ))(i)
     }
 
-    /// Comma-separated list of expressions
+    /// Comma-separated list of expressions, interspersed with comments.
     fn body(i: &str) -> IResult<&str, Vec<Expression>> {
-        separated_list0(delimited(multispace0, tag(","), multispace0), expression)(i)
+        preceded(
+            delimited(
+                multispace0,
+                separated_list0(multispace0, comment),
+                multispace0,
+            ),
+            separated_list0(
+                delimited(
+                    multispace0,
+                    tag(","),
+                    delimited(
+                        multispace0,
+                        separated_list0(multispace0, comment),
+                        multispace0,
+                    ),
+                ),
+                expression,
+            ),
+        )(i)
     }
 
     fn fact(i: &str) -> IResult<&str, ModusClause> {
