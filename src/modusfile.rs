@@ -15,7 +15,6 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use fp_core::compose::compose_two;
 use nom::character::complete::line_ending;
 use nom::character::complete::not_line_ending;
 use std::fmt;
@@ -36,11 +35,9 @@ pub struct ModusClause {
     pub body: Vec<Expression>,
 }
 
-impl From<&crate::modusfile::ModusClause>
-    for logic::Clause<crate::modusfile::Constant, crate::modusfile::Variable>
-{
+impl From<&crate::modusfile::ModusClause> for logic::Clause {
     fn from(modus_clause: &crate::modusfile::ModusClause) -> Self {
-        fn get_literals(expr: &Expression) -> Vec<logic::Literal<Constant, Variable>> {
+        fn get_literals(expr: &Expression) -> Vec<logic::Literal> {
             match expr {
                 Expression::Literal(l) => vec![l.clone()],
                 // for now, ignore operators
@@ -61,12 +58,10 @@ impl From<&crate::modusfile::ModusClause>
     }
 }
 
-type Constant = logic::Constant;
-type Variable = logic::Variable;
+type ModusTerm = logic::IRTerm;
+type Literal = logic::Literal<ModusTerm>;
 type Fact = ModusClause;
 type Rule = ModusClause;
-type Literal = logic::Literal;
-type Term = logic::Term;
 pub type Operator = Literal;
 
 #[derive(Clone, PartialEq, Debug)]
@@ -157,15 +152,7 @@ impl str::FromStr for Literal {
     }
 }
 
-impl fmt::Display for Constant {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Constant::String(s) => write!(f, "\"{}\"", s),
-        }
-    }
-}
-
-mod parser {
+pub mod parser {
     use crate::logic::parser::{literal, literal_identifier};
 
     use super::*;
@@ -254,20 +241,17 @@ mod parser {
         recognize(many0(none_of("\\\"")))(i)
     }
 
-    pub fn modus_const(i: &str) -> IResult<&str, Constant> {
-        // naively support f-strings
-        map(
-            delimited(alt((tag("\""), tag("f\""))), string_content, tag("\"")),
-            |s| Constant::String(s.into()),
-        )(i)
+    pub fn modus_const(i: &str) -> IResult<&str, &str> {
+        // TODO: don't treat f-strings as const
+        delimited(alt((tag("\""), tag("f\""))), string_content, tag("\""))(i)
     }
 
     pub fn variable_identifier(i: &str) -> IResult<&str, &str> {
         literal_identifier(i)
     }
 
-    pub fn modus_var(i: &str) -> IResult<&str, Variable> {
-        map(variable_identifier, compose!(String::from, Variable::User))(i)
+    pub fn modus_var(i: &str) -> IResult<&str, &str> {
+        variable_identifier(i)
     }
 
     pub fn modus_clause(i: &str) -> IResult<&str, ModusClause> {
@@ -386,7 +370,7 @@ mod tests {
         assert_eq!("foo :- (a, b)::merge.", r.to_string());
 
         // Convert to the simpler syntax
-        let c: logic::Clause<Constant, Variable> = (&r).into();
+        let c: logic::Clause = (&r).into();
         assert_eq!("foo :- a, b", c.to_string());
     }
 }

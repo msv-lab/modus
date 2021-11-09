@@ -15,20 +15,20 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use crate::logic::{IRConstant, IRVariable, Literal, Predicate, Term};
+use crate::logic::{IRTerm, Literal, Predicate};
 
-pub trait BuiltinPredicate<C: IRConstant, V: IRVariable> {
+pub trait BuiltinPredicate {
     fn name(&self) -> &'static str;
     fn arg_groundness(&self) -> &'static [bool];
 
-    fn select(&self, lit: &Literal<C, V>) -> bool {
+    fn select(&self, lit: &Literal) -> bool {
         let Literal { ref atom, ref args } = lit;
         if &atom.0 != self.name() {
             return false;
         }
         args.iter()
             .zip(self.arg_groundness().into_iter())
-            .all(|pair| !matches!(pair, (Term::Variable(_), false)))
+            .all(|pair| matches!(pair, (_, true) | (IRTerm::Constant(_), false)))
     }
 
     /// Return a new literal specifically constructed to unify with the input
@@ -44,39 +44,35 @@ pub trait BuiltinPredicate<C: IRConstant, V: IRVariable> {
     /// Renaming will not be done on this literal, so if variables are needed
     /// they must all be either auxillary or some existing variables from the
     /// input.
-    fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>>;
+    fn apply(&self, lit: &Literal) -> Option<Literal>;
 }
 
 trait MaybeStringConst {
     fn as_str_const(&self) -> Option<String>;
 }
 
-impl<C: IRConstant, V: IRVariable> MaybeStringConst for Term<C, V> {
+impl MaybeStringConst for IRTerm {
     fn as_str_const(&self) -> Option<String> {
         match &self {
-            Term::Constant(c) => Some(c.to_string()),
+            IRTerm::Constant(c) => Some(c.to_string()),
             _ => None,
         }
     }
 }
 
-fn string_concat_result<C: IRConstant, V: IRVariable>(
-    a: String,
-    b: String,
-    c: String,
-) -> Option<Literal<C, V>> {
+fn string_concat_result(a: String, b: String, c: String) -> Option<Literal> {
     Some(Literal {
         atom: Predicate("string_concat".to_owned()),
         args: vec![
-            Term::Constant(C::from(a)),
-            Term::Constant(C::from(b)),
-            Term::Constant(C::from(c)),
+            IRTerm::Constant(a),
+            IRTerm::Constant(b),
+            IRTerm::Constant(c),
         ],
     })
 }
 
 pub struct StringConcat1;
-impl<C: IRConstant, V: IRVariable> BuiltinPredicate<C, V> for StringConcat1 {
+impl BuiltinPredicate for StringConcat1 {
     fn name(&self) -> &'static str {
         "string_concat"
     }
@@ -85,7 +81,7 @@ impl<C: IRConstant, V: IRVariable> BuiltinPredicate<C, V> for StringConcat1 {
         &[false, false, true]
     }
 
-    fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>> {
+    fn apply(&self, lit: &Literal) -> Option<Literal> {
         let a = lit.args[0].as_str_const()?;
         let b = lit.args[1].as_str_const()?;
         let c = a.clone() + &b;
@@ -94,7 +90,7 @@ impl<C: IRConstant, V: IRVariable> BuiltinPredicate<C, V> for StringConcat1 {
 }
 
 pub struct StringConcat2;
-impl<C: IRConstant, V: IRVariable> BuiltinPredicate<C, V> for StringConcat2 {
+impl BuiltinPredicate for StringConcat2 {
     fn name(&self) -> &'static str {
         "string_concat"
     }
@@ -103,7 +99,7 @@ impl<C: IRConstant, V: IRVariable> BuiltinPredicate<C, V> for StringConcat2 {
         &[true, false, false]
     }
 
-    fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>> {
+    fn apply(&self, lit: &Literal) -> Option<Literal> {
         let b = lit.args[1].as_str_const()?;
         let c = lit.args[2].as_str_const()?;
         if let Some(a) = c.strip_suffix(&b) {
@@ -115,7 +111,7 @@ impl<C: IRConstant, V: IRVariable> BuiltinPredicate<C, V> for StringConcat2 {
 }
 
 pub struct StringConcat3;
-impl<C: IRConstant, V: IRVariable> BuiltinPredicate<C, V> for StringConcat3 {
+impl BuiltinPredicate for StringConcat3 {
     fn name(&self) -> &'static str {
         "string_concat"
     }
@@ -124,7 +120,7 @@ impl<C: IRConstant, V: IRVariable> BuiltinPredicate<C, V> for StringConcat3 {
         &[false, true, false]
     }
 
-    fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>> {
+    fn apply(&self, lit: &Literal) -> Option<Literal> {
         let a = lit.args[0].as_str_const()?;
         let c = lit.args[2].as_str_const()?;
         if let Some(b) = c.strip_prefix(&a) {
@@ -136,12 +132,12 @@ impl<C: IRConstant, V: IRVariable> BuiltinPredicate<C, V> for StringConcat3 {
 }
 
 mod run {
-    use crate::logic::{IRConstant, IRVariable, Literal, Term};
+    use crate::logic::{IRTerm, Literal};
 
     use super::BuiltinPredicate;
 
     pub struct Run;
-    impl<C: IRConstant, V: IRVariable> BuiltinPredicate<C, V> for Run {
+    impl BuiltinPredicate for Run {
         fn name(&self) -> &'static str {
             "run"
         }
@@ -150,11 +146,11 @@ mod run {
             &[false]
         }
 
-        fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>> {
+        fn apply(&self, lit: &Literal) -> Option<Literal> {
             let l = (*lit).clone();
             match lit.args[0] {
                 // it's valid as long as we're given a constant
-                Term::Constant(_) => Some(l),
+                IRTerm::Constant(_) => Some(l),
                 _ => None,
             }
         }
@@ -162,12 +158,12 @@ mod run {
 }
 
 mod from {
-    use crate::logic::{IRConstant, IRVariable, Literal, Term};
+    use crate::logic::{IRTerm, Literal};
 
     use super::BuiltinPredicate;
 
     pub struct From;
-    impl<C: IRConstant, V: IRVariable> BuiltinPredicate<C, V> for From {
+    impl BuiltinPredicate for From {
         fn name(&self) -> &'static str {
             "from"
         }
@@ -176,11 +172,11 @@ mod from {
             &[false]
         }
 
-        fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>> {
+        fn apply(&self, lit: &Literal) -> Option<Literal> {
             let l = (*lit).clone();
             match lit.args[0] {
                 // it's valid as long as we're given a constant
-                Term::Constant(_) => Some(l),
+                IRTerm::Constant(_) => Some(l),
                 _ => None,
             }
         }
@@ -201,9 +197,7 @@ macro_rules! select_builtins {
     };
 }
 
-pub fn select_builtin<'a, C: IRConstant, V: IRVariable>(
-    lit: &Literal<C, V>,
-) -> Option<&'a dyn BuiltinPredicate<C, V>> {
+pub fn select_builtin<'a>(lit: &Literal) -> Option<&'a dyn BuiltinPredicate> {
     select_builtins!(
         lit,
         StringConcat1,

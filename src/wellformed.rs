@@ -17,25 +17,25 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::logic::{Clause, IRConstant, IRVariable, Signature, Term};
+use crate::logic::{Clause, IRTerm, Signature};
 
 /// infer image predicates, i.e. those that transitively depend on image/1
 /// check that image predicates depend on image/1 in each disjunct
-pub fn check_image_predicates<C: IRConstant, V: IRVariable>(
-    clauses: &Vec<Clause<C, V>>,
+pub fn check_image_predicates(
+    clauses: &Vec<Clause<IRTerm>>,
 ) -> Result<HashSet<Signature>, HashSet<Signature>> {
     todo!()
 }
 
 // infer grounded variables, check if grounded variables are grounded in each rule
 //TODO: not sure what to do if there are variables inside compound terms
-pub fn check_grounded_variables<C: IRConstant, V: IRVariable>(
-    clauses: &Vec<Clause<C, V>>,
+pub fn check_grounded_variables(
+    clauses: &Vec<Clause<IRTerm>>,
 ) -> Result<HashMap<Signature, Vec<bool>>, HashSet<Signature>> {
     let mut errors: HashSet<Signature> = HashSet::new();
     let mut result: HashMap<Signature, Vec<bool>> = HashMap::new();
 
-    fn infer<C: IRConstant, V: IRVariable>(c: &Clause<C, V>) -> Vec<bool> {
+    fn infer(c: &Clause<IRTerm>) -> Vec<bool> {
         let body_vars = c
             .body
             .iter()
@@ -49,8 +49,8 @@ pub fn check_grounded_variables<C: IRConstant, V: IRVariable>(
             .args
             .iter()
             .map(|t| match t {
-                Term::Variable(v) => body_vars.contains(v),
-                _ => true,
+                IRTerm::Constant(_) => true,
+                v => body_vars.contains(v),
             })
             .collect()
     }
@@ -78,12 +78,11 @@ pub fn check_grounded_variables<C: IRConstant, V: IRVariable>(
 
 #[cfg(test)]
 mod tests {
-    use crate::logic::{toy, Predicate};
-
     use super::*;
+    use crate::logic::Predicate;
     #[test]
     fn consistently_grounded() {
-        let clauses: Vec<toy::Clause> = vec![
+        let clauses: Vec<Clause> = vec![
             "a(X, Y) :- b(X), c(X, Z).".parse().unwrap(),
             "a(X, Y) :- d(X).".parse().unwrap(),
             "b(X) :- d(X).".parse().unwrap(),
@@ -98,7 +97,7 @@ mod tests {
 
     #[test]
     fn inconsistently_grounded() {
-        let clauses: Vec<toy::Clause> = vec![
+        let clauses: Vec<Clause> = vec![
             "a(X, Y) :- b(X), c(X, Z).".parse().unwrap(),
             "a(X, Y) :- d(Y).".parse().unwrap(),
         ];
