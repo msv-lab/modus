@@ -218,11 +218,14 @@ pub mod parser {
         branch::alt,
         bytes::complete::tag,
         character::complete::{alpha1, alphanumeric1, one_of},
-        combinator::{map, opt, recognize, value},
+        combinator::{cut, map, opt, recognize, value},
+        error::VerboseError,
         multi::{many0, separated_list0, separated_list1},
         sequence::{delimited, pair, preceded, separated_pair, terminated},
-        IResult,
     };
+
+    /// Redeclaration that uses VerboseError instead of the default nom::Error.
+    pub type IResult<T, O> = nom::IResult<T, O, VerboseError<T>>;
 
     fn space(i: &str) -> IResult<&str, ()> {
         value(
