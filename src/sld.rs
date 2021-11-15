@@ -131,15 +131,15 @@ pub fn sld(
                 // (computed outside), and if a particular argument can not be
                 // ungrounded (grounded[arg_index] == false), variables will not be
                 // allowed there.
-                let lit_grounded = grounded
-                    .get(&literal.signature())
-                    .expect("should find literal with matching groundedness signature");
-                debug_assert_eq!(lit_grounded.len(), literal.args.len());
-                return literal
-                    .args
-                    .iter()
-                    .zip(lit_grounded.iter())
-                    .all(|pair| matches!(pair, (_, true) | (IRTerm::Constant(_), false)));
+                if let Some(lit_grounded) = grounded.get(&literal.signature()) {
+                    debug_assert_eq!(lit_grounded.len(), literal.args.len());
+                    return literal
+                        .args
+                        .iter()
+                        .zip(lit_grounded.iter())
+                        .all(|pair| matches!(pair, (_, true) | (IRTerm::Constant(_), false)));
+                }
+                false
             })
             .map(|(a, b)| (a, b.clone()))
     }
