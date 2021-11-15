@@ -43,16 +43,16 @@ pub(crate) type Goal<T = IRTerm> = Vec<Literal<T>>;
 
 /// A clause is either a rule, or a query
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum ClauseId<T = IRTerm> {
+pub enum ClauseId {
     Rule(RuleId),
     Query,
-    Builtin(Literal<T>),
+    Builtin(Literal<IRTerm>),
 }
 
 /// A literal origin can be uniquely identified through its source clause and its index in the clause body
 #[derive(Clone, PartialEq, Debug)]
-pub struct LiteralOrigin<T = IRTerm> {
-    clause: ClauseId<T>,
+pub struct LiteralOrigin {
+    clause: ClauseId,
     body_index: usize,
 }
 
@@ -61,22 +61,22 @@ type LiteralGoalId = usize;
 
 /// literal, tree level at which it was introduced if any, where it came from
 #[derive(Clone, PartialEq, Debug)]
-struct LiteralWithHistory<T = IRTerm> {
-    literal: Literal<T>,
+struct LiteralWithHistory {
+    literal: Literal<IRTerm>,
     introduction: TreeLevel,
-    origin: LiteralOrigin<T>,
+    origin: LiteralOrigin,
 }
-type GoalWithHistory<T = IRTerm> = Vec<LiteralWithHistory<T>>;
+type GoalWithHistory = Vec<LiteralWithHistory>;
 
 /// An SLD tree consists of
 /// - a goal with its dependencies (at which level and from which part of body each literal was introduced)
 /// - a level, which is incremented as tree grows
 /// - a mapping from (selected literal in goal, applied rule) to (mgu after rule renaming, rule renaming, resolvent subtree)
 #[derive(Clone)]
-pub struct Tree<T = IRTerm> {
-    goal: GoalWithHistory<T>,
+pub struct Tree {
+    goal: GoalWithHistory,
     level: TreeLevel,
-    resolvents: HashMap<(LiteralGoalId, ClauseId<T>), (Substitution<T>, Substitution<T>, Tree<T>)>,
+    resolvents: HashMap<(LiteralGoalId, ClauseId), (Substitution, Substitution, Tree)>,
 }
 
 /// A proof tree consist of
@@ -84,14 +84,14 @@ pub struct Tree<T = IRTerm> {
 /// - a valuation for this clause
 /// - proofs for parts of the clause body
 #[derive(Clone, Debug)]
-pub struct Proof<T = IRTerm> {
-    pub clause: ClauseId<T>,
-    pub valuation: Substitution<T>,
-    pub children: Vec<Proof<T>>,
+pub struct Proof {
+    pub clause: ClauseId,
+    pub valuation: Substitution,
+    pub children: Vec<Proof>,
 }
 
-impl Substitute<IRTerm> for GoalWithHistory<IRTerm> {
-    type Output = GoalWithHistory<IRTerm>;
+impl Substitute<IRTerm> for GoalWithHistory {
+    type Output = GoalWithHistory;
     fn substitute(&self, s: &Substitution<IRTerm>) -> Self::Output {
         self.iter()
             .map(
@@ -109,16 +109,12 @@ impl Substitute<IRTerm> for GoalWithHistory<IRTerm> {
     }
 }
 
-pub fn sld(
-    rules: &Vec<Clause<IRTerm>>,
-    goal: &Goal<IRTerm>,
-    maxdepth: TreeLevel,
-) -> Option<Tree<IRTerm>> {
+pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> Option<Tree> {
     /// select leftmost literal with compatible groundness
     fn select(
-        goal: &GoalWithHistory<IRTerm>,
+        goal: &GoalWithHistory,
         grounded: &HashMap<Signature, Vec<bool>>,
-    ) -> Option<(LiteralGoalId, LiteralWithHistory<IRTerm>)> {
+    ) -> Option<(LiteralGoalId, LiteralWithHistory)> {
         goal.iter()
             .enumerate()
             .find(|(_id, lit)| {
@@ -146,13 +142,13 @@ pub fn sld(
 
     fn resolve(
         lid: LiteralGoalId,
-        rid: ClauseId<IRTerm>,
-        goal: &GoalWithHistory<IRTerm>,
-        mgu: &Substitution<IRTerm>,
-        rule: &Clause<IRTerm>,
+        rid: ClauseId,
+        goal: &GoalWithHistory,
+        mgu: &Substitution,
+        rule: &Clause,
         level: TreeLevel,
-    ) -> GoalWithHistory<IRTerm> {
-        let mut g: GoalWithHistory<IRTerm> = goal.clone();
+    ) -> GoalWithHistory {
+        let mut g: GoalWithHistory = goal.clone();
         g.remove(lid);
         g.extend(
             rule.body
@@ -169,18 +165,18 @@ pub fn sld(
                         origin,
                     }
                 })
-                .collect::<GoalWithHistory<IRTerm>>(),
+                .collect::<GoalWithHistory>(),
         );
         g.substitute(mgu)
     }
 
     fn inner(
         rules: &Vec<Clause<IRTerm>>,
-        goal: &GoalWithHistory<IRTerm>,
+        goal: &GoalWithHistory,
         maxdepth: TreeLevel,
         level: TreeLevel,
         grounded: &HashMap<Signature, Vec<bool>>,
-    ) -> Option<Tree<IRTerm>> {
+    ) -> Option<Tree> {
         #[cfg(debug_assertions)]
         {
             // FIXME: move this ad-hoc debug code elsewhere
@@ -263,16 +259,14 @@ pub fn sld(
                     })
                 });
 
-            let resolvents: HashMap<
-                (LiteralGoalId, ClauseId),
-                (Substitution<IRTerm>, Substitution<IRTerm>, Tree<IRTerm>),
-            > = builtin_resolves
-                .chain(user_rules_resolves)
-                .filter_map(|(rid, mgu, renaming, resolvent)| {
-                    inner(rules, &resolvent, maxdepth, level + 1, grounded)
-                        .and_then(|tree| Some(((lid, rid), (mgu, renaming, tree))))
-                })
-                .collect();
+            let resolvents: HashMap<(LiteralGoalId, ClauseId), (Substitution, Substitution, Tree)> =
+                builtin_resolves
+                    .chain(user_rules_resolves)
+                    .filter_map(|(rid, mgu, renaming, resolvent)| {
+                        inner(rules, &resolvent, maxdepth, level + 1, grounded)
+                            .and_then(|tree| Some(((lid, rid), (mgu, renaming, tree))))
+                    })
+                    .collect();
             if resolvents.is_empty() {
                 None
             } else {
@@ -305,10 +299,10 @@ pub fn sld(
     inner(rules, &goal_with_history, maxdepth, 0, &grounded)
 }
 
-pub fn solutions(tree: &Tree<IRTerm>) -> HashSet<Goal<IRTerm>> {
-    fn inner(tree: &Tree<IRTerm>) -> Vec<Substitution<IRTerm>> {
+pub fn solutions(tree: &Tree) -> HashSet<Goal> {
+    fn inner(tree: &Tree) -> Vec<Substitution> {
         if tree.goal.is_empty() {
-            let s = Substitution::<IRTerm>::new();
+            let s = Substitution::new();
             return vec![s];
         }
         tree.resolvents
@@ -340,28 +334,24 @@ pub fn solutions(tree: &Tree<IRTerm>) -> HashSet<Goal<IRTerm>> {
 }
 
 #[derive(Clone)]
-struct PathNode<T = IRTerm> {
-    resolvent: GoalWithHistory<T>,
-    applied: ClauseId<T>,
+struct PathNode {
+    resolvent: GoalWithHistory,
+    applied: ClauseId,
     selected: LiteralGoalId,
-    renaming: Substitution<T>,
+    renaming: Substitution,
 }
 
 // sequence of nodes and global mgu
-type Path<T = IRTerm> = (Vec<PathNode<T>>, Substitution<T>);
+type Path = (Vec<PathNode>, Substitution);
 
-pub fn proofs(
-    tree: &Tree<IRTerm>,
-    rules: &Vec<Clause<IRTerm>>,
-    goal: &Goal<IRTerm>,
-) -> Vec<Proof<IRTerm>> {
+pub fn proofs(tree: &Tree, rules: &Vec<Clause>, goal: &Goal) -> Vec<Proof> {
     fn flatten_compose(
         lid: &LiteralGoalId,
-        cid: &ClauseId<IRTerm>,
-        mgu: &Substitution<IRTerm>,
-        renaming: &Substitution<IRTerm>,
-        tree: &Tree<IRTerm>,
-    ) -> Vec<Path<IRTerm>> {
+        cid: &ClauseId,
+        mgu: &Substitution,
+        renaming: &Substitution,
+        tree: &Tree,
+    ) -> Vec<Path> {
         if tree.goal.is_empty() {
             return vec![(
                 vec![PathNode {
@@ -389,18 +379,18 @@ pub fn proofs(
                         nodes.extend(sub_path.clone());
                         (nodes, val)
                     })
-                    .collect::<Vec<Path<IRTerm>>>()
+                    .collect::<Vec<Path>>()
             })
             .flatten()
             .collect()
     }
     // reconstruct proof for a given tree level
     fn proof_for_level(
-        path: &Vec<PathNode<IRTerm>>,
-        mgu: &Substitution<IRTerm>,
-        rules: &Vec<Clause<IRTerm>>,
+        path: &Vec<PathNode>,
+        mgu: &Substitution,
+        rules: &Vec<Clause>,
         level: TreeLevel,
-    ) -> Proof<IRTerm> {
+    ) -> Proof {
         let mut sublevels_map: HashMap<usize, TreeLevel> = HashMap::new();
         for l in 0..path.len() {
             if !path[l].resolvent.is_empty() {
@@ -451,16 +441,16 @@ pub fn proofs(
         &goal_id_renaming,
         tree,
     );
-    let all_proofs: Vec<Proof<IRTerm>> = paths
+    let all_proofs: Vec<Proof> = paths
         .iter()
         .map(|(path, mgu)| proof_for_level(path, mgu, rules, 0))
         .collect();
 
     //TODO: instead, I should find optimal proofs
-    let mut computed: HashSet<Goal<IRTerm>> = HashSet::new();
-    let mut proofs: Vec<Proof<IRTerm>> = Vec::new();
+    let mut computed: HashSet<Goal> = HashSet::new();
+    let mut proofs: Vec<Proof> = Vec::new();
     for p in all_proofs {
-        let solution: Goal<IRTerm> = goal.substitute(&p.valuation);
+        let solution: Goal = goal.substitute(&p.valuation);
         if !computed.contains(&solution) {
             computed.insert(solution.clone());
             proofs.push(p)
