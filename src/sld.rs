@@ -17,10 +17,11 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fmt::{Debug, Display},
+    fmt::Debug,
     hash::Hash,
 };
 
+use crate::unification::RenameWithSubstitution;
 use crate::{
     builtin,
     unification::{compose_extend, compose_no_extend, Rename, Substitution},
@@ -30,28 +31,28 @@ use crate::{
     unification::Substitute,
     wellformed,
 };
-use logic::{Atom, Clause, Literal, Term};
+use logic::{Clause, IRTerm, Literal};
 
-pub trait Variable<C, V>: Rename<C, V> {
+pub trait Auxiliary: Rename<Self> + Sized {
     fn aux() -> Self;
 }
 
 type RuleId = usize;
 type TreeLevel = usize;
-pub(crate) type Goal<C, V> = Vec<Literal<C, V>>;
+pub(crate) type Goal<T = IRTerm> = Vec<Literal<T>>;
 
 /// A clause is either a rule, or a query
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum ClauseId<C, V> {
+pub enum ClauseId<T = IRTerm> {
     Rule(RuleId),
     Query,
-    Builtin(Literal<C, V>),
+    Builtin(Literal<T>),
 }
 
 /// A literal origin can be uniquely identified through its source clause and its index in the clause body
 #[derive(Clone, PartialEq, Debug)]
-pub struct LiteralOrigin<C, V> {
-    clause: ClauseId<C, V>,
+pub struct LiteralOrigin<T = IRTerm> {
+    clause: ClauseId<T>,
     body_index: usize,
 }
 
@@ -60,23 +61,22 @@ type LiteralGoalId = usize;
 
 /// literal, tree level at which it was introduced if any, where it came from
 #[derive(Clone, PartialEq, Debug)]
-struct LiteralWithHistory<C, V> {
-    literal: Literal<C, V>,
+struct LiteralWithHistory<T = IRTerm> {
+    literal: Literal<T>,
     introduction: TreeLevel,
-    origin: LiteralOrigin<C, V>,
+    origin: LiteralOrigin<T>,
 }
-type GoalWithHistory<C, V> = Vec<LiteralWithHistory<C, V>>;
+type GoalWithHistory<T = IRTerm> = Vec<LiteralWithHistory<T>>;
 
 /// An SLD tree consists of
 /// - a goal with its dependencies (at which level and from which part of body each literal was introduced)
 /// - a level, which is incremented as tree grows
 /// - a mapping from (selected literal in goal, applied rule) to (mgu after rule renaming, rule renaming, resolvent subtree)
 #[derive(Clone)]
-pub struct Tree<C, V> {
-    goal: GoalWithHistory<C, V>,
+pub struct Tree<T = IRTerm> {
+    goal: GoalWithHistory<T>,
     level: TreeLevel,
-    resolvents:
-        HashMap<(LiteralGoalId, ClauseId<C, V>), (Substitution<C, V>, Substitution<C, V>, Tree<C, V>)>,
+    resolvents: HashMap<(LiteralGoalId, ClauseId<T>), (Substitution<T>, Substitution<T>, Tree<T>)>,
 }
 
 /// A proof tree consist of
@@ -84,15 +84,15 @@ pub struct Tree<C, V> {
 /// - a valuation for this clause
 /// - proofs for parts of the clause body
 #[derive(Clone, Debug)]
-pub struct Proof<C, V> {
-    pub clause: ClauseId<C, V>,
-    pub valuation: Substitution<C, V>,
-    pub children: Vec<Proof<C, V>>,
+pub struct Proof<T = IRTerm> {
+    pub clause: ClauseId<T>,
+    pub valuation: Substitution<T>,
+    pub children: Vec<Proof<T>>,
 }
 
-impl<C: Clone, V: Eq + Hash + Clone> Substitute<C, V> for GoalWithHistory<C, V> {
-    type Output = GoalWithHistory<C, V>;
-    fn substitute(&self, s: &Substitution<C, V>) -> Self::Output {
+impl Substitute<IRTerm> for GoalWithHistory<IRTerm> {
+    type Output = GoalWithHistory<IRTerm>;
+    fn substitute(&self, s: &Substitution<IRTerm>) -> Self::Output {
         self.iter()
             .map(
                 |LiteralWithHistory {
@@ -109,27 +109,19 @@ impl<C: Clone, V: Eq + Hash + Clone> Substitute<C, V> for GoalWithHistory<C, V> 
     }
 }
 
-pub fn sld<C, V>(
-    rules: &Vec<Clause<C, V>>,
-    goal: &Goal<C, V>,
+pub fn sld(
+    rules: &Vec<Clause<IRTerm>>,
+    goal: &Goal<IRTerm>,
     maxdepth: TreeLevel,
-) -> Option<Tree<C, V>>
-where
-    C: Clone + PartialEq + Debug + ToString + From<String> + Eq + Hash,
-    V: Clone + Eq + Hash + Variable<C, V> + Debug,
-{
+) -> Option<Tree<IRTerm>> {
     /// select leftmost literal with compatible groundness
-    fn select<C, V>(
-        goal: &GoalWithHistory<C, V>,
+    fn select(
+        goal: &GoalWithHistory<IRTerm>,
         grounded: &HashMap<Signature, Vec<bool>>,
-    ) -> Option<(LiteralGoalId, LiteralWithHistory<C, V>)>
-    where
-        C: Clone + ToString + From<String>,
-        V: Clone + Eq + Hash,
-    {
+    ) -> Option<(LiteralGoalId, LiteralWithHistory<IRTerm>)> {
         goal.iter()
             .enumerate()
-            .find(|(id, lit)| {
+            .find(|(_id, lit)| {
                 let literal = &lit.literal;
                 if builtin::select_builtin(literal).is_some() {
                     return true;
@@ -147,24 +139,20 @@ where
                     .args
                     .iter()
                     .zip(lit_grounded.iter())
-                    .all(|pair| !matches!(pair, (Term::Variable(_), &false)));
+                    .all(|pair| matches!(pair, (_, true) | (IRTerm::Constant(_), false)));
             })
             .map(|(a, b)| (a, b.clone()))
     }
 
-    fn resolve<C, V>(
+    fn resolve(
         lid: LiteralGoalId,
-        rid: ClauseId<C, V>,
-        goal: &GoalWithHistory<C, V>,
-        mgu: &Substitution<C, V>,
-        rule: &Clause<C, V>,
+        rid: ClauseId<IRTerm>,
+        goal: &GoalWithHistory<IRTerm>,
+        mgu: &Substitution<IRTerm>,
+        rule: &Clause<IRTerm>,
         level: TreeLevel,
-    ) -> GoalWithHistory<C, V>
-    where
-        C: Clone + PartialEq + Debug + ToString,
-        V: Clone + Eq + Hash + Variable<C, V> + Debug,
-    {
-        let mut g: GoalWithHistory<C, V> = goal.clone();
+    ) -> GoalWithHistory<IRTerm> {
+        let mut g: GoalWithHistory<IRTerm> = goal.clone();
         g.remove(lid);
         g.extend(
             rule.body
@@ -181,22 +169,18 @@ where
                         origin,
                     }
                 })
-                .collect::<GoalWithHistory<C, V>>(),
+                .collect::<GoalWithHistory<IRTerm>>(),
         );
         g.substitute(mgu)
     }
 
-    fn inner<C, V>(
-        rules: &Vec<Clause<C, V>>,
-        goal: &GoalWithHistory<C, V>,
+    fn inner(
+        rules: &Vec<Clause<IRTerm>>,
+        goal: &GoalWithHistory<IRTerm>,
         maxdepth: TreeLevel,
         level: TreeLevel,
         grounded: &HashMap<Signature, Vec<bool>>,
-    ) -> Option<Tree<C, V>>
-    where
-        C: Clone + PartialEq + Debug + ToString + From<String> + Eq + Hash,
-        V: Clone + Eq + Hash + Variable<C, V> + Debug,
-    {
+    ) -> Option<Tree<IRTerm>> {
         #[cfg(debug_assertions)]
         {
             // FIXME: move this ad-hoc debug code elsewhere
@@ -211,8 +195,8 @@ where
                             .args
                             .iter()
                             .map(|x| match x {
-                                Term::Constant(x) => x.to_string(),
-                                Term::Variable(v) =>
+                                IRTerm::Constant(x) => x.to_string(),
+                                IRTerm::UserVariable(v) =>
                                     format!("{:?}", v).trim_matches('\"').to_string(),
                                 _ => format!("{:?}", x),
                             })
@@ -247,7 +231,7 @@ where
                         (
                             ClauseId::Builtin(unify_cand.clone()),
                             mgu.clone(),
-                            Substitution::<C, V>::new(),
+                            Substitution::<IRTerm>::new(),
                             resolve(
                                 lid,
                                 ClauseId::Builtin(unify_cand.clone()),
@@ -267,7 +251,7 @@ where
                 .iter()
                 .enumerate()
                 .filter(|(_, c)| c.head.signature() == l.literal.signature())
-                .map(|(rid, c)| (ClauseId::Rule(rid), c.rename()))
+                .map(|(rid, c)| (ClauseId::Rule(rid), c.rename_with_sub()))
                 .filter_map(|(rid, (c, renaming))| {
                     c.head.unify(&l.literal).map(|mgu| {
                         (
@@ -280,8 +264,8 @@ where
                 });
 
             let resolvents: HashMap<
-                (LiteralGoalId, ClauseId<C, V>),
-                (Substitution<C, V>, Substitution<C, V>, Tree<C, V>),
+                (LiteralGoalId, ClauseId),
+                (Substitution<IRTerm>, Substitution<IRTerm>, Tree<IRTerm>),
             > = builtin_resolves
                 .chain(user_rules_resolves)
                 .filter_map(|(rid, mgu, renaming, resolvent)| {
@@ -321,18 +305,10 @@ where
     inner(rules, &goal_with_history, maxdepth, 0, &grounded)
 }
 
-pub fn solutions<C, V>(tree: &Tree<C, V>) -> HashSet<Goal<C, V>>
-where
-    C: Clone + Eq + Hash + Debug + Display,
-    V: Clone + Eq + Hash + Variable<C, V> + Debug + Display,
-{
-    fn inner<C, V>(tree: &Tree<C, V>) -> Vec<Substitution<C, V>>
-    where
-        C: Clone,
-        V: Clone + Eq + Hash + Debug,
-    {
+pub fn solutions(tree: &Tree<IRTerm>) -> HashSet<Goal<IRTerm>> {
+    fn inner(tree: &Tree<IRTerm>) -> Vec<Substitution<IRTerm>> {
         if tree.goal.is_empty() {
-            let s = Substitution::<C, V>::new();
+            let s = Substitution::<IRTerm>::new();
             return vec![s];
         }
         tree.resolvents
@@ -341,7 +317,7 @@ where
             .map(|(mgu, sub)| {
                 sub.iter()
                     .map(|s| compose_extend(mgu, s))
-                    .collect::<Vec<Substitution<C, V>>>()
+                    .collect::<Vec<Substitution<IRTerm>>>()
             })
             .flatten()
             .collect()
@@ -364,36 +340,28 @@ where
 }
 
 #[derive(Clone)]
-struct PathNode<C, V> {
-    resolvent: GoalWithHistory<C, V>,
-    applied: ClauseId<C, V>,
+struct PathNode<T = IRTerm> {
+    resolvent: GoalWithHistory<T>,
+    applied: ClauseId<T>,
     selected: LiteralGoalId,
-    renaming: Substitution<C, V>,
+    renaming: Substitution<T>,
 }
 
 // sequence of nodes and global mgu
-type Path<C, V> = (Vec<PathNode<C, V>>, Substitution<C, V>);
+type Path<T = IRTerm> = (Vec<PathNode<T>>, Substitution<T>);
 
-pub fn proofs<C, V>(
-    tree: &Tree<C, V>,
-    rules: &Vec<Clause<C, V>>,
-    goal: &Goal<C, V>,
-) -> Vec<Proof<C, V>>
-where
-    C: Clone + Eq + Hash + Debug,
-    V: Clone + Eq + Hash + Variable<C, V> + Debug,
-{
-    fn flatten_compose<C, V>(
+pub fn proofs(
+    tree: &Tree<IRTerm>,
+    rules: &Vec<Clause<IRTerm>>,
+    goal: &Goal<IRTerm>,
+) -> Vec<Proof<IRTerm>> {
+    fn flatten_compose(
         lid: &LiteralGoalId,
-        cid: &ClauseId<C, V>,
-        mgu: &Substitution<C, V>,
-        renaming: &Substitution<C, V>,
-        tree: &Tree<C, V>,
-    ) -> Vec<Path<C, V>>
-    where
-        C: Clone + Eq + Hash,
-        V: Clone + Eq + Hash,
-    {
+        cid: &ClauseId<IRTerm>,
+        mgu: &Substitution<IRTerm>,
+        renaming: &Substitution<IRTerm>,
+        tree: &Tree<IRTerm>,
+    ) -> Vec<Path<IRTerm>> {
         if tree.goal.is_empty() {
             return vec![(
                 vec![PathNode {
@@ -421,22 +389,18 @@ where
                         nodes.extend(sub_path.clone());
                         (nodes, val)
                     })
-                    .collect::<Vec<Path<C, V>>>()
+                    .collect::<Vec<Path<IRTerm>>>()
             })
             .flatten()
             .collect()
     }
     // reconstruct proof for a given tree level
-    fn proof_for_level<C, V>(
-        path: &Vec<PathNode<C, V>>,
-        mgu: &Substitution<C, V>,
-        rules: &Vec<Clause<C, V>>,
+    fn proof_for_level(
+        path: &Vec<PathNode<IRTerm>>,
+        mgu: &Substitution<IRTerm>,
+        rules: &Vec<Clause<IRTerm>>,
         level: TreeLevel,
-    ) -> Proof<C, V>
-    where
-        C: Clone + Eq + Hash,
-        V: Clone + Eq + Hash,
-    {
+    ) -> Proof<IRTerm> {
         let mut sublevels_map: HashMap<usize, TreeLevel> = HashMap::new();
         for l in 0..path.len() {
             if !path[l].resolvent.is_empty() {
@@ -478,27 +442,25 @@ where
             l
         })
         .unwrap_or_default();
-    let goal_id_reaming: Substitution<C, V> = goal_vars
-        .iter()
-        .map(|v| (v.clone(), Term::Variable(v.clone())))
-        .collect();
+    let goal_id_renaming: Substitution<IRTerm> =
+        goal_vars.iter().map(|v| (v.clone(), v.clone())).collect();
     let paths = flatten_compose(
         &0,
         &ClauseId::Query,
         &Substitution::new(),
-        &goal_id_reaming,
+        &goal_id_renaming,
         tree,
     );
-    let all_proofs: Vec<Proof<C, V>> = paths
+    let all_proofs: Vec<Proof<IRTerm>> = paths
         .iter()
         .map(|(path, mgu)| proof_for_level(path, mgu, rules, 0))
         .collect();
 
     //TODO: instead, I should find optimal proofs
-    let mut computed: HashSet<Goal<C, V>> = HashSet::new();
-    let mut proofs: Vec<Proof<C, V>> = Vec::new();
+    let mut computed: HashSet<Goal<IRTerm>> = HashSet::new();
+    let mut proofs: Vec<Proof<IRTerm>> = Vec::new();
     for p in all_proofs {
-        let solution: Goal<C, V> = goal.substitute(&p.valuation);
+        let solution: Goal<IRTerm> = goal.substitute(&p.valuation);
         if !computed.contains(&solution) {
             computed.insert(solution.clone());
             proofs.push(p)
@@ -509,54 +471,19 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::HashMap,
-        sync::atomic::{AtomicU32, Ordering},
-    };
-
     use super::*;
-
-    static AVAILABLE_INDEX: AtomicU32 = AtomicU32::new(0);
-
-    /// Assume that underscore is not used in normal variables
-    impl Rename<logic::Atom, logic::toy::Variable> for logic::toy::Variable {
-        type Output = logic::toy::Variable;
-        fn rename(
-            &self,
-        ) -> (
-            Self::Output,
-            Substitution<logic::Atom, logic::toy::Variable>,
-        ) {
-            let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
-            let prefix = self.split('_').next().unwrap();
-            let renamed = format!("{}_{}", prefix, index);
-            let mut s = HashMap::<
-                logic::toy::Variable,
-                logic::Term<logic::Atom, logic::toy::Variable>,
-            >::new();
-            s.insert(self.clone(), logic::Term::Variable(renamed.clone()));
-            (renamed, s)
-        }
-    }
-
-    impl Variable<logic::Atom, logic::toy::Variable> for logic::toy::Variable {
-        fn aux() -> logic::toy::Variable {
-            let index = AVAILABLE_INDEX.fetch_add(1, Ordering::SeqCst);
-            format!("Aux{}", index)
-        }
-    }
 
     #[test]
     fn simple_solving() {
-        let goal: Goal<logic::Atom, logic::toy::Variable> = vec!["a(X)".parse().unwrap()];
-        let clauses: Vec<logic::toy::Clause> = vec![
+        let goal: Goal<logic::IRTerm> = vec!["a(X)".parse().unwrap()];
+        let clauses: Vec<logic::Clause> = vec![
             "a(X) :- b(X).".parse().unwrap(),
-            logic::toy::Clause {
-                head: "b(c)".parse().unwrap(),
+            logic::Clause {
+                head: "b(\"c\")".parse().unwrap(),
                 body: vec![],
             },
-            logic::toy::Clause {
-                head: "b(d)".parse().unwrap(),
+            logic::Clause {
+                head: "b(\"d\")".parse().unwrap(),
                 body: vec![],
             },
         ];
@@ -564,14 +491,14 @@ mod tests {
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 2);
-        assert!(solutions.contains(&vec!["a(c)".parse::<logic::toy::Literal>().unwrap()]));
-        assert!(solutions.contains(&vec!["a(d)".parse::<logic::toy::Literal>().unwrap()]));
+        assert!(solutions.contains(&vec!["a(\"c\")".parse::<logic::Literal>().unwrap()]));
+        assert!(solutions.contains(&vec!["a(\"d\")".parse::<logic::Literal>().unwrap()]));
     }
 
     #[test]
     fn simple_nongrounded() {
-        let goal: Goal<logic::Atom, logic::toy::Variable> = vec!["a(b)".parse().unwrap()];
-        let clauses: Vec<logic::toy::Clause> = vec![logic::toy::Clause {
+        let goal: Goal<logic::IRTerm> = vec!["a(\"b\")".parse().unwrap()];
+        let clauses: Vec<logic::Clause> = vec![logic::Clause {
             head: "a(X)".parse().unwrap(),
             body: vec![],
         }];
@@ -579,13 +506,13 @@ mod tests {
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 1);
-        assert!(solutions.contains(&vec!["a(b)".parse::<logic::toy::Literal>().unwrap()]));
+        assert!(solutions.contains(&vec!["a(\"b\")".parse::<logic::Literal>().unwrap()]));
     }
 
     #[test]
     fn simple_nongrounded_invalid() {
-        let goal: Goal<logic::Atom, logic::toy::Variable> = vec!["a(X)".parse().unwrap()];
-        let clauses: Vec<logic::toy::Clause> = vec![logic::toy::Clause {
+        let goal: Goal<logic::IRTerm> = vec!["a(X)".parse().unwrap()];
+        let clauses: Vec<logic::Clause> = vec![logic::Clause {
             head: "a(X)".parse().unwrap(),
             body: vec![],
         }];
@@ -595,23 +522,22 @@ mod tests {
 
     #[test]
     fn complex_goal() {
-        let goal: Goal<logic::Atom, logic::toy::Variable> =
-            vec!["a(X)".parse().unwrap(), "b(X)".parse().unwrap()];
-        let clauses: Vec<logic::toy::Clause> = vec![
-            logic::toy::Clause {
-                head: "a(t)".parse().unwrap(),
+        let goal: Goal<logic::IRTerm> = vec!["a(X)".parse().unwrap(), "b(X)".parse().unwrap()];
+        let clauses: Vec<logic::Clause> = vec![
+            logic::Clause {
+                head: "a(\"t\")".parse().unwrap(),
                 body: vec![],
             },
-            logic::toy::Clause {
-                head: "a(f)".parse().unwrap(),
+            logic::Clause {
+                head: "a(\"f\")".parse().unwrap(),
                 body: vec![],
             },
-            logic::toy::Clause {
-                head: "b(g)".parse().unwrap(),
+            logic::Clause {
+                head: "b(\"g\")".parse().unwrap(),
                 body: vec![],
             },
-            logic::toy::Clause {
-                head: "b(t)".parse().unwrap(),
+            logic::Clause {
+                head: "b(\"t\")".parse().unwrap(),
                 body: vec![],
             },
         ];
@@ -619,28 +545,31 @@ mod tests {
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 1);
-        assert!(solutions.contains(&vec!["a(t)".parse().unwrap(), "b(t)".parse().unwrap()]));
+        assert!(solutions.contains(&vec![
+            "a(\"t\")".parse().unwrap(),
+            "b(\"t\")".parse().unwrap()
+        ]));
     }
 
     #[test]
     fn solving_with_binary_relations() {
-        let goal: Goal<logic::Atom, logic::toy::Variable> = vec!["a(X)".parse().unwrap()];
-        let clauses: Vec<logic::toy::Clause> = vec![
+        let goal: Goal<logic::IRTerm> = vec!["a(X)".parse().unwrap()];
+        let clauses: Vec<logic::Clause> = vec![
             "a(X) :- b(X, Y), c(Y).".parse().unwrap(),
-            logic::toy::Clause {
-                head: "b(t, f)".parse().unwrap(),
+            logic::Clause {
+                head: "b(\"t\", \"f\")".parse().unwrap(),
                 body: vec![],
             },
-            logic::toy::Clause {
-                head: "b(f, t)".parse().unwrap(),
+            logic::Clause {
+                head: "b(\"f\", \"t\")".parse().unwrap(),
                 body: vec![],
             },
-            logic::toy::Clause {
-                head: "b(g, t)".parse().unwrap(),
+            logic::Clause {
+                head: "b(\"g\", \"t\")".parse().unwrap(),
                 body: vec![],
             },
-            logic::toy::Clause {
-                head: "c(t)".parse().unwrap(),
+            logic::Clause {
+                head: "c(\"t\")".parse().unwrap(),
                 body: vec![],
             },
         ];
@@ -648,42 +577,42 @@ mod tests {
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 2);
-        assert!(solutions.contains(&vec!["a(f)".parse().unwrap()]));
-        assert!(solutions.contains(&vec!["a(g)".parse().unwrap()]));
+        assert!(solutions.contains(&vec!["a(\"f\")".parse().unwrap()]));
+        assert!(solutions.contains(&vec!["a(\"g\")".parse().unwrap()]));
     }
 
     #[test]
     fn simple_recursion() {
-        let goal: Goal<logic::Atom, logic::toy::Variable> = vec!["reach(a, X)".parse().unwrap()];
-        let clauses: Vec<logic::toy::Clause> = vec![
+        let goal: Goal<logic::IRTerm> = vec!["reach(\"a\", X)".parse().unwrap()];
+        let clauses: Vec<logic::Clause> = vec![
             "reach(X, Y) :- reach(X, Z), arc(Z, Y).".parse().unwrap(),
             "reach(X, Y) :- arc(X, Y).".parse().unwrap(),
-            logic::toy::Clause {
-                head: "arc(a, b)".parse().unwrap(),
+            logic::Clause {
+                head: "arc(\"a\", \"b\")".parse().unwrap(),
                 body: vec![],
             },
-            logic::toy::Clause {
-                head: "arc(b, c)".parse().unwrap(),
+            logic::Clause {
+                head: "arc(\"b\", \"c\")".parse().unwrap(),
                 body: vec![],
             },
-            logic::toy::Clause {
-                head: "arc(c, d)".parse().unwrap(),
+            logic::Clause {
+                head: "arc(\"c\", \"d\")".parse().unwrap(),
                 body: vec![],
             },
-            logic::toy::Clause {
-                head: "arc(d, e)".parse().unwrap(),
+            logic::Clause {
+                head: "arc(\"d\", \"e\")".parse().unwrap(),
                 body: vec![],
             },
-            logic::toy::Clause {
-                head: "arc(f, e)".parse().unwrap(),
+            logic::Clause {
+                head: "arc(\"f\", \"e\")".parse().unwrap(),
                 body: vec![],
             },
-            logic::toy::Clause {
-                head: "arc(g, f)".parse().unwrap(),
+            logic::Clause {
+                head: "arc(\"g\", \"f\")".parse().unwrap(),
                 body: vec![],
             },
-            logic::toy::Clause {
-                head: "arc(g, a)".parse().unwrap(),
+            logic::Clause {
+                head: "arc(\"g\", \"a\")".parse().unwrap(),
                 body: vec![],
             },
         ];
@@ -691,23 +620,23 @@ mod tests {
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 4);
-        assert!(solutions.contains(&vec!["reach(a, b)".parse().unwrap()]));
-        assert!(solutions.contains(&vec!["reach(a, c)".parse().unwrap()]));
-        assert!(solutions.contains(&vec!["reach(a, d)".parse().unwrap()]));
-        assert!(solutions.contains(&vec!["reach(a, e)".parse().unwrap()]));
+        assert!(solutions.contains(&vec!["reach(\"a\", \"b\")".parse().unwrap()]));
+        assert!(solutions.contains(&vec!["reach(\"a\", \"c\")".parse().unwrap()]));
+        assert!(solutions.contains(&vec!["reach(\"a\", \"d\")".parse().unwrap()]));
+        assert!(solutions.contains(&vec!["reach(\"a\", \"e\")".parse().unwrap()]));
     }
 
     #[test]
     fn string_concat() {
-        let goal: Goal<logic::Atom, logic::toy::Variable> =
-            vec!["string_concat(hello, world, X)".parse().unwrap()];
-        let clauses: Vec<logic::toy::Clause> = vec![];
+        let goal: Goal<logic::IRTerm> =
+            vec!["string_concat(\"hello\", \"world\", X)".parse().unwrap()];
+        let clauses: Vec<logic::Clause> = vec![];
         let result = sld(&clauses, &goal, 10);
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 1);
         assert!(
-            solutions.contains(&vec!["string_concat(hello, world, helloworld)"
+            solutions.contains(&vec!["string_concat(\"hello\", \"world\", \"helloworld\")"
                 .parse()
                 .unwrap()])
         );
@@ -723,14 +652,13 @@ mod tests {
             .map(|x| (*x, true))
             .chain(bad.iter().map(|x| (*x, false)))
         {
-            let goal: Goal<logic::Atom, logic::toy::Variable> =
-                vec![format!("a({})", s).parse().unwrap()];
-            let clauses: Vec<logic::toy::Clause> = vec![
-                logic::toy::Clause {
-                    head: "a(ab)".parse().unwrap(),
+            let goal: Goal<logic::IRTerm> = vec![format!("a(\"{}\")", s).parse().unwrap()];
+            let clauses: Vec<logic::Clause> = vec![
+                logic::Clause {
+                    head: "a(\"ab\")".parse().unwrap(),
                     body: vec![],
                 },
-                "a(S) :- string_concat(a, X, S), string_concat(Y, b, X), a(Y)"
+                "a(S) :- string_concat(\"a\", X, S), string_concat(Y, \"b\", X), a(Y)"
                     .parse()
                     .unwrap(),
             ];
@@ -739,7 +667,7 @@ mod tests {
                 assert!(result.is_some());
                 let solutions = solutions(&result.unwrap());
                 assert_eq!(solutions.len(), 1);
-                assert!(solutions.contains(&vec![format!("a({})", s).parse().unwrap()]));
+                assert!(solutions.contains(&vec![format!("a(\"{}\")", s).parse().unwrap()]));
             } else {
                 assert!(result.is_none());
             }

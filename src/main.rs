@@ -90,8 +90,7 @@ fn main() {
     match matches.subcommand() {
         ("transpile", Some(sub)) => {
             let input_file = sub.value_of("FILE").unwrap();
-            let query: modusfile::Literal =
-                sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
+            let query: logic::Literal = sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
 
             let file_content = fs::read_to_string(input_file).unwrap();
             let mf: Modusfile = file_content.parse().unwrap();
@@ -102,8 +101,7 @@ fn main() {
         }
         ("proof", Some(sub)) => {
             let input_file = sub.value_of("FILE").unwrap();
-            let query: Option<modusfile::Literal> =
-                sub.value_of("QUERY").map(|l| l.parse().unwrap());
+            let query: Option<logic::Literal> = sub.value_of("QUERY").map(|l| l.parse().unwrap());
 
             let file_content = fs::read_to_string(input_file).unwrap();
             match (file_content.parse::<Modusfile>(), query) {

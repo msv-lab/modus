@@ -15,29 +15,18 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use fp_core::compose::compose_two;
+use nom::character::complete::line_ending;
+use nom::character::complete::not_line_ending;
 use std::fmt;
 use std::str;
 
+use crate::dockerfile;
 use crate::logic;
-use crate::{dockerfile, transpiler};
-
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum Constant {
-    String(String),
-    Integer(u32), //TODO: arbitrary-precision arithmetic?
-}
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Expression {
     Literal(Literal),
     OperatorApplication(Vec<Expression>, Operator),
-}
-
-impl From<String> for Constant {
-    fn from(s: String) -> Self {
-        Constant::String(s)
-    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -46,11 +35,9 @@ pub struct ModusClause {
     pub body: Vec<Expression>,
 }
 
-impl From<&crate::modusfile::ModusClause>
-    for logic::Clause<crate::modusfile::Constant, crate::modusfile::Variable>
-{
+impl From<&crate::modusfile::ModusClause> for logic::Clause {
     fn from(modus_clause: &crate::modusfile::ModusClause) -> Self {
-        fn get_literals(expr: &Expression) -> Vec<logic::Literal<Constant, Variable>> {
+        fn get_literals(expr: &Expression) -> Vec<logic::Literal> {
             match expr {
                 Expression::Literal(l) => vec![l.clone()],
                 // for now, ignore operators
@@ -71,11 +58,10 @@ impl From<&crate::modusfile::ModusClause>
     }
 }
 
-pub type Fact = ModusClause;
-pub type Rule = ModusClause;
-pub type Variable = transpiler::Variable;
-pub type Literal = logic::Literal<Constant, Variable>;
-pub type Term = logic::Term<Constant, Variable>;
+type ModusTerm = logic::IRTerm;
+type Literal = logic::Literal<ModusTerm>;
+type Fact = ModusClause;
+type Rule = ModusClause;
 pub type Operator = Literal;
 
 #[derive(Clone, PartialEq, Debug)]
@@ -166,16 +152,7 @@ impl str::FromStr for Literal {
     }
 }
 
-impl fmt::Display for Constant {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Constant::String(s) => write!(f, "\"{}\"", s),
-            Constant::Integer(i) => write!(f, "{}", i),
-        }
-    }
-}
-
-mod parser {
+pub mod parser {
     use crate::logic::parser::{literal, literal_identifier};
 
     use super::*;
@@ -190,6 +167,10 @@ mod parser {
         sequence::{delimited, preceded, separated_pair, terminated},
         IResult,
     };
+
+    fn comment(s: &str) -> IResult<&str, &str> {
+        delimited(tag("#"), not_line_ending, line_ending)(s)
+    }
 
     fn head(i: &str) -> IResult<&str, Literal> {
         literal(modus_const, modus_var)(i)
@@ -212,9 +193,27 @@ mod parser {
         ))(i)
     }
 
-    /// Comma-separated list of expressions
+    /// Comma-separated list of expressions, interspersed with comments.
     fn body(i: &str) -> IResult<&str, Vec<Expression>> {
-        separated_list0(delimited(multispace0, tag(","), multispace0), expression)(i)
+        preceded(
+            delimited(
+                multispace0,
+                separated_list0(multispace0, comment),
+                multispace0,
+            ),
+            separated_list0(
+                delimited(
+                    multispace0,
+                    tag(","),
+                    delimited(
+                        multispace0,
+                        separated_list0(multispace0, comment),
+                        multispace0,
+                    ),
+                ),
+                expression,
+            ),
+        )(i)
     }
 
     fn fact(i: &str) -> IResult<&str, ModusClause> {
@@ -242,20 +241,17 @@ mod parser {
         recognize(many0(none_of("\\\"")))(i)
     }
 
-    pub fn modus_const(i: &str) -> IResult<&str, Constant> {
-        // naively support f-strings
-        map(
-            delimited(alt((tag("\""), tag("f\""))), string_content, tag("\"")),
-            |s| Constant::String(s.into()),
-        )(i)
+    pub fn modus_const(i: &str) -> IResult<&str, &str> {
+        // TODO: don't treat f-strings as const
+        delimited(alt((tag("\""), tag("f\""))), string_content, tag("\""))(i)
     }
 
     pub fn variable_identifier(i: &str) -> IResult<&str, &str> {
         literal_identifier(i)
     }
 
-    pub fn modus_var(i: &str) -> IResult<&str, Variable> {
-        map(variable_identifier, compose!(String::from, Variable::User))(i)
+    pub fn modus_var(i: &str) -> IResult<&str, &str> {
+        variable_identifier(i)
     }
 
     pub fn modus_clause(i: &str) -> IResult<&str, ModusClause> {
@@ -283,7 +279,7 @@ mod tests {
     #[test]
     fn fact() {
         let l1 = Literal {
-            atom: logic::Atom("l1".into()),
+            atom: logic::Predicate("l1".into()),
             args: Vec::new(),
         };
         let c = ModusClause {
@@ -297,15 +293,15 @@ mod tests {
     #[test]
     fn rule() {
         let l1 = Literal {
-            atom: logic::Atom("l1".into()),
+            atom: logic::Predicate("l1".into()),
             args: Vec::new(),
         };
         let l2 = Literal {
-            atom: logic::Atom("l2".into()),
+            atom: logic::Predicate("l2".into()),
             args: Vec::new(),
         };
         let l3 = Literal {
-            atom: logic::Atom("l3".into()),
+            atom: logic::Predicate("l3".into()),
             args: Vec::new(),
         };
         let c = Rule {
@@ -320,19 +316,19 @@ mod tests {
     #[test]
     fn rule_with_operator() {
         let foo = Literal {
-            atom: logic::Atom("foo".into()),
+            atom: logic::Predicate("foo".into()),
             args: Vec::new(),
         };
         let a = Literal {
-            atom: logic::Atom("a".into()),
+            atom: logic::Predicate("a".into()),
             args: Vec::new(),
         };
         let b = Literal {
-            atom: logic::Atom("b".into()),
+            atom: logic::Predicate("b".into()),
             args: Vec::new(),
         };
         let merge = Operator {
-            atom: logic::Atom("merge".into()),
+            atom: logic::Predicate("merge".into()),
             args: Vec::new(),
         };
         let r = Rule {
@@ -349,19 +345,19 @@ mod tests {
     #[test]
     fn modusclause_to_clause() {
         let foo = Literal {
-            atom: logic::Atom("foo".into()),
+            atom: logic::Predicate("foo".into()),
             args: Vec::new(),
         };
         let a = Literal {
-            atom: logic::Atom("a".into()),
+            atom: logic::Predicate("a".into()),
             args: Vec::new(),
         };
         let b = Literal {
-            atom: logic::Atom("b".into()),
+            atom: logic::Predicate("b".into()),
             args: Vec::new(),
         };
         let merge = Operator {
-            atom: logic::Atom("merge".into()),
+            atom: logic::Predicate("merge".into()),
             args: Vec::new(),
         };
         let r = Rule {
@@ -374,7 +370,7 @@ mod tests {
         assert_eq!("foo :- (a, b)::merge.", r.to_string());
 
         // Convert to the simpler syntax
-        let c: logic::Clause<Constant, Variable> = (&r).into();
+        let c: logic::Clause = (&r).into();
         assert_eq!("foo :- a, b", c.to_string());
     }
 }

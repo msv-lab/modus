@@ -15,20 +15,20 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use crate::logic::{Literal, Term};
+use crate::logic::{Clause, IRTerm, Literal, Predicate};
 
-pub trait BuiltinPredicate<C, V> {
+pub trait BuiltinPredicate {
     fn name(&self) -> &'static str;
     fn arg_groundness(&self) -> &'static [bool];
 
-    fn select(&self, lit: &Literal<C, V>) -> bool {
+    fn select(&self, lit: &Literal) -> bool {
         let Literal { ref atom, ref args } = lit;
         if &atom.0 != self.name() {
             return false;
         }
         args.iter()
             .zip(self.arg_groundness().into_iter())
-            .all(|pair| !matches!(pair, (Term::Variable(_), false)))
+            .all(|pair| matches!(pair, (_, true) | (IRTerm::Constant(_), false)))
     }
 
     /// Return a new literal specifically constructed to unify with the input
@@ -44,55 +44,26 @@ pub trait BuiltinPredicate<C, V> {
     /// Renaming will not be done on this literal, so if variables are needed
     /// they must all be either auxillary or some existing variables from the
     /// input.
-    fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>>;
-}
-
-trait MaybeStringConst {
-    fn as_str_const(&self) -> Option<String>;
-}
-
-impl<C: ToString, V> MaybeStringConst for Term<C, V> {
-    fn as_str_const(&self) -> Option<String> {
-        match &self {
-            // FIXME: ugly hack, the Display impl of Constant adds a quote.
-            // Remove this once we stabilize C and V
-            Term::Constant(c) => {
-                let c = c.to_string();
-                Some(
-                    c.strip_prefix("\"")
-                        .unwrap_or(&c)
-                        .strip_suffix("\"")
-                        .unwrap_or(&c)
-                        .to_string(),
-                )
-            }
-            Term::Atom(a) => Some(a.0.clone()),
-            _ => None,
-        }
-    }
+    fn apply(&self, lit: &Literal) -> Option<Literal>;
 }
 
 mod string_concat {
-    use super::{BuiltinPredicate, MaybeStringConst};
-    use crate::logic::{Atom, Literal, Term};
+    use super::BuiltinPredicate;
+    use crate::logic::{IRTerm, Literal, Predicate};
 
-    fn string_concat_result<C: From<String>, V>(
-        a: String,
-        b: String,
-        c: String,
-    ) -> Option<Literal<C, V>> {
+    fn string_concat_result(a: &str, b: &str, c: &str) -> Option<Literal> {
         Some(Literal {
-            atom: Atom("string_concat".to_owned()),
+            atom: Predicate("string_concat".to_owned()),
             args: vec![
-                Term::Constant(C::from(a)),
-                Term::Constant(C::from(b)),
-                Term::Constant(C::from(c)),
+                IRTerm::Constant(a.to_owned()),
+                IRTerm::Constant(b.to_owned()),
+                IRTerm::Constant(c.to_owned()),
             ],
         })
     }
 
     pub struct StringConcat1;
-    impl<C: ToString + From<String>, V> BuiltinPredicate<C, V> for StringConcat1 {
+    impl BuiltinPredicate for StringConcat1 {
         fn name(&self) -> &'static str {
             "string_concat"
         }
@@ -101,16 +72,16 @@ mod string_concat {
             &[false, false, true]
         }
 
-        fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>> {
-            let a = lit.args[0].as_str_const()?;
-            let b = lit.args[1].as_str_const()?;
-            let c = a.clone() + &b;
-            string_concat_result(a, b, c)
+        fn apply(&self, lit: &Literal) -> Option<Literal> {
+            let a = lit.args[0].as_constant()?;
+            let b = lit.args[1].as_constant()?;
+            let c = a.to_owned() + b;
+            string_concat_result(a, b, &c)
         }
     }
 
     pub struct StringConcat2;
-    impl<C: ToString + From<String>, V> BuiltinPredicate<C, V> for StringConcat2 {
+    impl BuiltinPredicate for StringConcat2 {
         fn name(&self) -> &'static str {
             "string_concat"
         }
@@ -118,12 +89,11 @@ mod string_concat {
         fn arg_groundness(&self) -> &'static [bool] {
             &[true, false, false]
         }
-
-        fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>> {
-            let b = lit.args[1].as_str_const()?;
-            let c = lit.args[2].as_str_const()?;
+        fn apply(&self, lit: &Literal) -> Option<Literal> {
+            let b = lit.args[1].as_constant()?;
+            let c = lit.args[2].as_constant()?;
             if let Some(a) = c.strip_suffix(&b) {
-                string_concat_result(a.to_string(), b, c)
+                string_concat_result(a, b, c)
             } else {
                 None
             }
@@ -131,7 +101,7 @@ mod string_concat {
     }
 
     pub struct StringConcat3;
-    impl<C: ToString + From<String>, V> BuiltinPredicate<C, V> for StringConcat3 {
+    impl BuiltinPredicate for StringConcat3 {
         fn name(&self) -> &'static str {
             "string_concat"
         }
@@ -140,11 +110,11 @@ mod string_concat {
             &[false, true, false]
         }
 
-        fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>> {
-            let a = lit.args[0].as_str_const()?;
-            let c = lit.args[2].as_str_const()?;
+        fn apply(&self, lit: &Literal) -> Option<Literal> {
+            let a = lit.args[0].as_constant()?;
+            let c = lit.args[2].as_constant()?;
             if let Some(b) = c.strip_prefix(&a) {
-                string_concat_result(a, b.to_string(), c)
+                string_concat_result(a, b, c)
             } else {
                 None
             }
@@ -153,12 +123,12 @@ mod string_concat {
 }
 
 mod run {
-    use crate::logic::{Literal, Term};
+    use crate::logic::{IRTerm, Literal};
 
     use super::BuiltinPredicate;
 
     pub struct Run;
-    impl<C: Clone, V: Clone> BuiltinPredicate<C, V> for Run {
+    impl BuiltinPredicate for Run {
         fn name(&self) -> &'static str {
             "run"
         }
@@ -167,11 +137,11 @@ mod run {
             &[false]
         }
 
-        fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>> {
+        fn apply(&self, lit: &Literal) -> Option<Literal> {
             let l = (*lit).clone();
             match lit.args[0] {
                 // it's valid as long as we're given a constant
-                Term::Constant(_) => Some(l),
+                IRTerm::Constant(_) => Some(l),
                 _ => None,
             }
         }
@@ -179,12 +149,12 @@ mod run {
 }
 
 mod from {
-    use crate::logic::{Literal, Term};
+    use crate::logic::{IRTerm, Literal};
 
     use super::BuiltinPredicate;
 
     pub struct From;
-    impl<C: Clone, V: Clone> BuiltinPredicate<C, V> for From {
+    impl BuiltinPredicate for From {
         fn name(&self) -> &'static str {
             "from"
         }
@@ -193,11 +163,11 @@ mod from {
             &[false]
         }
 
-        fn apply(&self, lit: &Literal<C, V>) -> Option<Literal<C, V>> {
+        fn apply(&self, lit: &Literal) -> Option<Literal> {
             let l = (*lit).clone();
             match lit.args[0] {
                 // it's valid as long as we're given a constant
-                Term::Constant(_) => Some(l),
+                IRTerm::Constant(_) => Some(l),
                 _ => None,
             }
         }
@@ -218,11 +188,7 @@ macro_rules! select_builtins {
     };
 }
 
-pub fn select_builtin<'a, C, V>(lit: &Literal<C, V>) -> Option<&'a dyn BuiltinPredicate<C, V>>
-where
-    C: 'a + ToString + From<String> + std::clone::Clone,
-    V: 'a + std::clone::Clone,
-{
+pub fn select_builtin<'a>(lit: &Literal) -> Option<&'a dyn BuiltinPredicate> {
     select_builtins!(
         lit,
         string_concat::StringConcat1,
@@ -236,14 +202,15 @@ where
 
 #[cfg(test)]
 mod test {
+    use crate::logic::IRTerm;
+
     #[test]
     pub fn test_select() {
-        use crate::logic::toy::{Clause, Literal, Term, Variable};
-        use crate::logic::Atom;
+        use crate::logic::{Literal, Predicate};
 
         let lit = Literal {
-            atom: Atom("run".to_owned()),
-            args: vec![Term::Constant(Atom("hello".to_owned()))],
+            atom: Predicate("run".to_owned()),
+            args: vec![IRTerm::Constant("hello".to_owned())],
         };
         let b = super::select_builtin(&lit);
         assert!(b.is_some());
@@ -252,11 +219,11 @@ mod test {
         assert_eq!(b.apply(&lit), Some(lit));
 
         let lit = Literal {
-            atom: Atom("string_concat".to_owned()),
+            atom: Predicate("string_concat".to_owned()),
             args: vec![
-                Term::Constant(Atom("hello".to_owned())),
-                Term::Constant(Atom("world".to_owned())),
-                Term::Variable("X".to_owned()),
+                IRTerm::Constant("hello".to_owned()),
+                IRTerm::Constant("world".to_owned()),
+                IRTerm::UserVariable("X".to_owned()),
             ],
         };
         let b = super::select_builtin(&lit);
@@ -266,18 +233,18 @@ mod test {
         assert_eq!(
             b.apply(&lit),
             Some(Literal {
-                atom: Atom("string_concat".to_owned()),
+                atom: Predicate("string_concat".to_owned()),
                 args: vec![
-                    Term::Constant(Atom("hello".to_owned())),
-                    Term::Constant(Atom("world".to_owned())),
-                    Term::Constant(Atom("helloworld".to_owned())),
+                    IRTerm::Constant("hello".to_owned()),
+                    IRTerm::Constant("world".to_owned()),
+                    IRTerm::Constant("helloworld".to_owned()),
                 ]
             })
         );
 
         let lit = Literal {
-            atom: Atom("xxx".to_owned()),
-            args: vec![Term::Constant(Atom("hello".to_owned()))],
+            atom: Predicate("xxx".to_owned()),
+            args: vec![IRTerm::Constant("hello".to_owned())],
         };
         let b = super::select_builtin(&lit);
         assert!(b.is_none());
@@ -285,28 +252,26 @@ mod test {
 
     #[test]
     pub fn test_from_run() {
-        use crate::logic::Atom;
-        use crate::modusfile::{Constant as C, Literal, Term, Variable as V};
-        type Clause = crate::logic::Clause<C, V>;
+        use crate::logic::{Clause, Literal, Predicate};
 
         let rules = vec![Clause {
             head: Literal {
-                atom: Atom("a".to_owned()),
+                atom: Predicate("a".to_owned()),
                 args: vec![],
             },
             body: vec![
                 Literal {
-                    atom: Atom("from".to_owned()),
-                    args: vec![Term::Constant(C::String("ubuntu".to_owned()))],
+                    atom: Predicate("from".to_owned()),
+                    args: vec![IRTerm::Constant("ubuntu".to_owned())],
                 },
                 Literal {
-                    atom: Atom("run".to_owned()),
-                    args: vec![Term::Constant(C::String("rm -rf /".to_owned()))],
+                    atom: Predicate("run".to_owned()),
+                    args: vec![IRTerm::Constant("rm -rf /".to_owned())],
                 },
             ],
         }];
         let goals = vec![Literal {
-            atom: Atom("a".to_owned()),
+            atom: Predicate("a".to_owned()),
             args: vec![],
         }];
         let tree = crate::sld::sld(&rules, &goals, 100).unwrap();
