@@ -42,17 +42,17 @@ type TreeLevel = usize;
 pub(crate) type Goal<T = IRTerm> = Vec<Literal<T>>;
 
 /// A clause is either a rule, or a query
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-pub enum ClauseId {
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum ClauseId<T = IRTerm> {
     Rule(RuleId),
     Query,
-    Builtin,
+    Builtin(Literal<T>),
 }
 
 /// A literal origin can be uniquely identified through its source clause and its index in the clause body
 #[derive(Clone, PartialEq, Debug)]
-pub struct LiteralOrigin {
-    clause: ClauseId,
+pub struct LiteralOrigin<T = IRTerm> {
+    clause: ClauseId<T>,
     body_index: usize,
 }
 
@@ -64,7 +64,7 @@ type LiteralGoalId = usize;
 struct LiteralWithHistory<T = IRTerm> {
     literal: Literal<T>,
     introduction: TreeLevel,
-    origin: LiteralOrigin,
+    origin: LiteralOrigin<T>,
 }
 type GoalWithHistory<T = IRTerm> = Vec<LiteralWithHistory<T>>;
 
@@ -76,7 +76,7 @@ type GoalWithHistory<T = IRTerm> = Vec<LiteralWithHistory<T>>;
 pub struct Tree<T = IRTerm> {
     goal: GoalWithHistory<T>,
     level: TreeLevel,
-    resolvents: HashMap<(LiteralGoalId, ClauseId), (Substitution<T>, Substitution<T>, Tree<T>)>,
+    resolvents: HashMap<(LiteralGoalId, ClauseId<T>), (Substitution<T>, Substitution<T>, Tree<T>)>,
 }
 
 /// A proof tree consist of
@@ -85,7 +85,7 @@ pub struct Tree<T = IRTerm> {
 /// - proofs for parts of the clause body
 #[derive(Clone, Debug)]
 pub struct Proof<T = IRTerm> {
-    pub clause: ClauseId,
+    pub clause: ClauseId<T>,
     pub valuation: Substitution<T>,
     pub children: Vec<Proof<T>>,
 }
@@ -146,7 +146,7 @@ pub fn sld(
 
     fn resolve(
         lid: LiteralGoalId,
-        rid: ClauseId,
+        rid: ClauseId<IRTerm>,
         goal: &GoalWithHistory<IRTerm>,
         mgu: &Substitution<IRTerm>,
         rule: &Clause<IRTerm>,
@@ -160,7 +160,7 @@ pub fn sld(
                 .enumerate()
                 .map(|(id, l)| {
                     let origin = LiteralOrigin {
-                        clause: rid,
+                        clause: rid.clone(),
                         body_index: id,
                     };
                     LiteralWithHistory {
@@ -229,12 +229,12 @@ pub fn sld(
                 .and_then(|unify_cand| {
                     unify_cand.unify(&l.literal).map(|mgu| {
                         (
-                            ClauseId::Builtin,
+                            ClauseId::Builtin(unify_cand.clone()),
                             mgu.clone(),
                             Substitution::<IRTerm>::new(),
                             resolve(
                                 lid,
-                                ClauseId::Builtin,
+                                ClauseId::Builtin(unify_cand.clone()),
                                 &goal,
                                 &mgu,
                                 &Clause {
@@ -255,7 +255,7 @@ pub fn sld(
                 .filter_map(|(rid, (c, renaming))| {
                     c.head.unify(&l.literal).map(|mgu| {
                         (
-                            rid,
+                            rid.clone(),
                             mgu.clone(),
                             renaming,
                             resolve(lid, rid, &goal, &mgu, &c, level + 1),
@@ -342,7 +342,7 @@ pub fn solutions(tree: &Tree<IRTerm>) -> HashSet<Goal<IRTerm>> {
 #[derive(Clone)]
 struct PathNode<T = IRTerm> {
     resolvent: GoalWithHistory<T>,
-    applied: ClauseId,
+    applied: ClauseId<T>,
     selected: LiteralGoalId,
     renaming: Substitution<T>,
 }
@@ -357,7 +357,7 @@ pub fn proofs(
 ) -> Vec<Proof<IRTerm>> {
     fn flatten_compose(
         lid: &LiteralGoalId,
-        cid: &ClauseId,
+        cid: &ClauseId<IRTerm>,
         mgu: &Substitution<IRTerm>,
         renaming: &Substitution<IRTerm>,
         tree: &Tree<IRTerm>,
@@ -414,7 +414,7 @@ pub fn proofs(
         match path[level].applied {
             ClauseId::Query => assert_eq!(children_length, path[0].resolvent.len()),
             ClauseId::Rule(rid) => assert_eq!(children_length, rules[rid].body.len()),
-            ClauseId::Builtin => assert_eq!(children_length, 0),
+            ClauseId::Builtin(_) => assert_eq!(children_length, 0),
         };
 
         let mut sublevels = Vec::<TreeLevel>::with_capacity(sublevels_map.len());

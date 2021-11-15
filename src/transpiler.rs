@@ -15,13 +15,17 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{collections::HashMap, sync::atomic::AtomicU32};
+use std::{
+    collections::HashMap,
+    str::FromStr,
+    sync::atomic::{AtomicU32, Ordering},
+};
 
 use crate::{
-    dockerfile::{Dockerfile, ResolvedParent},
+    dockerfile::{Dockerfile, Image, Instruction, ResolvedDockerfile, ResolvedParent, Run},
     logic::{self, Clause},
     modusfile::Modusfile,
-    sld,
+    sld::{self, ClauseId},
 };
 
 pub fn prove_goal(
@@ -40,25 +44,44 @@ pub fn prove_goal(
 
 pub fn transpile(mf: Modusfile, query: logic::Literal) -> Dockerfile<ResolvedParent> {
     let goal = vec![query];
-    let proofs = prove_goal(&mf, &goal);
-    todo!()
+    let proofs = prove_goal(&mf, &goal).unwrap();
+    assert_eq!(proofs.len(), 1);
+    let proof = proofs.into_iter().next().unwrap();
+    proof_to_docker(proof)
 }
 
 static AVAILABLE_STAGE_INDEX: AtomicU32 = AtomicU32::new(0);
-
-fn proof_to_docker(
-    rules: &Vec<Clause>,
-    proof: &sld::Proof,
-    cache: &mut HashMap<sld::Goal, ResolvedParent>,
-    goal: &sld::Goal,
-) -> ResolvedParent {
-    todo!()
+pub fn new_stage() -> ResolvedParent {
+    ResolvedParent::Stage(format!(
+        "_t{}",
+        AVAILABLE_STAGE_INDEX.fetch_add(1, Ordering::SeqCst)
+    ))
 }
 
-fn proofs_to_docker(
-    rules: &Vec<Clause>,
-    proofs: &Vec<sld::Proof>,
-    goal: &sld::Goal,
-) -> Dockerfile<ResolvedParent> {
-    todo!()
+pub fn proof_to_docker(proof: sld::Proof) -> ResolvedDockerfile {
+    let mut instructions = Vec::new();
+    fn dfs(proof: &sld::Proof, instructions: &mut Vec<Instruction<ResolvedParent>>) {
+        match &proof.clause {
+            ClauseId::Builtin(lit) => match &lit.atom.0[..] {
+                "run" => {
+                    let arg = lit.args[0].as_constant().unwrap();
+                    instructions.push(Instruction::Run(Run(arg.to_owned())));
+                }
+                "from" => {
+                    let arg = lit.args[0].as_constant().unwrap();
+                    instructions.push(Instruction::From(crate::dockerfile::From {
+                        parent: ResolvedParent::Image(Image::from_str(arg).unwrap()),
+                        alias: None,
+                    }));
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+        for c in proof.children.iter() {
+            dfs(c, instructions);
+        }
+    }
+    dfs(&proof, &mut instructions);
+    Dockerfile::<ResolvedParent>(instructions)
 }

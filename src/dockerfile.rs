@@ -45,7 +45,7 @@ pub struct From<P> {
 pub struct Copy(String);
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Run(String);
+pub struct Run(pub String);
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Env(String);
@@ -116,7 +116,8 @@ impl str::FromStr for Image {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match parser::image(s) {
-            Result::Ok((_, o)) => Ok(o),
+            Result::Ok(("", o)) => Ok(o),
+            Result::Ok((rem, _)) => Err(format!("Unexpected {}", rem)),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
     }

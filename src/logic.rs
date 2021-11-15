@@ -79,6 +79,15 @@ pub enum IRTerm {
     RenamedVariable(u32, Box<IRTerm>),
 }
 
+impl IRTerm {
+    pub fn as_constant(&self) -> Option<&str> {
+        match self {
+            IRTerm::Constant(c) => Some(&c[..]),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Literal<T = IRTerm> {
     pub atom: Predicate,
