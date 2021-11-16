@@ -122,7 +122,11 @@ fn main() {
                     Err(e) => println!("{}", e),
                 },
                 (Err(error), _) => {
-                    println!("Didn't parse {} successfully, error: {}", input_file, error)
+                    println!(
+                        "❌ Did not parse {} successfully. Error trace:\n{}",
+                        input_file.purple(),
+                        error
+                    )
                 }
             }
         }

@@ -17,6 +17,7 @@
 
 use nom::character::complete::line_ending;
 use nom::character::complete::not_line_ending;
+use nom::error::convert_error;
 use std::fmt;
 use std::str;
 
@@ -82,7 +83,10 @@ impl str::FromStr for Modusfile {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match parser::modusfile(s) {
             Result::Ok((_, o)) => Ok(o),
-            Result::Err(e) => Result::Err(format!("{}", e)),
+            Result::Err(nom::Err::Error(e) | nom::Err::Failure(e)) => {
+                Result::Err(format!("{}", convert_error(s, e)))
+            }
+            _ => unimplemented!(),
         }
     }
 }
@@ -153,11 +157,13 @@ impl str::FromStr for Literal {
 }
 
 pub mod parser {
-    use crate::logic::parser::{literal, literal_identifier};
+    use crate::logic::parser::{literal, literal_identifier, IResult};
 
     use super::*;
 
     use nom::character::complete::multispace0;
+    use nom::combinator::cut;
+    use nom::error::context;
     use nom::{
         branch::alt,
         bytes::complete::tag,
@@ -165,7 +171,6 @@ pub mod parser {
         combinator::{eof, map, recognize},
         multi::{many0, separated_list0},
         sequence::{delimited, preceded, separated_pair, terminated},
-        IResult,
     };
 
     fn comment(s: &str) -> IResult<&str, &str> {
@@ -186,7 +191,7 @@ pub mod parser {
                     // implicit recursion here
                     delimited(tag("("), body, tag(")")),
                     tag("::"),
-                    literal(modus_const, modus_var),
+                    cut(literal(modus_const, modus_var)),
                 ),
                 |(exprs, operator)| Expression::OperatorApplication(exprs, operator),
             ),
@@ -230,7 +235,7 @@ pub mod parser {
             separated_pair(
                 head,
                 delimited(space0, tag(":-"), multispace0),
-                terminated(body, tag(".")),
+                cut(terminated(body, tag("."))),
             ),
             |(head, body)| ModusClause { head, body },
         )(i)
@@ -243,7 +248,7 @@ pub mod parser {
 
     pub fn modus_const(i: &str) -> IResult<&str, &str> {
         // TODO: don't treat f-strings as const
-        delimited(alt((tag("\""), tag("f\""))), string_content, tag("\""))(i)
+        delimited(alt((tag("\""), tag("f\""))), string_content, cut(tag("\"")))(i)
     }
 
     pub fn variable_identifier(i: &str) -> IResult<&str, &str> {
@@ -255,7 +260,7 @@ pub mod parser {
     }
 
     pub fn modus_clause(i: &str) -> IResult<&str, ModusClause> {
-        alt((fact, rule))(i)
+        context("modus_clause", alt((fact, rule)))(i)
     }
 
     pub fn modusfile(i: &str) -> IResult<&str, Modusfile> {

@@ -211,6 +211,8 @@ where
 }
 
 pub mod parser {
+    use crate::logic::parser::IResult;
+
     use super::*;
 
     use nom::{
@@ -220,7 +222,6 @@ pub mod parser {
         combinator::{eof, map, opt, peek, recognize, value},
         multi::{many0, many1, separated_list1},
         sequence::{delimited, pair, preceded, terminated, tuple},
-        IResult,
     };
 
     //TODO: need to double-check
