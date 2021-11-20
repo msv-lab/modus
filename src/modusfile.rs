@@ -244,10 +244,14 @@ pub mod parser {
     }
 
     /// Processes the given string, converting escape substrings into the proper characters.
+    ///
+    /// This also supports multiline strings, This allows users to write strings like: "Hello, \
+    ///                                                                                 World!"
+    /// which is actually just "Hello, World!".
     fn process_raw_string(s: &str) -> String {
         let mut processed = String::new();
 
-        let mut chars = s.chars();
+        let mut chars = s.chars().peekable();
         while let Some(c) = chars.next() {
             if c == '\\' {
                 match chars.next() {
@@ -257,7 +261,15 @@ pub mod parser {
                     Some('r') => processed.push('\r'),
                     Some('t') => processed.push('\t'),
                     Some('0') => processed.push('\0'),
-                    Some('\n') => unimplemented!("TODO: multiline strings"),
+                    Some('\n') => {
+                        // Multiline string so we'll ignore whitespace till we get to a non-whitespace.
+                        while let Some(c) = chars.peek() {
+                            if !c.is_whitespace() {
+                                break;
+                            }
+                            chars.next();
+                        }
+                    },
                     Some(c) => {
                         // leave it unchanged if we don't recognize the escape char
                         processed.push('\\');
@@ -422,10 +434,14 @@ mod tests {
         // Could use https://crates.io/crates/test_case if this pattern occurs often
         let inp1 = r#""Hello\nWorld""#;
         let inp2 = r#""Tabs\tare\tbetter\tthan\tspaces""#;
+        let inp3 = r#""Testing \
+                       multiline.""#;
         let (_, s1) = parser::modus_const(inp1).unwrap();
         let (_, s2) = parser::modus_const(inp2).unwrap();
+        let (_, s3) = parser::modus_const(inp3).unwrap();
 
         assert_eq!(s1, "Hello\nWorld");
         assert_eq!(s2, "Tabs\tare\tbetter\tthan\tspaces");
+        assert_eq!(s3, "Testing multiline.");
     }
 }
