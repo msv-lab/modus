@@ -582,4 +582,63 @@ mod tests {
         let rule = format!("foo :- {}.", expr_str);
         assert_eq!(Ok(Some(expr)), rule.parse().map(|r: ModusClause| r.body));
     }
+
+    #[test]
+    fn multiple_clause_with_different_ops() {
+        let foo = Literal {
+            atom: logic::Predicate("foo".into()),
+            args: vec![ModusTerm::UserVariable("x".to_owned())],
+        };
+        let bar = Literal {
+            atom: logic::Predicate("bar".into()),
+            args: Vec::new(),
+        };
+        let baz = Literal {
+            atom: logic::Predicate("baz".into()),
+            args: Vec::new(),
+        };
+        let a = Rule {
+            head: logic::Literal {
+                atom: logic::Predicate("a".to_owned()),
+                args: vec![],
+            },
+            body: vec![
+                Expression::OperatorApplication(
+                    vec![foo.into(), bar.into()],
+                    Operator {
+                        atom: logic::Predicate("setenv".into()),
+                        args: vec![
+                            ModusTerm::Constant("a".to_owned()),
+                            ModusTerm::Constant("foobar".to_owned()),
+                        ],
+                    },
+                ),
+                Expression::OperatorApplication(
+                    vec![baz.into()],
+                    Operator {
+                        atom: logic::Predicate("setenv".into()),
+                        args: vec![
+                            ModusTerm::Constant("a".to_owned()),
+                            ModusTerm::Constant("baz".to_owned()),
+                        ],
+                    },
+                ),
+            ],
+        };
+        // assert_eq!(&a, &(r#"a:-(foo(x),bar)::setenv("a","foobar"), baz::setenv("a" "baz")."#.parse().unwrap()));
+        // assert_eq!(&a, &(r#"a:-(foo(x),bar)::setenv("a","foobar"), baz()::setenv("a" "baz")."#.parse().unwrap()));
+        assert_eq!(
+            &a,
+            &(r#"a:-(foo(x),bar)::setenv("a","foobar"), (baz)::setenv("a", "baz")."#
+                .parse()
+                .unwrap())
+        );
+        // assert_eq!(
+        //     &a,
+        //     &(r#"a:-(foo(x),bar)::setenv("a","foobar"), (baz())::setenv("a" "baz")."#
+        //         .parse()
+        //         .unwrap())
+        // );
+        // assert_eq!(&a, &(r#"a:-(foo(x),bar)::setenv("a","foobar"), baz::setenv("a" "baz")."#.parse().unwrap()));
+    }
 }
