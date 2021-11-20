@@ -1,6 +1,7 @@
 pylint(python_version, "ubuntu", ubuntu_version) :-
     python(python_version, "ubuntu", ubuntu_version),
-    run("pip install pylint").
+    run("pip install \
+         pylint").
 
 python(python_version, "ubuntu", distr_version) :-
     # Below we use a format string to vary which version of ubuntu we use.

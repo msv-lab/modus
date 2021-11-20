@@ -245,7 +245,7 @@ pub mod parser {
 
     /// Processes the given string, converting escape substrings into the proper characters.
     ///
-    /// This also supports multiline strings, This allows users to write strings like: "Hello, \
+    /// This also supports string continuation, This allows users to write strings like: "Hello, \
     ///                                                                                 World!"
     /// which is actually just "Hello, World!".
     fn process_raw_string(s: &str) -> String {
@@ -262,7 +262,7 @@ pub mod parser {
                     Some('t') => processed.push('\t'),
                     Some('0') => processed.push('\0'),
                     Some('\n') => {
-                        // Multiline string so we'll ignore whitespace till we get to a non-whitespace.
+                        // string continuation so we'll ignore whitespace till we get to a non-whitespace.
                         while let Some(c) = chars.peek() {
                             if !c.is_whitespace() {
                                 break;
