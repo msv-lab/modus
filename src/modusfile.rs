@@ -161,9 +161,11 @@ pub mod parser {
 
     use super::*;
 
+    use nom::bytes::complete::is_not;
     use nom::character::complete::multispace0;
     use nom::combinator::cut;
     use nom::error::context;
+    use nom::multi::fold_many0;
     use nom::{
         branch::alt,
         bytes::complete::tag,
@@ -241,13 +243,49 @@ pub mod parser {
         )(i)
     }
 
-    // TODO: support proper string literals + format strings
-    fn string_content(i: &str) -> IResult<&str, &str> {
-        recognize(many0(none_of("\\\"")))(i)
+    /// Processes the given string, converting escape substrings into the proper characters.
+    fn process_raw_string(s: &str) -> String {
+        let mut processed = String::new();
+
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                match chars.next() {
+                    Some('"') => processed.push('"'),
+                    Some('\\') => processed.push('\\'),
+                    Some('n') => processed.push('\n'),
+                    Some('r') => processed.push('\r'),
+                    Some('t') => processed.push('\t'),
+                    Some('0') => processed.push('\0'),
+                    Some('\n') => unimplemented!("TODO: multiline strings"),
+                    Some(c) => {
+                        // leave it unchanged if we don't recognize the escape char
+                        processed.push('\\');
+                        processed.push(c);
+                    }
+                    None => panic!("given string ends with an escape character"),
+                }
+            } else {
+                processed.push(c);
+            }
+        }
+        processed
     }
 
-    pub fn modus_const(i: &str) -> IResult<&str, &str> {
-        // TODO: don't treat f-strings as const
+    fn string_content(i: &str) -> IResult<&str, String> {
+        let (a, b) = recognize(fold_many0(
+            // Either an escaped double quote or anything that's not a double quote.
+            // It should try the escaped double quote first.
+            alt((tag("\\\""), is_not("\""))),
+            || "".to_string(),
+            |a, b| a.to_owned() + b,
+        ))(i)?;
+        let s = process_raw_string(b);
+        Ok((a, s))
+    }
+
+    pub fn modus_const(i: &str) -> IResult<&str, String> {
+        // TODO: Support proper f-strings, don't treat f-strings as const.
         delimited(alt((tag("\""), tag("f\""))), string_content, cut(tag("\"")))(i)
     }
 
@@ -377,5 +415,17 @@ mod tests {
         // Convert to the simpler syntax
         let c: logic::Clause = (&r).into();
         assert_eq!("foo :- a, b", c.to_string());
+    }
+
+    #[test]
+    fn modus_constant() {
+        // Could use https://crates.io/crates/test_case if this pattern occurs often
+        let inp1 = r#""Hello\nWorld""#;
+        let inp2 = r#""Tabs\tare\tbetter\tthan\tspaces""#;
+        let (_, s1) = parser::modus_const(inp1).unwrap();
+        let (_, s2) = parser::modus_const(inp2).unwrap();
+
+        assert_eq!(s1, "Hello\nWorld");
+        assert_eq!(s2, "Tabs\tare\tbetter\tthan\tspaces");
     }
 }

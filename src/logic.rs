@@ -270,11 +270,11 @@ pub mod parser {
         variable: FV,
     ) -> impl FnMut(&'a str) -> IResult<&'a str, IRTerm>
     where
-        FC: FnMut(&str) -> IResult<&str, &str>,
+        FC: FnMut(&str) -> IResult<&str, String>,
         FV: FnMut(&str) -> IResult<&str, &str>,
     {
         alt((
-            map(constant, |c| IRTerm::Constant(c.to_string())),
+            map(constant, |c| IRTerm::Constant(c)),
             map(variable, |v| IRTerm::UserVariable(v.to_string())),
         ))
     }
@@ -284,7 +284,7 @@ pub mod parser {
         variable: FV,
     ) -> impl FnMut(&'a str) -> IResult<&'a str, Literal>
     where
-        FC: FnMut(&str) -> IResult<&str, &str>,
+        FC: FnMut(&str) -> IResult<&str, String>,
         FV: FnMut(&str) -> IResult<&str, &str>,
     {
         map(
@@ -314,7 +314,7 @@ pub mod parser {
         variable: FV,
     ) -> impl FnMut(&'a str) -> IResult<&'a str, Clause>
     where
-        FC: FnMut(&str) -> IResult<&str, &str> + Clone,
+        FC: FnMut(&str) -> IResult<&str, String> + Clone,
         FV: FnMut(&str) -> IResult<&str, &str> + Clone,
     {
         map(
