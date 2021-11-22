@@ -209,7 +209,9 @@ impl fmt::Display for Expression {
                     .map(|e| e.to_string())
                     .collect::<Vec<String>>()
                     .join(", ");
-                write!(f, "{}", s)
+                // Explicit parenthesization when printing to output, looks a bit
+                // verbose but shouldn't affect user code.
+                write!(f, "({})", s)
             }
             Expression::DisjunctionList(exprs) => {
                 let s = exprs
@@ -217,7 +219,7 @@ impl fmt::Display for Expression {
                     .map(|e| e.to_string())
                     .collect::<Vec<String>>()
                     .join("; ");
-                write!(f, "{}", s)
+                write!(f, "({})", s)
             }
         }
     }
@@ -475,7 +477,7 @@ mod tests {
             head: l1,
             body: Expression::ConjunctionList(vec![l2.into(), l3.into()]).into(),
         };
-        assert_eq!("l1 :- l2, l3.", c.to_string());
+        assert_eq!("l1 :- (l2, l3).", c.to_string());
         assert_eq!(Ok(c.clone()), "l1 :- l2, l3.".parse());
         assert_eq!(Ok(c.clone()), "l1 :- l2,\n\tl3.".parse());
     }
@@ -489,7 +491,7 @@ mod tests {
             body: Expression::DisjunctionList(vec![l1.into(), l2.into()]).into(),
         };
 
-        assert_eq!("foo :- l1; l2.", c.to_string());
+        assert_eq!("foo :- (l1; l2).", c.to_string());
         assert_eq!(Ok(c.clone()), "foo :- l1; l2.".parse());
     }
 
@@ -519,8 +521,8 @@ mod tests {
             )
             .into(),
         };
-        assert_eq!("foo :- (a, b)::merge.", r.to_string());
-        assert_eq!(Ok(r.clone()), "foo :- (a, b)::merge.".parse());
+        assert_eq!("foo :- ((a, b))::merge.", r.to_string());
+        assert_eq!(Ok(r.clone()), "foo :- ((a, b))::merge.".parse());
     }
 
     #[test]
@@ -549,12 +551,52 @@ mod tests {
             )
             .into(),
         };
-        assert_eq!("foo :- (a, b)::merge.", r.to_string());
+        assert_eq!("foo :- ((a, b))::merge.", r.to_string());
 
         // Convert to the simpler syntax
         let c: Vec<logic::Clause> = (&r).into();
         assert_eq!(1, c.len());
         assert_eq!("foo :- a, b", c[0].to_string());
+    }
+
+    #[test]
+    fn modusclause_to_clause_with_or() {
+        let foo: Literal = "foo".parse().unwrap();
+        let a: Literal = "a".parse().unwrap();
+        let b: Literal = "b".parse().unwrap();
+        let merge = Operator {
+            predicate: logic::Predicate("merge".into()),
+            args: Vec::new(),
+        };
+        let r1 = Rule {
+            head: foo.clone(),
+            body: Expression::OperatorApplication(
+                Expression::DisjunctionList(vec![a.clone().into(), b.clone().into()]).into(),
+                merge,
+            )
+            .into(),
+        };
+        let r2 = Rule {
+            head: foo.clone(),
+            body: Expression::ConjunctionList(vec![
+                a.clone().into(),
+                b.clone().into(),
+                Expression::DisjunctionList(vec![a.clone().into(), b.clone().into()])
+            ]).into()
+        };
+        assert_eq!("foo :- ((a; b))::merge.", r1.to_string());
+        assert_eq!("foo :- (a, b, (a; b)).", r2.to_string());
+
+        let c1: Vec<logic::Clause> = (&r1).into();
+        assert_eq!(2, c1.len());
+        assert_eq!("foo :- a", c1[0].to_string());
+        assert_eq!("foo :- b", c1[1].to_string());
+
+        let c2: Vec<logic::Clause> = (&r2).into();
+        assert_eq!(3, c2.len());
+        assert_eq!("__replaced0 :- a", c2[0].to_string());
+        assert_eq!("__replaced0 :- b", c2[1].to_string());
+        assert_eq!("foo :- a, b, __replaced0", c2[2].to_string());
     }
 
     #[test]
@@ -585,7 +627,7 @@ mod tests {
 
         let expr = Expression::DisjunctionList(vec![e1, e2]);
 
-        let expr_str = "a, b; c, d";
+        let expr_str = "((a, b); (c, d))";
         assert_eq!(expr_str, expr.to_string());
         let rule = format!("foo :- {}.", expr_str);
         assert_eq!(Ok(Some(expr)), rule.parse().map(|r: ModusClause| r.body));
