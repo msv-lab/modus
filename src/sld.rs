@@ -186,7 +186,7 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> Opt
                 goal.iter()
                     .map(|g| format!(
                         "{}({})",
-                        &g.literal.atom.0,
+                        &g.literal.predicate.0,
                         g.literal
                             .args
                             .iter()

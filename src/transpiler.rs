@@ -33,7 +33,13 @@ pub fn prove_goal(
     goal: &Vec<logic::Literal>,
 ) -> Result<Vec<sld::Proof>, &'static str> {
     let max_depth = 20;
-    let clauses: Vec<Clause> = mf.0.iter().map(|mc| mc.into()).collect();
+    let clauses: Vec<Clause> =
+        mf.0.iter()
+            .flat_map(|mc| {
+                let clauses: Vec<Clause> = mc.into();
+                clauses
+            })
+            .collect();
 
     let res = sld::sld(&clauses, goal, max_depth);
     match res {
@@ -62,7 +68,7 @@ pub fn proof_to_docker(proof: sld::Proof) -> ResolvedDockerfile {
     let mut instructions = Vec::new();
     fn dfs(proof: &sld::Proof, instructions: &mut Vec<Instruction<ResolvedParent>>) {
         match &proof.clause {
-            ClauseId::Builtin(lit) => match &lit.atom.0[..] {
+            ClauseId::Builtin(lit) => match &lit.predicate.0[..] {
                 "run" => {
                     let arg = lit.args[0].as_constant().unwrap();
                     instructions.push(Instruction::Run(Run(arg.to_owned())));
