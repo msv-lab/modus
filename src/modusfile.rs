@@ -137,7 +137,7 @@ impl str::FromStr for Modusfile {
         match parser::modusfile(s) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(nom::Err::Error(e) | nom::Err::Failure(e)) => {
-                Result::Err(format!("{}", convert_error(s, e)))
+                Result::Err(convert_error(s, e))
             }
             _ => unimplemented!(),
         }
@@ -349,7 +349,7 @@ pub mod parser {
             // It should try the escaped double quote first.
             alt((tag("\\\""), is_not("\""))),
             || "".to_string(),
-            |a, b| a.to_owned() + b,
+            |a, b| a + b,
         ))(i)?;
         let s = process_raw_string(b);
         Ok((a, s))
