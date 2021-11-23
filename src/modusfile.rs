@@ -20,8 +20,6 @@ use nom::character::complete::not_line_ending;
 use nom::error::convert_error;
 use std::fmt;
 use std::str;
-use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering;
 
 use crate::dockerfile;
 use crate::logic;
@@ -34,38 +32,10 @@ pub enum Expression {
     OperatorApplication(Box<Expression>, Operator),
 
     // A conjunction of expressions.
-    ConjunctionList(Vec<Expression>),
+    And(Box<Expression>, Box<Expression>),
 
     // A disjunction of expressions.
-    DisjunctionList(Vec<Expression>),
-}
-
-impl Expression {
-    /// Simplifies the expression tree by replacing singletons by that single value.
-    fn prune(self) -> Self {
-        match self {
-            Self::ConjunctionList(es) => {
-                let mut pruned: Vec<Expression> = es.into_iter().map(|e| e.prune()).collect();
-                if pruned.len() == 1 {
-                    pruned.remove(0) // `remove` to avoid clone
-                } else {
-                    Self::ConjunctionList(pruned)
-                }
-            }
-            Self::DisjunctionList(es) => {
-                let mut pruned: Vec<Expression> = es.into_iter().map(|e| e.prune()).collect();
-                if pruned.len() == 1 {
-                    pruned.remove(0)
-                } else {
-                    Self::DisjunctionList(pruned)
-                }
-            }
-            Self::OperatorApplication(expr, op) => {
-                Self::OperatorApplication(Box::new(expr.prune()), op)
-            }
-            expr => expr,
-        }
-    }
+    Or(Box<Expression>, Box<Expression>),
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -74,11 +44,6 @@ pub struct ModusClause {
     // If None, this clause is a fact.
     pub body: Option<Expression>,
 }
-
-/// Used to generate a new unique literal.
-/// The current format is "__replaced[id]", e.g. `__replaced1`.
-/// This is not syntactically valid so no risk of a user using this predicate name.
-static AVAILABLE_LITERAL_INDEX: AtomicU32 = AtomicU32::new(0);
 
 impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
     /// Convert a ModusClause into one supported by the IR.
@@ -99,61 +64,44 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                     body: Some(*expr.clone()),
                 }))
             }
-            Some(Expression::ConjunctionList(exprs)) => {
-                let mut curr_literals: Vec<Literal> = Vec::new();
-                for expr in exprs {
-                    match expr {
-                        Expression::Literal(l) => curr_literals.push(l.clone()),
-                        expr => {
-                            // Create a new literal to represent this goal and recursively expand out the goal.
-                            let new_literal = Literal {
-                                predicate: format!(
-                                    "__replaced{}",
-                                    AVAILABLE_LITERAL_INDEX.fetch_add(1, Ordering::SeqCst)
-                                )
-                                .into(),
-                                args: Vec::new(),
-                            };
-                            curr_literals.push(new_literal.clone());
-                            clauses.extend(Self::from(&ModusClause {
-                                head: new_literal,
-                                body: Some(expr.clone()),
-                            }))
-                        }
-                    }
-                }
-                clauses.push(logic::Clause {
+            Some(Expression::And(expr1, expr2)) => {
+                let c1 = Self::from(&ModusClause {
                     head: modus_clause.head.clone(),
-                    body: curr_literals,
-                })
-            }
-            Some(Expression::DisjunctionList(exprs)) => {
-                for expr in exprs {
-                    if let Expression::Literal(l) = expr {
+                    body: Some(*expr1.clone()),
+                });
+                let c2 = Self::from(&ModusClause {
+                    head: modus_clause.head.clone(),
+                    body: Some(*expr2.clone()),
+                });
+
+                // If we have the possible rules for left and right sub expressions,
+                // consider the cartesian product of them.
+                for clause1 in &c1 {
+                    for clause2 in &c2 {
                         clauses.push(logic::Clause {
-                            head: modus_clause.head.clone(),
-                            body: vec![l.clone()],
-                        });
-                    } else {
-                        // Create a new literal to represent this goal and recursively expand out the goal.
-                        let new_literal = Literal {
-                            predicate: format!(
-                                "__replaced{}",
-                                AVAILABLE_LITERAL_INDEX.fetch_add(1, Ordering::SeqCst)
-                            )
-                            .into(),
-                            args: Vec::new(),
-                        };
-                        clauses.push(logic::Clause {
-                            head: modus_clause.head.clone(),
-                            body: vec![new_literal.clone()],
-                        });
-                        clauses.extend(Self::from(&ModusClause {
-                            head: new_literal,
-                            body: Some(expr.clone()),
-                        }))
+                            head: clause1.head.clone(),
+                            body: clause1
+                                .body
+                                .clone()
+                                .into_iter()
+                                .chain(clause2.body.clone().into_iter())
+                                .collect(),
+                        })
                     }
                 }
+            }
+            Some(Expression::Or(expr1, expr2)) => {
+                let c1 = Self::from(&ModusClause {
+                    head: modus_clause.head.clone(),
+                    body: Some(*expr1.clone()),
+                });
+                let c2 = Self::from(&ModusClause {
+                    head: modus_clause.head.clone(),
+                    body: Some(*expr2.clone()),
+                });
+
+                clauses.extend(c1);
+                clauses.extend(c2);
             }
             None => clauses.push(logic::Clause {
                 head: modus_clause.head.clone(),
@@ -203,23 +151,13 @@ impl fmt::Display for Expression {
                 write!(f, "({})::{}", expr.to_string(), op)
             }
             Expression::Literal(l) => write!(f, "{}", l.to_string()),
-            Expression::ConjunctionList(exprs) => {
-                let s = exprs
-                    .iter()
-                    .map(|e| e.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", ");
+            Expression::And(expr1, expr2) => {
                 // Explicit parenthesization when printing to output, looks a bit
                 // verbose but shouldn't affect user code.
-                write!(f, "({})", s)
+                write!(f, "({}, {})", expr1, expr2)
             }
-            Expression::DisjunctionList(exprs) => {
-                let s = exprs
-                    .iter()
-                    .map(|e| e.to_string())
-                    .collect::<Vec<String>>()
-                    .join("; ");
-                write!(f, "({})", s)
+            Expression::Or(expr1, expr2) => {
+                write!(f, "({}; {})", expr1, expr2)
             }
         }
     }
@@ -319,19 +257,26 @@ pub mod parser {
     fn body(i: &str) -> IResult<&str, Expression> {
         let comma_separated_exprs = map(
             separated_list1(delimited(comments, tag(","), comments), expression_inner),
-            Expression::ConjunctionList,
+            |es| {
+                es.into_iter()
+                    .reduce(|e1, e2| Expression::And(Box::new(e1), Box::new(e2)))
+                    .expect("Converting list to expression pairs.")
+            },
         );
         let semi_separated_exprs = map(
             separated_list1(
                 delimited(comments, tag(";"), comments),
                 comma_separated_exprs,
             ),
-            Expression::DisjunctionList,
+            |es| {
+                es.into_iter()
+                    .reduce(|e1, e2| Expression::Or(Box::new(e1), Box::new(e2)))
+                    .expect("Converting list to expression pairs.")
+            },
         );
         // Parses the body as a semicolon separated list of comma separated inner expressions.
         // This resolves ambiguity by making commas/and higher precedence.
-        let (i, expr) = preceded(comments, semi_separated_exprs)(i)?;
-        Ok((i, expr.prune()))
+        preceded(comments, semi_separated_exprs)(i)
     }
 
     fn fact(i: &str) -> IResult<&str, ModusClause> {
@@ -475,7 +420,7 @@ mod tests {
         };
         let c = Rule {
             head: l1,
-            body: Expression::ConjunctionList(vec![l2.into(), l3.into()]).into(),
+            body: Expression::And(Box::new(l2.into()), Box::new(l3.into())).into(),
         };
         assert_eq!("l1 :- (l2, l3).", c.to_string());
         assert_eq!(Ok(c.clone()), "l1 :- l2, l3.".parse());
@@ -488,7 +433,7 @@ mod tests {
         let l2: Literal = "l2".parse().unwrap();
         let c = Rule {
             head: "foo".parse().unwrap(),
-            body: Expression::DisjunctionList(vec![l1.into(), l2.into()]).into(),
+            body: Expression::Or(Box::new(l1.into()), Box::new(l2.into())).into(),
         };
 
         assert_eq!("foo :- (l1; l2).", c.to_string());
@@ -516,7 +461,7 @@ mod tests {
         let r = Rule {
             head: foo,
             body: Expression::OperatorApplication(
-                Expression::ConjunctionList(vec![a.into(), b.into()]).into(),
+                Expression::And(Box::new(a.into()), Box::new(b.into())).into(),
                 merge,
             )
             .into(),
@@ -546,7 +491,7 @@ mod tests {
         let r = Rule {
             head: foo,
             body: Expression::OperatorApplication(
-                Expression::ConjunctionList(vec![a.into(), b.into()]).into(),
+                Expression::And(Box::new(a.into()), Box::new(b.into())).into(),
                 merge,
             )
             .into(),
@@ -571,21 +516,27 @@ mod tests {
         let r1 = Rule {
             head: foo.clone(),
             body: Expression::OperatorApplication(
-                Expression::DisjunctionList(vec![a.clone().into(), b.clone().into()]).into(),
+                Expression::Or(Box::new(a.clone().into()), Box::new(b.clone().into())).into(),
                 merge,
             )
             .into(),
         };
         let r2 = Rule {
             head: foo.clone(),
-            body: Expression::ConjunctionList(vec![
-                a.clone().into(),
-                b.clone().into(),
-                Expression::DisjunctionList(vec![a.clone().into(), b.clone().into()])
-            ]).into()
+            body: Expression::And(
+                Box::new(a.clone().into()),
+                Box::new(Expression::And(
+                    Box::new(b.clone().into()),
+                    Box::new(Expression::Or(
+                        Box::new(a.clone().into()),
+                        Box::new(b.clone().into()),
+                    )),
+                )),
+            )
+            .into(),
         };
         assert_eq!("foo :- ((a; b))::merge.", r1.to_string());
-        assert_eq!("foo :- (a, b, (a; b)).", r2.to_string());
+        assert_eq!("foo :- (a, (b, (a; b))).", r2.to_string());
 
         let c1: Vec<logic::Clause> = (&r1).into();
         assert_eq!(2, c1.len());
@@ -593,10 +544,9 @@ mod tests {
         assert_eq!("foo :- b", c1[1].to_string());
 
         let c2: Vec<logic::Clause> = (&r2).into();
-        assert_eq!(3, c2.len());
-        assert_eq!("__replaced0 :- a", c2[0].to_string());
-        assert_eq!("__replaced0 :- b", c2[1].to_string());
-        assert_eq!("foo :- a, b, __replaced0", c2[2].to_string());
+        assert_eq!(2, c2.len());
+        assert_eq!("foo :- a, b, a", c2[0].to_string());
+        assert_eq!("foo :- a, b, b", c2[1].to_string());
     }
 
     #[test]
@@ -622,10 +572,10 @@ mod tests {
         let c: Literal = "c".parse().unwrap();
         let d: Literal = "d".parse().unwrap();
 
-        let e1 = Expression::ConjunctionList(vec![Expression::Literal(a), Expression::Literal(b)]);
-        let e2 = Expression::ConjunctionList(vec![Expression::Literal(c), Expression::Literal(d)]);
+        let e1 = Expression::And(Expression::Literal(a).into(), Expression::Literal(b).into());
+        let e2 = Expression::And(Expression::Literal(c).into(), Expression::Literal(d).into());
 
-        let expr = Expression::DisjunctionList(vec![e1, e2]);
+        let expr = Expression::Or(e1.into(), e2.into());
 
         let expr_str = "((a, b); (c, d))";
         assert_eq!(expr_str, expr.to_string());
