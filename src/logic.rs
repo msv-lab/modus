@@ -90,7 +90,7 @@ impl IRTerm {
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Literal<T = IRTerm> {
-    pub atom: Predicate,
+    pub predicate: Predicate,
     pub args: Vec<T>,
 }
 
@@ -121,7 +121,7 @@ impl IRTerm {
 
 impl Literal {
     pub fn signature(&self) -> Signature {
-        Signature(self.atom.clone(), self.args.len().try_into().unwrap())
+        Signature(self.predicate.clone(), self.args.len().try_into().unwrap())
     }
     pub fn variables(&self) -> HashSet<IRTerm> {
         self.args
@@ -196,8 +196,8 @@ fn display_sep<T: fmt::Display>(seq: &[T], sep: &str) -> String {
 impl fmt::Display for Literal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &*self.args {
-            [] => write!(f, "{}", self.atom),
-            _ => write!(f, "{}({})", self.atom, display_sep(&self.args, ", ")),
+            [] => write!(f, "{}", self.predicate),
+            _ => write!(f, "{}({})", self.predicate, display_sep(&self.args, ", ")),
         }
     }
 }
@@ -298,11 +298,11 @@ pub mod parser {
             ),
             |(name, args)| match args {
                 Some(args) => Literal {
-                    atom: Predicate(name.into()),
+                    predicate: Predicate(name.into()),
                     args,
                 },
                 None => Literal {
-                    atom: Predicate(name.into()),
+                    predicate: Predicate(name.into()),
                     args: Vec::new(),
                 },
             },
@@ -338,15 +338,15 @@ mod tests {
         let va = IRTerm::UserVariable("A".into());
         let vb = IRTerm::UserVariable("B".into());
         let l1 = Literal {
-            atom: Predicate("l1".into()),
+            predicate: Predicate("l1".into()),
             args: vec![va.clone(), vb.clone()],
         };
         let l2 = Literal {
-            atom: Predicate("l2".into()),
+            predicate: Predicate("l2".into()),
             args: vec![va.clone(), c.clone()],
         };
         let l3 = Literal {
-            atom: Predicate("l3".into()),
+            predicate: Predicate("l3".into()),
             args: vec![vb.clone(), c.clone()],
         };
         let r = Clause {
@@ -361,11 +361,11 @@ mod tests {
     fn nullary_predicate() {
         let va = IRTerm::UserVariable("A".into());
         let l1 = Literal {
-            atom: Predicate("l1".into()),
+            predicate: Predicate("l1".into()),
             args: Vec::new(),
         };
         let l2 = Literal {
-            atom: Predicate("l2".into()),
+            predicate: Predicate("l2".into()),
             args: vec![va.clone()],
         };
         let r = Clause {

@@ -22,8 +22,11 @@ pub trait BuiltinPredicate {
     fn arg_groundness(&self) -> &'static [bool];
 
     fn select(&self, lit: &Literal) -> bool {
-        let Literal { ref atom, ref args } = lit;
-        if &atom.0 != self.name() {
+        let Literal {
+            ref predicate,
+            ref args,
+        } = lit;
+        if &predicate.0 != self.name() {
             return false;
         }
         args.iter()
@@ -53,7 +56,7 @@ mod string_concat {
 
     fn string_concat_result(a: &str, b: &str, c: &str) -> Option<Literal> {
         Some(Literal {
-            atom: Predicate("string_concat".to_owned()),
+            predicate: Predicate("string_concat".to_owned()),
             args: vec![
                 IRTerm::Constant(a.to_owned()),
                 IRTerm::Constant(b.to_owned()),
@@ -209,7 +212,7 @@ mod test {
         use crate::logic::{Literal, Predicate};
 
         let lit = Literal {
-            atom: Predicate("run".to_owned()),
+            predicate: Predicate("run".to_owned()),
             args: vec![IRTerm::Constant("hello".to_owned())],
         };
         let b = super::select_builtin(&lit);
@@ -219,7 +222,7 @@ mod test {
         assert_eq!(b.apply(&lit), Some(lit));
 
         let lit = Literal {
-            atom: Predicate("string_concat".to_owned()),
+            predicate: Predicate("string_concat".to_owned()),
             args: vec![
                 IRTerm::Constant("hello".to_owned()),
                 IRTerm::Constant("world".to_owned()),
@@ -233,7 +236,7 @@ mod test {
         assert_eq!(
             b.apply(&lit),
             Some(Literal {
-                atom: Predicate("string_concat".to_owned()),
+                predicate: Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::Constant("hello".to_owned()),
                     IRTerm::Constant("world".to_owned()),
@@ -243,7 +246,7 @@ mod test {
         );
 
         let lit = Literal {
-            atom: Predicate("xxx".to_owned()),
+            predicate: Predicate("xxx".to_owned()),
             args: vec![IRTerm::Constant("hello".to_owned())],
         };
         let b = super::select_builtin(&lit);
@@ -256,22 +259,22 @@ mod test {
 
         let rules = vec![Clause {
             head: Literal {
-                atom: Predicate("a".to_owned()),
+                predicate: Predicate("a".to_owned()),
                 args: vec![],
             },
             body: vec![
                 Literal {
-                    atom: Predicate("from".to_owned()),
+                    predicate: Predicate("from".to_owned()),
                     args: vec![IRTerm::Constant("ubuntu".to_owned())],
                 },
                 Literal {
-                    atom: Predicate("run".to_owned()),
+                    predicate: Predicate("run".to_owned()),
                     args: vec![IRTerm::Constant("rm -rf /".to_owned())],
                 },
             ],
         }];
         let goals = vec![Literal {
-            atom: Predicate("a".to_owned()),
+            predicate: Predicate("a".to_owned()),
             args: vec![],
         }];
         let tree = crate::sld::sld(&rules, &goals, 100).unwrap();

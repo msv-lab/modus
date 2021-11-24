@@ -27,35 +27,88 @@ use crate::logic;
 #[derive(Clone, PartialEq, Debug)]
 pub enum Expression {
     Literal(Literal),
-    OperatorApplication(Vec<Expression>, Operator),
+
+    // An operator applied to an expression
+    OperatorApplication(Box<Expression>, Operator),
+
+    // A conjunction of expressions.
+    And(Box<Expression>, Box<Expression>),
+
+    // A disjunction of expressions.
+    Or(Box<Expression>, Box<Expression>),
 }
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct ModusClause {
     pub head: Literal,
-    pub body: Vec<Expression>,
+    // If None, this clause is a fact.
+    pub body: Option<Expression>,
 }
 
-impl From<&crate::modusfile::ModusClause> for logic::Clause {
+impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
+    /// Convert a ModusClause into one supported by the IR.
+    /// It converts logical or/; into multiple rules, which should be equivalent.
     fn from(modus_clause: &crate::modusfile::ModusClause) -> Self {
-        fn get_literals(expr: &Expression) -> Vec<logic::Literal> {
-            match expr {
-                Expression::Literal(l) => vec![l.clone()],
-                // for now, ignore operators
-                Expression::OperatorApplication(exprs, _) => {
-                    exprs.iter().flat_map(|e| get_literals(e)).collect()
+        let mut clauses: Vec<logic::Clause> = Vec::new();
+
+        // REVIEW: lots of cloning going on below, double check if this is necessary.
+        match &modus_clause.body {
+            Some(Expression::Literal(l)) => clauses.push(logic::Clause {
+                head: modus_clause.head.clone(),
+                body: vec![l.clone()],
+            }),
+            // ignores operators for now
+            Some(Expression::OperatorApplication(expr, _)) => {
+                clauses.extend(Self::from(&ModusClause {
+                    head: modus_clause.head.clone(),
+                    body: Some(*expr.clone()),
+                }))
+            }
+            Some(Expression::And(expr1, expr2)) => {
+                let c1 = Self::from(&ModusClause {
+                    head: modus_clause.head.clone(),
+                    body: Some(*expr1.clone()),
+                });
+                let c2 = Self::from(&ModusClause {
+                    head: modus_clause.head.clone(),
+                    body: Some(*expr2.clone()),
+                });
+
+                // If we have the possible rules for left and right sub expressions,
+                // consider the cartesian product of them.
+                for clause1 in &c1 {
+                    for clause2 in &c2 {
+                        clauses.push(logic::Clause {
+                            head: clause1.head.clone(),
+                            body: clause1
+                                .body
+                                .clone()
+                                .into_iter()
+                                .chain(clause2.body.clone().into_iter())
+                                .collect(),
+                        })
+                    }
                 }
             }
+            Some(Expression::Or(expr1, expr2)) => {
+                let c1 = Self::from(&ModusClause {
+                    head: modus_clause.head.clone(),
+                    body: Some(*expr1.clone()),
+                });
+                let c2 = Self::from(&ModusClause {
+                    head: modus_clause.head.clone(),
+                    body: Some(*expr2.clone()),
+                });
+
+                clauses.extend(c1);
+                clauses.extend(c2);
+            }
+            None => clauses.push(logic::Clause {
+                head: modus_clause.head.clone(),
+                body: Vec::new(),
+            }),
         }
-        let literals = modus_clause
-            .body
-            .iter()
-            .flat_map(|e| get_literals(e))
-            .collect();
-        Self {
-            head: modus_clause.head.clone(),
-            body: literals,
-        }
+        clauses
     }
 }
 
@@ -84,7 +137,7 @@ impl str::FromStr for Modusfile {
         match parser::modusfile(s) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(nom::Err::Error(e) | nom::Err::Failure(e)) => {
-                Result::Err(format!("{}", convert_error(s, e)))
+                Result::Err(convert_error(s, e))
             }
             _ => unimplemented!(),
         }
@@ -94,17 +147,18 @@ impl str::FromStr for Modusfile {
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Expression::OperatorApplication(exprs, op) => write!(
-                f,
-                "({})::{}",
-                exprs
-                    .iter()
-                    .map(|e| e.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", "),
-                op
-            ),
+            Expression::OperatorApplication(expr, op) => {
+                write!(f, "({})::{}", expr.to_string(), op)
+            }
             Expression::Literal(l) => write!(f, "{}", l.to_string()),
+            Expression::And(expr1, expr2) => {
+                // Explicit parenthesization when printing to output, looks a bit
+                // verbose but shouldn't affect user code.
+                write!(f, "({}, {})", expr1, expr2)
+            }
+            Expression::Or(expr1, expr2) => {
+                write!(f, "({}; {})", expr1, expr2)
+            }
         }
     }
 }
@@ -129,18 +183,10 @@ impl str::FromStr for ModusClause {
 
 impl fmt::Display for ModusClause {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.body.len() {
-            0 => write!(f, "{}.", self.head),
-            _ => write!(
-                f,
-                "{} :- {}.",
-                self.head,
-                self.body
-                    .iter()
-                    .map(|e| e.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            ),
+        if let Some(e) = &self.body {
+            write!(f, "{} :- {}.", self.head, e.to_string(),)
+        } else {
+            write!(f, "{}.", self.head)
         }
     }
 }
@@ -165,11 +211,11 @@ pub mod parser {
     use nom::character::complete::multispace0;
     use nom::combinator::cut;
     use nom::error::context;
-    use nom::multi::fold_many0;
+    use nom::multi::{fold_many0, separated_list1};
     use nom::{
         branch::alt,
         bytes::complete::tag,
-        character::complete::{none_of, space0},
+        character::complete::space0,
         combinator::{eof, map, recognize},
         multi::{many0, separated_list0},
         sequence::{delimited, preceded, separated_pair, terminated},
@@ -179,48 +225,58 @@ pub mod parser {
         delimited(tag("#"), not_line_ending, line_ending)(s)
     }
 
+    fn comments(s: &str) -> IResult<&str, Vec<&str>> {
+        delimited(
+            multispace0,
+            separated_list0(multispace0, comment),
+            multispace0,
+        )(s)
+    }
+
     fn head(i: &str) -> IResult<&str, Literal> {
         literal(modus_const, modus_var)(i)
     }
 
-    fn expression(i: &str) -> IResult<&str, Expression> {
-        alt((
-            map(literal(modus_const, modus_var), |lit| {
-                Expression::Literal(lit)
-            }),
-            map(
-                separated_pair(
-                    // implicit recursion here
-                    delimited(tag("("), body, tag(")")),
-                    tag("::"),
-                    cut(literal(modus_const, modus_var)),
-                ),
-                |(exprs, operator)| Expression::OperatorApplication(exprs, operator),
+    fn expression_inner(i: &str) -> IResult<&str, Expression> {
+        let lit_parser = map(literal(modus_const, modus_var), |lit| {
+            Expression::Literal(lit)
+        });
+        // These inner expression parsers can fully recurse.
+        let op_application_parser = map(
+            separated_pair(
+                delimited(tag("("), body, cut(tag(")"))),
+                tag("::"),
+                cut(literal(modus_const, modus_var)),
             ),
-        ))(i)
+            |(expr, operator)| Expression::OperatorApplication(Box::new(expr), operator),
+        );
+        let parenthesized_expr = delimited(tag("("), body, cut(tag(")")));
+        alt((lit_parser, op_application_parser, parenthesized_expr))(i)
     }
 
-    /// Comma-separated list of expressions, interspersed with comments.
-    fn body(i: &str) -> IResult<&str, Vec<Expression>> {
-        preceded(
-            delimited(
-                multispace0,
-                separated_list0(multispace0, comment),
-                multispace0,
+    fn body(i: &str) -> IResult<&str, Expression> {
+        let comma_separated_exprs = map(
+            separated_list1(delimited(comments, tag(","), comments), expression_inner),
+            |es| {
+                es.into_iter()
+                    .reduce(|e1, e2| Expression::And(Box::new(e1), Box::new(e2)))
+                    .expect("Converting list to expression pairs.")
+            },
+        );
+        let semi_separated_exprs = map(
+            separated_list1(
+                delimited(comments, tag(";"), comments),
+                comma_separated_exprs,
             ),
-            separated_list0(
-                delimited(
-                    multispace0,
-                    tag(","),
-                    delimited(
-                        multispace0,
-                        separated_list0(multispace0, comment),
-                        multispace0,
-                    ),
-                ),
-                expression,
-            ),
-        )(i)
+            |es| {
+                es.into_iter()
+                    .reduce(|e1, e2| Expression::Or(Box::new(e1), Box::new(e2)))
+                    .expect("Converting list to expression pairs.")
+            },
+        );
+        // Parses the body as a semicolon separated list of comma separated inner expressions.
+        // This resolves ambiguity by making commas/and higher precedence.
+        preceded(comments, semi_separated_exprs)(i)
     }
 
     fn fact(i: &str) -> IResult<&str, ModusClause> {
@@ -228,7 +284,7 @@ pub mod parser {
         // defines it as "head."
         map(terminated(head, tag(".")), |h| ModusClause {
             head: h,
-            body: Vec::new(),
+            body: None,
         })(i)
     }
 
@@ -239,7 +295,10 @@ pub mod parser {
                 delimited(space0, tag(":-"), multispace0),
                 cut(terminated(body, tag("."))),
             ),
-            |(head, body)| ModusClause { head, body },
+            |(head, body)| ModusClause {
+                head,
+                body: Some(body),
+            },
         )(i)
     }
 
@@ -269,7 +328,7 @@ pub mod parser {
                             }
                             chars.next();
                         }
-                    },
+                    }
                     Some(c) => {
                         // leave it unchanged if we don't recognize the escape char
                         processed.push('\\');
@@ -290,7 +349,7 @@ pub mod parser {
             // It should try the escaped double quote first.
             alt((tag("\\\""), is_not("\""))),
             || "".to_string(),
-            |a, b| a.to_owned() + b,
+            |a, b| a + b,
         ))(i)?;
         let s = process_raw_string(b);
         Ok((a, s))
@@ -334,12 +393,12 @@ mod tests {
     #[test]
     fn fact() {
         let l1 = Literal {
-            atom: logic::Predicate("l1".into()),
+            predicate: logic::Predicate("l1".into()),
             args: Vec::new(),
         };
         let c = ModusClause {
             head: l1,
-            body: Vec::new(),
+            body: None,
         };
         assert_eq!("l1.", c.to_string());
         assert_eq!(Ok(c), "l1.".parse());
@@ -348,85 +407,146 @@ mod tests {
     #[test]
     fn rule() {
         let l1 = Literal {
-            atom: logic::Predicate("l1".into()),
+            predicate: logic::Predicate("l1".into()),
             args: Vec::new(),
         };
         let l2 = Literal {
-            atom: logic::Predicate("l2".into()),
+            predicate: logic::Predicate("l2".into()),
             args: Vec::new(),
         };
         let l3 = Literal {
-            atom: logic::Predicate("l3".into()),
+            predicate: logic::Predicate("l3".into()),
             args: Vec::new(),
         };
         let c = Rule {
             head: l1,
-            body: vec![l2.into(), l3.into()],
+            body: Expression::And(Box::new(l2.into()), Box::new(l3.into())).into(),
         };
-        assert_eq!("l1 :- l2, l3.", c.to_string());
+        assert_eq!("l1 :- (l2, l3).", c.to_string());
         assert_eq!(Ok(c.clone()), "l1 :- l2, l3.".parse());
         assert_eq!(Ok(c.clone()), "l1 :- l2,\n\tl3.".parse());
     }
 
     #[test]
+    fn rule_with_or() {
+        let l1: Literal = "l1".parse().unwrap();
+        let l2: Literal = "l2".parse().unwrap();
+        let c = Rule {
+            head: "foo".parse().unwrap(),
+            body: Expression::Or(Box::new(l1.into()), Box::new(l2.into())).into(),
+        };
+
+        assert_eq!("foo :- (l1; l2).", c.to_string());
+        assert_eq!(Ok(c.clone()), "foo :- l1; l2.".parse());
+    }
+
+    #[test]
     fn rule_with_operator() {
         let foo = Literal {
-            atom: logic::Predicate("foo".into()),
+            predicate: logic::Predicate("foo".into()),
             args: Vec::new(),
         };
         let a = Literal {
-            atom: logic::Predicate("a".into()),
+            predicate: logic::Predicate("a".into()),
             args: Vec::new(),
         };
         let b = Literal {
-            atom: logic::Predicate("b".into()),
+            predicate: logic::Predicate("b".into()),
             args: Vec::new(),
         };
         let merge = Operator {
-            atom: logic::Predicate("merge".into()),
+            predicate: logic::Predicate("merge".into()),
             args: Vec::new(),
         };
         let r = Rule {
             head: foo,
-            body: vec![Expression::OperatorApplication(
-                vec![a.into(), b.into()],
+            body: Expression::OperatorApplication(
+                Expression::And(Box::new(a.into()), Box::new(b.into())).into(),
                 merge,
-            )],
+            )
+            .into(),
         };
-        assert_eq!("foo :- (a, b)::merge.", r.to_string());
-        assert_eq!(Ok(r.clone()), "foo :- (a, b)::merge.".parse());
+        assert_eq!("foo :- ((a, b))::merge.", r.to_string());
+        assert_eq!(Ok(r.clone()), "foo :- ((a, b))::merge.".parse());
     }
 
     #[test]
     fn modusclause_to_clause() {
         let foo = Literal {
-            atom: logic::Predicate("foo".into()),
+            predicate: logic::Predicate("foo".into()),
             args: Vec::new(),
         };
         let a = Literal {
-            atom: logic::Predicate("a".into()),
+            predicate: logic::Predicate("a".into()),
             args: Vec::new(),
         };
         let b = Literal {
-            atom: logic::Predicate("b".into()),
+            predicate: logic::Predicate("b".into()),
             args: Vec::new(),
         };
         let merge = Operator {
-            atom: logic::Predicate("merge".into()),
+            predicate: logic::Predicate("merge".into()),
             args: Vec::new(),
         };
         let r = Rule {
             head: foo,
-            body: vec![Expression::OperatorApplication(
-                vec![a.into(), b.into()],
+            body: Expression::OperatorApplication(
+                Expression::And(Box::new(a.into()), Box::new(b.into())).into(),
                 merge,
-            )],
+            )
+            .into(),
         };
-        assert_eq!("foo :- (a, b)::merge.", r.to_string());
+        assert_eq!("foo :- ((a, b))::merge.", r.to_string());
 
         // Convert to the simpler syntax
-        let c: logic::Clause = (&r).into();
-        assert_eq!("foo :- a, b", c.to_string());
+        let c: Vec<logic::Clause> = (&r).into();
+        assert_eq!(1, c.len());
+        assert_eq!("foo :- a, b", c[0].to_string());
+    }
+
+    #[test]
+    fn modusclause_to_clause_with_or() {
+        let foo: Literal = "foo".parse().unwrap();
+        let a: Literal = "a".parse().unwrap();
+        let b: Literal = "b".parse().unwrap();
+        let merge = Operator {
+            predicate: logic::Predicate("merge".into()),
+            args: Vec::new(),
+        };
+        let r1 = Rule {
+            head: foo.clone(),
+            body: Expression::OperatorApplication(
+                Expression::Or(Box::new(a.clone().into()), Box::new(b.clone().into())).into(),
+                merge,
+            )
+            .into(),
+        };
+        let r2 = Rule {
+            head: foo.clone(),
+            body: Expression::And(
+                Box::new(a.clone().into()),
+                Box::new(Expression::And(
+                    Box::new(b.clone().into()),
+                    Box::new(Expression::Or(
+                        Box::new(a.clone().into()),
+                        Box::new(b.clone().into()),
+                    )),
+                )),
+            )
+            .into(),
+        };
+        assert_eq!("foo :- ((a; b))::merge.", r1.to_string());
+        assert_eq!("foo :- (a, (b, (a; b))).", r2.to_string());
+
+        let c1: Vec<logic::Clause> = (&r1).into();
+        assert_eq!(2, c1.len());
+        assert_eq!("foo :- a", c1[0].to_string());
+        assert_eq!("foo :- b", c1[1].to_string());
+
+        let c2: Vec<logic::Clause> = (&r2).into();
+        assert_eq!(2, c2.len());
+        assert_eq!("foo :- a, b, a", c2[0].to_string());
+        assert_eq!("foo :- a, b, b", c2[1].to_string());
     }
 
     #[test]
@@ -443,5 +563,23 @@ mod tests {
         assert_eq!(s1, "Hello\nWorld");
         assert_eq!(s2, "Tabs\tare\tbetter\tthan\tspaces");
         assert_eq!(s3, "Testing multiline.");
+    }
+
+    #[test]
+    fn modus_expression() {
+        let a: Literal = "a".parse().unwrap();
+        let b: Literal = "b".parse().unwrap();
+        let c: Literal = "c".parse().unwrap();
+        let d: Literal = "d".parse().unwrap();
+
+        let e1 = Expression::And(Expression::Literal(a).into(), Expression::Literal(b).into());
+        let e2 = Expression::And(Expression::Literal(c).into(), Expression::Literal(d).into());
+
+        let expr = Expression::Or(e1.into(), e2.into());
+
+        let expr_str = "((a, b); (c, d))";
+        assert_eq!(expr_str, expr.to_string());
+        let rule = format!("foo :- {}.", expr_str);
+        assert_eq!(Ok(Some(expr)), rule.parse().map(|r: ModusClause| r.body));
     }
 }
