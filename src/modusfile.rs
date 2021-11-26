@@ -20,6 +20,7 @@ use nom::character::complete::not_line_ending;
 use nom::error::convert_error;
 use std::fmt;
 use std::str;
+use std::sync::atomic::AtomicUsize;
 
 use crate::dockerfile;
 use crate::logic;
@@ -47,6 +48,8 @@ pub struct ModusClause {
     pub body: Option<Expression>,
 }
 
+static OPERATOR_PAIR_ID: AtomicUsize = AtomicUsize::new(0);
+
 impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
     /// Convert a ModusClause into one supported by the IR.
     /// It converts logical or/; into multiple rules, which should be equivalent.
@@ -60,14 +63,17 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                 body: vec![l.clone()],
             }),
             // ignores operators for now
-            Some(Expression::OperatorApplication(expr, op)) => {
-                clauses.extend(Self::from(&ModusClause {
+            Some(Expression::OperatorApplication(expr, op)) => clauses.extend(
+                Self::from(&ModusClause {
                     head: modus_clause.head.clone(),
                     body: Some(*expr.clone()),
-                }).into_iter().map(|c| {
+                })
+                .into_iter()
+                .map(|c| {
                     let mut body = Vec::with_capacity(c.body.len() + 2);
                     let mut op_args = Vec::with_capacity(op.args.len() + 1);
-                    op_args.push(IRTerm::Constant("_TODO".to_owned()));
+                    let id = OPERATOR_PAIR_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    op_args.push(IRTerm::Constant(id.to_string()));
                     op_args.extend_from_slice(&op.args);
                     body.push(logic::Literal {
                         predicate: Predicate(format!("_operator_{}_begin", &op.predicate.0)),
@@ -82,8 +88,8 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                         head: c.head.clone(),
                         body,
                     }
-                }))
-            }
+                }),
+            ),
             Some(Expression::And(expr1, expr2)) => {
                 let c1 = Self::from(&ModusClause {
                     head: modus_clause.head.clone(),

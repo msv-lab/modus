@@ -42,7 +42,7 @@ pub struct From<P> {
 }
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Copy(String);
+pub struct Copy(pub String);
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Run(pub String);
@@ -54,7 +54,7 @@ pub struct Env(String);
 pub struct Arg(pub String);
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Workdir(String);
+pub struct Workdir(pub String);
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Instruction<P> {

@@ -173,6 +173,9 @@ intrinsic_predicate!(run, false);
 intrinsic_predicate!(from, false);
 intrinsic_predicate!(_operator_copy_begin, false, false, false);
 intrinsic_predicate!(_operator_copy_end, false, false, false);
+intrinsic_predicate!(_operator_workdir_begin, false, false);
+intrinsic_predicate!(_operator_workdir_end, false, false);
+intrinsic_predicate!(copy, false, false);
 
 /// Convenience macro that returns Some(b) for the first b that can be selected.
 macro_rules! select_builtins {
@@ -206,13 +209,16 @@ pub fn select_builtin<'a>(
         run,
         from,
         _operator_copy_begin,
-        _operator_copy_end
+        _operator_copy_end,
+        _operator_workdir_begin,
+        _operator_workdir_end,
+        copy
     )
 }
 
 #[cfg(test)]
 mod test {
-    use crate::{logic::IRTerm, builtin::SelectBuiltinResult};
+    use crate::{builtin::SelectBuiltinResult, logic::IRTerm};
 
     #[test]
     pub fn test_select() {
