@@ -79,7 +79,8 @@ pub fn proof_to_docker(proof: sld::Proof) -> ResolvedDockerfile {
                         parent: ResolvedParent::Image(Image::from_str(arg).unwrap()),
                         alias: None,
                     }));
-                }
+                },
+                "_operator_copy_begin" => unimplemented!(), // TODO
                 _ => {}
             },
             _ => {}

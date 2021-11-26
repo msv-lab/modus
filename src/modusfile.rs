@@ -23,6 +23,8 @@ use std::str;
 
 use crate::dockerfile;
 use crate::logic;
+use crate::logic::IRTerm;
+use crate::logic::Predicate;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Expression {
@@ -58,10 +60,28 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                 body: vec![l.clone()],
             }),
             // ignores operators for now
-            Some(Expression::OperatorApplication(expr, _)) => {
+            Some(Expression::OperatorApplication(expr, op)) => {
                 clauses.extend(Self::from(&ModusClause {
                     head: modus_clause.head.clone(),
                     body: Some(*expr.clone()),
+                }).into_iter().map(|c| {
+                    let mut body = Vec::with_capacity(c.body.len() + 2);
+                    let mut op_args = Vec::with_capacity(op.args.len() + 1);
+                    op_args.push(IRTerm::Constant("_TODO".to_owned()));
+                    op_args.extend_from_slice(&op.args);
+                    body.push(logic::Literal {
+                        predicate: Predicate(format!("_operator_{}_begin", &op.predicate.0)),
+                        args: op_args.clone(),
+                    });
+                    body.extend_from_slice(&c.body);
+                    body.push(logic::Literal {
+                        predicate: Predicate(format!("_operator_{}_end", &op.predicate.0)),
+                        args: op_args,
+                    });
+                    logic::Clause {
+                        head: c.head.clone(),
+                        body,
+                    }
                 }))
             }
             Some(Expression::And(expr1, expr2)) => {

@@ -35,7 +35,7 @@ impl fmt::Display for IRTerm {
         match self {
             IRTerm::Constant(s) => write!(f, "\"{}\"", s),
             IRTerm::UserVariable(s) => write!(f, "{}", s),
-            _ => unimplemented!(),
+            _ => write!(f, "%internal"),
         }
     }
 }
