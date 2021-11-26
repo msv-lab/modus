@@ -113,7 +113,7 @@ pub fn proof_to_docker(proof: sld::Proof) -> ResolvedDockerfile {
                     let from = current.args[1].as_constant().unwrap();
                     let to = current.args[2].as_constant().unwrap();
                     instructions.push(Instruction::Copy(crate::dockerfile::Copy(format!(
-                        "--from={} {:?} {:?}",
+                        "--from=copy_{} {:?} {:?}",
                         pair_id, from, to
                     ))));
                     i = j + 1;
