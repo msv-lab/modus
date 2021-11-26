@@ -21,11 +21,11 @@ use std::{
     hash::Hash,
 };
 
-use crate::unification::RenameWithSubstitution;
 use crate::{
     builtin,
     unification::{compose_extend, compose_no_extend, Rename, Substitution},
 };
+use crate::{builtin::SelectBuiltinResult, unification::RenameWithSubstitution};
 use crate::{
     logic::{self, Signature},
     unification::Substitute,
@@ -119,7 +119,8 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> Opt
             .enumerate()
             .find(|(_id, lit)| {
                 let literal = &lit.literal;
-                if builtin::select_builtin(literal).is_some() {
+                let select_builtin_res = builtin::select_builtin(literal);
+                if select_builtin_res.0.is_match() {
                     return true;
                 }
 
@@ -127,15 +128,24 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> Opt
                 // (computed outside), and if a particular argument can not be
                 // ungrounded (grounded[arg_index] == false), variables will not be
                 // allowed there.
-                let lit_grounded = grounded
-                    .get(&literal.signature())
-                    .expect("should find literal with matching groundedness signature");
-                debug_assert_eq!(lit_grounded.len(), literal.args.len());
-                return literal
-                    .args
-                    .iter()
-                    .zip(lit_grounded.iter())
-                    .all(|pair| matches!(pair, (_, true) | (IRTerm::Constant(_), false)));
+                let lit_grounded = grounded.get(&literal.signature());
+                if let Some(lit_grounded) = lit_grounded {
+                    debug_assert_eq!(lit_grounded.len(), literal.args.len());
+                    return literal
+                        .args
+                        .iter()
+                        .zip(lit_grounded.iter())
+                        .all(|pair| matches!(pair, (_, true) | (IRTerm::Constant(_), false)));
+                } else if select_builtin_res.0 == SelectBuiltinResult::GroundnessMismatch {
+                    return false;
+                }
+
+                // No builtin nor user-define predicate with this name
+                panic!(
+                    "Unknown predicate {}/{}",
+                    &literal.predicate.0,
+                    literal.args.len()
+                );
             })
             .map(|(a, b)| (a, b.clone()))
     }
@@ -220,29 +230,32 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> Opt
             }
             let (lid, l) = selected.unwrap();
 
-            let builtin_resolves = builtin::select_builtin(&l.literal)
-                .and_then(|pred| pred.apply(&l.literal))
-                .and_then(|unify_cand| {
-                    unify_cand.unify(&l.literal).map(|mgu| {
-                        (
+            let builtin_resolves = match builtin::select_builtin(&l.literal) {
+                (SelectBuiltinResult::Match, lit) => lit,
+                _ => None,
+            }
+            .and_then(|pred| pred.apply(&l.literal))
+            .and_then(|unify_cand| {
+                unify_cand.unify(&l.literal).map(|mgu| {
+                    (
+                        ClauseId::Builtin(unify_cand.clone()),
+                        mgu.clone(),
+                        Substitution::<IRTerm>::new(),
+                        resolve(
+                            lid,
                             ClauseId::Builtin(unify_cand.clone()),
-                            mgu.clone(),
-                            Substitution::<IRTerm>::new(),
-                            resolve(
-                                lid,
-                                ClauseId::Builtin(unify_cand.clone()),
-                                &goal,
-                                &mgu,
-                                &Clause {
-                                    head: unify_cand,
-                                    body: Vec::new(), // TODO: allow builtin rules to return more conditions?
-                                },
-                                level + 1,
-                            ),
-                        )
-                    })
+                            &goal,
+                            &mgu,
+                            &Clause {
+                                head: unify_cand,
+                                body: Vec::new(), // TODO: allow builtin rules to return more conditions?
+                            },
+                            level + 1,
+                        ),
+                    )
                 })
-                .into_iter();
+            })
+            .into_iter();
             let user_rules_resolves = rules
                 .iter()
                 .enumerate()

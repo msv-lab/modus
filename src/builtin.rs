@@ -17,21 +17,45 @@
 
 use crate::logic::{Clause, IRTerm, Literal, Predicate};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SelectBuiltinResult {
+    Match,
+    GroundnessMismatch,
+    NoMatch,
+}
+
+impl SelectBuiltinResult {
+    pub fn is_match(&self) -> bool {
+        match self {
+            SelectBuiltinResult::Match => true,
+            _ => false,
+        }
+    }
+}
+
 pub trait BuiltinPredicate {
     fn name(&self) -> &'static str;
+
+    /// Return if the argument is allowed to be ungrounded. This means that a "false" here will force a constant.
     fn arg_groundness(&self) -> &'static [bool];
 
-    fn select(&self, lit: &Literal) -> bool {
+    fn select(&self, lit: &Literal) -> SelectBuiltinResult {
         let Literal {
             ref predicate,
             ref args,
         } = lit;
         if &predicate.0 != self.name() {
-            return false;
+            return SelectBuiltinResult::NoMatch;
         }
-        args.iter()
+        if args
+            .iter()
             .zip(self.arg_groundness().into_iter())
             .all(|pair| matches!(pair, (_, true) | (IRTerm::Constant(_), false)))
+        {
+            SelectBuiltinResult::Match
+        } else {
+            SelectBuiltinResult::GroundnessMismatch
+        }
     }
 
     /// Return a new literal specifically constructed to unify with the input
