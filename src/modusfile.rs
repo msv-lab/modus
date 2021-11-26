@@ -468,6 +468,9 @@ mod tests {
         };
         assert_eq!("foo :- ((a, b))::merge.", r.to_string());
         assert_eq!(Ok(r.clone()), "foo :- ((a, b))::merge.".parse());
+        assert_eq!(Ok(r.clone()), "foo :- (a, b)::merge.".parse());
+        // assert_eq!(Ok(r.clone()), "foo :- (a, b)::merge().".parse());
+        // TODO: either uncomment or remove.
     }
 
     #[test]
@@ -586,44 +589,44 @@ mod tests {
     #[test]
     fn multiple_clause_with_different_ops() {
         let foo = Literal {
-            atom: logic::Predicate("foo".into()),
+            predicate: logic::Predicate("foo".into()),
             args: vec![ModusTerm::UserVariable("x".to_owned())],
         };
         let bar = Literal {
-            atom: logic::Predicate("bar".into()),
+            predicate: logic::Predicate("bar".into()),
             args: Vec::new(),
         };
         let baz = Literal {
-            atom: logic::Predicate("baz".into()),
+            predicate: logic::Predicate("baz".into()),
             args: Vec::new(),
         };
         let a = Rule {
             head: logic::Literal {
-                atom: logic::Predicate("a".to_owned()),
+                predicate: logic::Predicate("a".to_owned()),
                 args: vec![],
             },
-            body: vec![
-                Expression::OperatorApplication(
-                    vec![foo.into(), bar.into()],
+            body: Some(Expression::And(
+                Box::new(Expression::OperatorApplication(
+                    Box::new(Expression::And(Box::new(foo.into()), Box::new(bar.into()))),
                     Operator {
-                        atom: logic::Predicate("setenv".into()),
+                        predicate: logic::Predicate("setenv".into()),
                         args: vec![
                             ModusTerm::Constant("a".to_owned()),
                             ModusTerm::Constant("foobar".to_owned()),
                         ],
                     },
-                ),
-                Expression::OperatorApplication(
-                    vec![baz.into()],
+                )),
+                Box::new(Expression::OperatorApplication(
+                    Box::new(baz.into()),
                     Operator {
-                        atom: logic::Predicate("setenv".into()),
+                        predicate: logic::Predicate("setenv".into()),
                         args: vec![
                             ModusTerm::Constant("a".to_owned()),
                             ModusTerm::Constant("baz".to_owned()),
                         ],
                     },
-                ),
-            ],
+                )),
+            )),
         };
         // assert_eq!(&a, &(r#"a:-(foo(x),bar)::setenv("a","foobar"), baz::setenv("a" "baz")."#.parse().unwrap()));
         // assert_eq!(&a, &(r#"a:-(foo(x),bar)::setenv("a","foobar"), baz()::setenv("a" "baz")."#.parse().unwrap()));
