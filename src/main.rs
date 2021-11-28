@@ -17,6 +17,7 @@
 
 mod builtin;
 mod dockerfile;
+mod imagegen;
 mod logic;
 mod modusfile;
 mod sld;
