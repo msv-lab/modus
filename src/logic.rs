@@ -35,12 +35,14 @@ impl fmt::Display for IRTerm {
         match self {
             IRTerm::Constant(s) => write!(f, "\"{}\"", s),
             IRTerm::UserVariable(s) => write!(f, "{}", s),
+            // there may be aux variables after translating to IR
+            IRTerm::AuxiliaryVariable(i) => write!(f, "__AUX_{}", i),
             _ => unimplemented!(),
         }
     }
 }
 
-static AVAILABLE_VARIABLE_INDEX: AtomicU32 = AtomicU32::new(0);
+pub static AVAILABLE_VARIABLE_INDEX: AtomicU32 = AtomicU32::new(0);
 
 impl Rename<IRTerm> for IRTerm {
     fn rename(&self) -> IRTerm {

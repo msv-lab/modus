@@ -171,4 +171,69 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
     }
 }
 
-// TODO tests
+#[cfg(test)]
+mod tests {
+    use serial_test::serial;
+
+    use super::*;
+
+    /// Should be called if any tests rely on the variable index.
+    /// Note that the code (currently) doesn't rely on the variable indexes, just the tests, for convenience.
+    fn setup() {
+        logic::AVAILABLE_VARIABLE_INDEX.store(0, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[test]
+    #[serial]
+    fn format_string_translation() {
+        setup();
+
+        let case = "ubuntu:${distr_version}";
+
+        let lits = vec![
+            logic::Literal {
+                predicate: logic::Predicate("string_concat".to_owned()),
+                args: vec![IRTerm::Constant("".to_owned()), IRTerm::Constant("".to_owned()), IRTerm::AuxiliaryVariable(0)],
+            },
+            logic::Literal {
+                predicate: logic::Predicate("string_concat".to_owned()),
+                args: vec![IRTerm::AuxiliaryVariable(0), IRTerm::Constant("ubuntu:".to_owned()), IRTerm::AuxiliaryVariable(1)],
+            },
+            logic::Literal {
+                predicate: logic::Predicate("string_concat".to_owned()),
+                args: vec![IRTerm::AuxiliaryVariable(1), IRTerm::UserVariable("distr_version".to_owned()), IRTerm::AuxiliaryVariable(2)],
+            },
+        ];
+
+        assert_eq!((lits, IRTerm::AuxiliaryVariable(2)), convert_format_string(case));
+    }
+
+    #[test]
+    #[serial]
+    fn format_string_translation_with_escape() {
+        setup();
+
+        let case = "use ${feature} like this \\${...}";
+
+        let lits = vec![
+            logic::Literal {
+                predicate: logic::Predicate("string_concat".to_owned()),
+                args: vec![IRTerm::Constant("".to_owned()), IRTerm::Constant("".to_owned()), IRTerm::AuxiliaryVariable(0)],
+            },
+            logic::Literal {
+                predicate: logic::Predicate("string_concat".to_owned()),
+                args: vec![IRTerm::AuxiliaryVariable(0), IRTerm::Constant("use ".to_owned()), IRTerm::AuxiliaryVariable(1)],
+            },
+            logic::Literal {
+                predicate: logic::Predicate("string_concat".to_owned()),
+                args: vec![IRTerm::AuxiliaryVariable(1), IRTerm::UserVariable("feature".to_owned()), IRTerm::AuxiliaryVariable(2)],
+            },
+            logic::Literal {
+                predicate: logic::Predicate("string_concat".to_owned()),
+                args: vec![IRTerm::AuxiliaryVariable(2), IRTerm::Constant(" like this ${...}".to_owned()), IRTerm::AuxiliaryVariable(3)],
+            },
+        ];
+
+        assert_eq!((lits, IRTerm::AuxiliaryVariable(3)), convert_format_string(case));
+    }
+}

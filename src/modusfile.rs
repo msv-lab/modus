@@ -54,6 +54,16 @@ pub enum ModusTerm {
     UserVariable(String),
 }
 
+impl fmt::Display for ModusTerm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ModusTerm::Constant(s) => write!(f, "\"{}\"", s),
+            ModusTerm::UserVariable(s) => write!(f, "{}", s),
+            ModusTerm::FormatString(s) => write!(f, "\"{}\"", s),
+        }
+    }
+}
+
 impl From<ModusTerm> for logic::IRTerm {
     fn from(modus_term: ModusTerm) -> Self {
         match modus_term {
@@ -68,7 +78,19 @@ impl From<ModusTerm> for logic::IRTerm {
 
 impl fmt::Display for logic::Literal<ModusTerm> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        match &*self.args {
+            [] => write!(f, "{}", self.predicate),
+            _ => write!(
+                f,
+                "{}({})",
+                self.predicate,
+                self.args
+                    .iter()
+                    .map(|a| a.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            ),
+        }
     }
 }
 
@@ -333,7 +355,9 @@ pub mod parser {
     /// Parses a substring outside of the expansion part of a format string's content.
     pub fn outside_format_expansion(i: &str) -> IResult<&str, String> {
         fold_many0(
-            alt((tag("\\$"), is_not("$"))),
+            // We want to parse until we see '$', except if it was preceded with escape char.
+            // Here we rely on the ordering of `alt`.
+            alt((tag("\\$"), tag("\\"), is_not("\\$"))),
             || "".to_owned(),
             |a, b| a + b,
         )(i)
