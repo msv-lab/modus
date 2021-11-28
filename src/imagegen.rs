@@ -303,7 +303,7 @@ pub fn build_dag_from_proofs(
                             }
                             "workdir" => {
                                 let mut new_state = curr_state.clone();
-                                new_state.cwd = lit.args[1].as_constant().unwrap().to_owned();
+                                new_state.cwd = Path::new(&curr_state.cwd).join(lit.args[1].as_constant().unwrap()).to_string_lossy().into_owned();
                                 process_children(
                                     subtree_in_op,
                                     last_node,
