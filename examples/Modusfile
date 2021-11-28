@@ -6,5 +6,8 @@ pylint(python_version, "ubuntu", ubuntu_version) :-
 python(python_version, "ubuntu", distr_version) :-
     # Below we use a format string to vary which version of ubuntu we use.
     # This makes image tags easier to work with.
-    from(f"ubuntu:${distr_version}"), # comments are allowed after an expression's comma
-    run(f"apt-get install -y python${python_version}"). # comments are allowed here
+    (
+        # comments are allowed here
+        from(f"ubuntu:${distr_version}"),
+        run(f"apt-get install -y python${python_version}")
+    )::merge. # comments are allowed here

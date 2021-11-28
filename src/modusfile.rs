@@ -238,19 +238,22 @@ pub mod parser {
     }
 
     fn expression_inner(i: &str) -> IResult<&str, Expression> {
+        let l_paren_with_comments = |i| terminated(tag("("), comments)(i);
+        let r_paren_with_comments = |i| preceded(comments, cut(tag(")")))(i);
+
         let lit_parser = map(literal(modus_const, modus_var), |lit| {
             Expression::Literal(lit)
         });
         // These inner expression parsers can fully recurse.
         let op_application_parser = map(
             separated_pair(
-                delimited(tag("("), body, cut(tag(")"))),
+                delimited(l_paren_with_comments, body, r_paren_with_comments),
                 tag("::"),
                 cut(literal(modus_const, modus_var)),
             ),
             |(expr, operator)| Expression::OperatorApplication(Box::new(expr), operator),
         );
-        let parenthesized_expr = delimited(tag("("), body, cut(tag(")")));
+        let parenthesized_expr = delimited(l_paren_with_comments, body, r_paren_with_comments);
         alt((lit_parser, op_application_parser, parenthesized_expr))(i)
     }
 
@@ -458,16 +461,28 @@ mod tests {
             predicate: logic::Predicate("merge".into()),
             args: Vec::new(),
         };
-        let r = Rule {
+        let r1 = Rule {
+            head: foo.clone(),
+            body: Expression::OperatorApplication(
+                Expression::And(Box::new(a.clone().into()), Box::new(b.into())).into(),
+                merge.clone(),
+            )
+            .into(),
+        };
+        let r2 = Rule {
             head: foo,
             body: Expression::OperatorApplication(
-                Expression::And(Box::new(a.into()), Box::new(b.into())).into(),
+                Box::new(Expression::Literal(a)),
                 merge,
             )
             .into(),
         };
-        assert_eq!("foo :- ((a, b))::merge.", r.to_string());
-        assert_eq!(Ok(r.clone()), "foo :- ((a, b))::merge.".parse());
+
+        assert_eq!("foo :- ((a, b))::merge.", r1.to_string());
+        assert_eq!(Ok(r1.clone()), "foo :- ((a, b))::merge.".parse());
+
+        assert_eq!("foo :- (a)::merge.", r2.to_string());
+        assert_eq!(Ok(r2.clone()), "foo :- ( a )::merge.".parse());
     }
 
     #[test]
