@@ -54,7 +54,7 @@ pub fn prove_goal(
 
 pub fn transpile(mf: Modusfile, query: logic::Literal) -> Dockerfile<ResolvedParent> {
     let goal = vec![query];
-    let max_depth = 20;
+    let max_depth = 50;
     let clauses: Vec<Clause> =
         mf.0.iter()
             .flat_map(|mc| {
