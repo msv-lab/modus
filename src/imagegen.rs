@@ -192,12 +192,19 @@ pub fn build_dag_from_proofs(
                     if last_node.is_some() {
                         panic!("from must be the first build instruction.");
                     }
-                    last_node.replace(res.new_node(
-                        BuildNode::From {
-                            image_ref: intrinsic.args[0].as_constant().unwrap().to_owned(),
-                        },
-                        vec![],
-                    ));
+                    // Special sharing for the "from" intrinsic.
+                    if let Some(&existing_node) = image_literals.get(&intrinsic) {
+                        last_node.replace(existing_node);
+                    } else {
+                        let new_node = res.new_node(
+                            BuildNode::From {
+                                image_ref: intrinsic.args[0].as_constant().unwrap().to_owned(),
+                            },
+                            vec![],
+                        );
+                        last_node.replace(new_node);
+                        image_literals.insert(intrinsic.clone(), new_node);
+                    }
                 }
                 "run" => {
                     if last_node.is_none() {
