@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use crate::logic::{Clause, IRTerm, Literal, Predicate};
 use crate::sld::{ClauseId, Proof};
@@ -219,8 +220,11 @@ pub fn build_dag_from_proofs(
                     }
                     let parent = last_node.unwrap();
                     let src_path = intrinsic.args[0].as_constant().unwrap().to_owned();
-                    // TODO: resolve path relative to workdir
-                    let dst_path = intrinsic.args[1].as_constant().unwrap().to_owned();
+                    let dst_path = intrinsic.args[1].as_constant().unwrap();
+                    let dst_path = Path::new(&curr_state.cwd)
+                        .join(dst_path)
+                        .to_string_lossy()
+                        .into_owned();
                     last_node.replace(res.new_node(
                         BuildNode::CopyFromLocal {
                             parent,
@@ -281,7 +285,10 @@ pub fn build_dag_from_proofs(
                                         parent,
                                         src_image: img,
                                         src_path: lit.args[1].as_constant().unwrap().to_owned(),
-                                        dst_path: lit.args[2].as_constant().unwrap().to_owned(),
+                                        dst_path: Path::new(&curr_state.cwd)
+                                            .join(lit.args[2].as_constant().unwrap())
+                                            .to_string_lossy()
+                                            .into_owned(),
                                     },
                                     vec![parent, img],
                                 );
@@ -290,7 +297,14 @@ pub fn build_dag_from_proofs(
                             "workdir" => {
                                 let mut new_state = curr_state.clone();
                                 new_state.cwd = lit.args[1].as_constant().unwrap().to_owned();
-                                process_children(subtree_in_op, last_node, rules, res, image_literals, &mut new_state);
+                                process_children(
+                                    subtree_in_op,
+                                    last_node,
+                                    rules,
+                                    res,
+                                    image_literals,
+                                    &mut new_state,
+                                );
                             }
                             _ => {}
                         }
