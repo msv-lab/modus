@@ -20,6 +20,7 @@ mod dockerfile;
 mod logic;
 mod modusfile;
 mod sld;
+mod translate;
 mod transpiler;
 mod unification;
 mod wellformed;

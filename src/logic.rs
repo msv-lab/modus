@@ -212,22 +212,34 @@ impl str::FromStr for Clause {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match parser::clause(modusfile::parser::modus_const, modusfile::parser::modus_var)(s) {
+        match parser::clause(parser::term)(s) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
     }
 }
 
+impl str::FromStr for Literal {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match parser::literal(parser::term)(s) {
+            Result::Ok((_, o)) => Ok(o),
+            Result::Err(e) => Result::Err(format!("{}", e)),
+        }
+    }
+}
+
+/// The parser for the IR is only for convenience in writing tests.
 pub mod parser {
 
     use super::*;
 
     use nom::{
         branch::alt,
-        bytes::complete::tag,
+        bytes::complete::{is_not, tag},
         character::complete::{alpha1, alphanumeric1, one_of},
-        combinator::{cut, map, opt, recognize, value},
+        combinator::{map, opt, recognize, value},
         error::VerboseError,
         multi::{many0, separated_list0, separated_list1},
         sequence::{delimited, pair, preceded, separated_pair, terminated},
@@ -257,6 +269,21 @@ pub mod parser {
         delimited(optional_space, inner, optional_space)
     }
 
+    fn constant(i: &str) -> IResult<&str, &str> {
+        delimited(tag("\""), is_not("\""), tag("\""))(i)
+    }
+
+    fn variable(i: &str) -> IResult<&str, &str> {
+        literal_identifier(i)
+    }
+
+    pub fn term(i: &str) -> IResult<&str, IRTerm> {
+        alt((
+            map(constant, |s| IRTerm::Constant(s.to_owned())),
+            map(variable, |s| IRTerm::UserVariable(s.to_owned())),
+        ))(i)
+    }
+
     //TODO: I need to think more carefully how to connect this to stage name
     pub fn literal_identifier(i: &str) -> IResult<&str, &str> {
         recognize(pair(
@@ -265,34 +292,17 @@ pub mod parser {
         ))(i)
     }
 
-    pub fn term<'a, FC: 'a, FV: 'a>(
-        constant: FC,
-        variable: FV,
-    ) -> impl FnMut(&'a str) -> IResult<&'a str, IRTerm>
+    /// Parses a literal with a generic term type.
+    pub fn literal<'a, FT: 'a, T>(term: FT) -> impl FnMut(&'a str) -> IResult<&'a str, Literal<T>>
     where
-        FC: FnMut(&str) -> IResult<&str, String>,
-        FV: FnMut(&str) -> IResult<&str, &str>,
-    {
-        alt((
-            map(constant, |c| IRTerm::Constant(c)),
-            map(variable, |v| IRTerm::UserVariable(v.to_string())),
-        ))
-    }
-
-    pub fn literal<'a, FC: 'a, FV: 'a>(
-        constant: FC,
-        variable: FV,
-    ) -> impl FnMut(&'a str) -> IResult<&'a str, Literal>
-    where
-        FC: FnMut(&str) -> IResult<&str, String>,
-        FV: FnMut(&str) -> IResult<&str, &str>,
+        FT: FnMut(&str) -> IResult<&str, T>,
     {
         map(
             pair(
                 literal_identifier,
                 opt(delimited(
                     terminated(tag("("), optional_space),
-                    separated_list1(ws(tag(",")), term(constant, variable)),
+                    separated_list1(ws(tag(",")), term),
                     preceded(optional_space, tag(")")),
                 )),
             ),
@@ -309,19 +319,15 @@ pub mod parser {
         )
     }
 
-    pub fn clause<'a, FC: 'a, FV: 'a>(
-        constant: FC,
-        variable: FV,
-    ) -> impl FnMut(&'a str) -> IResult<&'a str, Clause>
+    pub fn clause<'a, FT: 'a, T>(term: FT) -> impl FnMut(&'a str) -> IResult<&'a str, Clause<T>>
     where
-        FC: FnMut(&str) -> IResult<&str, String> + Clone,
-        FV: FnMut(&str) -> IResult<&str, &str> + Clone,
+        FT: FnMut(&str) -> IResult<&str, T> + Clone,
     {
         map(
             separated_pair(
-                literal(constant.clone(), variable.clone()),
+                literal(term.clone()),
                 ws(tag(":-")),
-                separated_list0(ws(tag(",")), literal(constant, variable)),
+                separated_list0(ws(tag(",")), literal(term)),
             ),
             |(head, body)| Clause { head, body },
         )

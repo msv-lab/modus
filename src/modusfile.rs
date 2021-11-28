@@ -45,75 +45,48 @@ pub struct ModusClause {
     pub body: Option<Expression>,
 }
 
-impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
-    /// Convert a ModusClause into one supported by the IR.
-    /// It converts logical or/; into multiple rules, which should be equivalent.
-    fn from(modus_clause: &crate::modusfile::ModusClause) -> Self {
-        let mut clauses: Vec<logic::Clause> = Vec::new();
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum ModusTerm {
+    Constant(String),
+    /// A format string with '\$' left unhandled. This should be dealt with when
+    /// converting to the IR.
+    FormatString(String),
+    UserVariable(String),
+}
 
-        // REVIEW: lots of cloning going on below, double check if this is necessary.
-        match &modus_clause.body {
-            Some(Expression::Literal(l)) => clauses.push(logic::Clause {
-                head: modus_clause.head.clone(),
-                body: vec![l.clone()],
-            }),
-            // ignores operators for now
-            Some(Expression::OperatorApplication(expr, _)) => {
-                clauses.extend(Self::from(&ModusClause {
-                    head: modus_clause.head.clone(),
-                    body: Some(*expr.clone()),
-                }))
-            }
-            Some(Expression::And(expr1, expr2)) => {
-                let c1 = Self::from(&ModusClause {
-                    head: modus_clause.head.clone(),
-                    body: Some(*expr1.clone()),
-                });
-                let c2 = Self::from(&ModusClause {
-                    head: modus_clause.head.clone(),
-                    body: Some(*expr2.clone()),
-                });
-
-                // If we have the possible rules for left and right sub expressions,
-                // consider the cartesian product of them.
-                for clause1 in &c1 {
-                    for clause2 in &c2 {
-                        clauses.push(logic::Clause {
-                            head: clause1.head.clone(),
-                            body: clause1
-                                .body
-                                .clone()
-                                .into_iter()
-                                .chain(clause2.body.clone().into_iter())
-                                .collect(),
-                        })
-                    }
-                }
-            }
-            Some(Expression::Or(expr1, expr2)) => {
-                let c1 = Self::from(&ModusClause {
-                    head: modus_clause.head.clone(),
-                    body: Some(*expr1.clone()),
-                });
-                let c2 = Self::from(&ModusClause {
-                    head: modus_clause.head.clone(),
-                    body: Some(*expr2.clone()),
-                });
-
-                clauses.extend(c1);
-                clauses.extend(c2);
-            }
-            None => clauses.push(logic::Clause {
-                head: modus_clause.head.clone(),
-                body: Vec::new(),
-            }),
+impl From<ModusTerm> for logic::IRTerm {
+    fn from(modus_term: ModusTerm) -> Self {
+        match modus_term {
+            ModusTerm::Constant(c) => logic::IRTerm::Constant(c),
+            // TODO: return a Result type and propogate the error up properly if we want to warn about
+            // this. Example: the user might try to use a format string in a head literal.
+            ModusTerm::FormatString(_) => panic!("Cannot convert a format string to an IRTerm."),
+            ModusTerm::UserVariable(v) => logic::IRTerm::UserVariable(v),
         }
-        clauses
     }
 }
 
-type ModusTerm = logic::IRTerm;
+impl fmt::Display for logic::Literal<ModusTerm> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        todo!()
+    }
+}
+
 type Literal = logic::Literal<ModusTerm>;
+
+impl From<Literal> for logic::Literal {
+    fn from(modus_literal: Literal) -> Self {
+        Self {
+            predicate: modus_literal.predicate,
+            args: modus_literal
+                .args
+                .into_iter()
+                .map(|arg| arg.into())
+                .collect(),
+        }
+    }
+}
+
 type Fact = ModusClause;
 type Rule = ModusClause;
 pub type Operator = Literal;
@@ -195,7 +168,7 @@ impl str::FromStr for Literal {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match logic::parser::literal(parser::modus_const, parser::modus_var)(s) {
+        match logic::parser::literal(parser::modus_term)(s) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
@@ -234,19 +207,17 @@ pub mod parser {
     }
 
     fn head(i: &str) -> IResult<&str, Literal> {
-        literal(modus_const, modus_var)(i)
+        literal(modus_term)(i)
     }
 
     fn expression_inner(i: &str) -> IResult<&str, Expression> {
-        let lit_parser = map(literal(modus_const, modus_var), |lit| {
-            Expression::Literal(lit)
-        });
+        let lit_parser = map(literal(modus_term), |lit| Expression::Literal(lit));
         // These inner expression parsers can fully recurse.
         let op_application_parser = map(
             separated_pair(
                 delimited(tag("("), body, cut(tag(")"))),
                 tag("::"),
-                cut(literal(modus_const, modus_var)),
+                cut(literal(modus_term)),
             ),
             |(expr, operator)| Expression::OperatorApplication(Box::new(expr), operator),
         );
@@ -356,8 +327,22 @@ pub mod parser {
     }
 
     pub fn modus_const(i: &str) -> IResult<&str, String> {
-        // TODO: Support proper f-strings, don't treat f-strings as const.
-        delimited(alt((tag("\""), tag("f\""))), string_content, cut(tag("\"")))(i)
+        delimited(tag("\""), string_content, cut(tag("\"")))(i)
+    }
+
+    /// Parses a substring outside of the expansion part of a format string's content.
+    pub fn outside_format_expansion(i: &str) -> IResult<&str, String> {
+        fold_many0(
+            alt((tag("\\$"), is_not("$"))),
+            || "".to_owned(),
+            |a, b| a + b,
+        )(i)
+    }
+
+    fn modus_format_string(i: &str) -> IResult<&str, String> {
+        // TODO: check that the token(s) inside "${...}" conform to the variable syntax.
+        // Note that if it's escaped, "\${...}", it does not need to conform to the variable syntax.
+        delimited(tag("f\""), string_content, cut(tag("\"")))(i)
     }
 
     pub fn variable_identifier(i: &str) -> IResult<&str, &str> {
@@ -366,6 +351,14 @@ pub mod parser {
 
     pub fn modus_var(i: &str) -> IResult<&str, &str> {
         variable_identifier(i)
+    }
+
+    pub fn modus_term(i: &str) -> IResult<&str, ModusTerm> {
+        alt((
+            map(modus_const, ModusTerm::Constant),
+            map(modus_format_string, ModusTerm::FormatString),
+            map(modus_var, |s| ModusTerm::UserVariable(s.to_owned())),
+        ))(i)
     }
 
     pub fn modus_clause(i: &str) -> IResult<&str, ModusClause> {
