@@ -193,19 +193,34 @@ mod tests {
         let lits = vec![
             logic::Literal {
                 predicate: logic::Predicate("string_concat".to_owned()),
-                args: vec![IRTerm::Constant("".to_owned()), IRTerm::Constant("".to_owned()), IRTerm::AuxiliaryVariable(0)],
+                args: vec![
+                    IRTerm::Constant("".to_owned()),
+                    IRTerm::Constant("".to_owned()),
+                    IRTerm::AuxiliaryVariable(0),
+                ],
             },
             logic::Literal {
                 predicate: logic::Predicate("string_concat".to_owned()),
-                args: vec![IRTerm::AuxiliaryVariable(0), IRTerm::Constant("ubuntu:".to_owned()), IRTerm::AuxiliaryVariable(1)],
+                args: vec![
+                    IRTerm::AuxiliaryVariable(0),
+                    IRTerm::Constant("ubuntu:".to_owned()),
+                    IRTerm::AuxiliaryVariable(1),
+                ],
             },
             logic::Literal {
                 predicate: logic::Predicate("string_concat".to_owned()),
-                args: vec![IRTerm::AuxiliaryVariable(1), IRTerm::UserVariable("distr_version".to_owned()), IRTerm::AuxiliaryVariable(2)],
+                args: vec![
+                    IRTerm::AuxiliaryVariable(1),
+                    IRTerm::UserVariable("distr_version".to_owned()),
+                    IRTerm::AuxiliaryVariable(2),
+                ],
             },
         ];
 
-        assert_eq!((lits, IRTerm::AuxiliaryVariable(2)), convert_format_string(case));
+        assert_eq!(
+            (lits, IRTerm::AuxiliaryVariable(2)),
+            convert_format_string(case)
+        );
     }
 
     #[test]
@@ -218,22 +233,41 @@ mod tests {
         let lits = vec![
             logic::Literal {
                 predicate: logic::Predicate("string_concat".to_owned()),
-                args: vec![IRTerm::Constant("".to_owned()), IRTerm::Constant("".to_owned()), IRTerm::AuxiliaryVariable(0)],
+                args: vec![
+                    IRTerm::Constant("".to_owned()),
+                    IRTerm::Constant("".to_owned()),
+                    IRTerm::AuxiliaryVariable(0),
+                ],
             },
             logic::Literal {
                 predicate: logic::Predicate("string_concat".to_owned()),
-                args: vec![IRTerm::AuxiliaryVariable(0), IRTerm::Constant("use ".to_owned()), IRTerm::AuxiliaryVariable(1)],
+                args: vec![
+                    IRTerm::AuxiliaryVariable(0),
+                    IRTerm::Constant("use ".to_owned()),
+                    IRTerm::AuxiliaryVariable(1),
+                ],
             },
             logic::Literal {
                 predicate: logic::Predicate("string_concat".to_owned()),
-                args: vec![IRTerm::AuxiliaryVariable(1), IRTerm::UserVariable("feature".to_owned()), IRTerm::AuxiliaryVariable(2)],
+                args: vec![
+                    IRTerm::AuxiliaryVariable(1),
+                    IRTerm::UserVariable("feature".to_owned()),
+                    IRTerm::AuxiliaryVariable(2),
+                ],
             },
             logic::Literal {
                 predicate: logic::Predicate("string_concat".to_owned()),
-                args: vec![IRTerm::AuxiliaryVariable(2), IRTerm::Constant(" like this ${...}".to_owned()), IRTerm::AuxiliaryVariable(3)],
+                args: vec![
+                    IRTerm::AuxiliaryVariable(2),
+                    IRTerm::Constant(" like this ${...}".to_owned()),
+                    IRTerm::AuxiliaryVariable(3),
+                ],
             },
         ];
 
-        assert_eq!((lits, IRTerm::AuxiliaryVariable(3)), convert_format_string(case));
+        assert_eq!(
+            (lits, IRTerm::AuxiliaryVariable(3)),
+            convert_format_string(case)
+        );
     }
 }
