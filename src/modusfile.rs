@@ -199,11 +199,12 @@ impl str::FromStr for Literal {
 
 pub mod parser {
     use crate::logic::parser::{literal, literal_identifier, IResult};
+    use crate::logic::Predicate;
 
     use super::*;
 
     use nom::bytes::complete::is_not;
-    use nom::character::complete::multispace0;
+    use nom::character::complete::{multispace0, multispace1};
     use nom::combinator::cut;
     use nom::error::context;
     use nom::multi::{fold_many0, separated_list1};
@@ -232,13 +233,27 @@ pub mod parser {
         literal(modus_term)(i)
     }
 
+    /// Parses `<term> = <term>` into a builtin call, `string_concat("", term1, term2)`.
+    fn unification_sugar(i: &str) -> IResult<&str, Literal> {
+        map(
+            separated_pair(
+                modus_term,
+                delimited(multispace1, tag("="), multispace1),
+                cut(modus_term),
+            ),
+            |(t1, t2)| Literal {
+                predicate: Predicate("string_concat".to_owned()),
+                args: vec![ModusTerm::Constant("".to_owned()), t1, t2],
+            },
+        )(i)
+    }
+
     fn expression_inner(i: &str) -> IResult<&str, Expression> {
         let l_paren_with_comments = |i| terminated(tag("("), comments)(i);
         let r_paren_with_comments = |i| preceded(comments, cut(tag(")")))(i);
 
-        let lit_parser = map(literal(modus_term), |lit| {
-            Expression::Literal(lit)
-        });
+        let lit_parser = map(literal(modus_term), Expression::Literal);
+        let unification_expr_parser = map(unification_sugar, Expression::Literal);
         // These inner expression parsers can fully recurse.
         let op_application_parser = map(
             separated_pair(
@@ -249,7 +264,12 @@ pub mod parser {
             |(expr, operator)| Expression::OperatorApplication(Box::new(expr), operator),
         );
         let parenthesized_expr = delimited(l_paren_with_comments, body, r_paren_with_comments);
-        alt((lit_parser, op_application_parser, parenthesized_expr))(i)
+        alt((
+            unification_expr_parser,
+            lit_parser,
+            op_application_parser,
+            parenthesized_expr,
+        ))(i)
     }
 
     fn body(i: &str) -> IResult<&str, Expression> {
@@ -490,11 +510,7 @@ mod tests {
         };
         let r2 = Rule {
             head: foo,
-            body: Expression::OperatorApplication(
-                Box::new(Expression::Literal(a)),
-                merge,
-            )
-            .into(),
+            body: Expression::OperatorApplication(Box::new(Expression::Literal(a)), merge).into(),
         };
 
         assert_eq!("foo :- ((a, b))::merge.", r1.to_string());
@@ -615,5 +631,16 @@ mod tests {
         assert_eq!(expr_str, expr.to_string());
         let rule = format!("foo :- {}.", expr_str);
         assert_eq!(Ok(Some(expr)), rule.parse().map(|r: ModusClause| r.body));
+    }
+
+    #[test]
+    fn modus_unification() {
+        let inp = "foo(X, Y) :- X = Y.";
+
+        let expected_lit: Literal = "string_concat(\"\", X, Y)".parse().unwrap();
+        assert_eq!(
+            Ok(Some(Expression::Literal(expected_lit))),
+            inp.parse().map(|r: ModusClause| r.body)
+        )
     }
 }
