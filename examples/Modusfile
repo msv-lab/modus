@@ -8,6 +8,7 @@ python(python_version, "ubuntu", distr_version) :-
     # This makes image tags easier to work with.
     (
         # comments are allowed here
-        from(f"ubuntu:${distr_version}"),
+        PARENT_IMAGE = f"ubuntu:${distr_version}",
+        from(PARENT_IMAGE),
         run(f"apt-get install -y python${python_version}")
     )::merge. # comments are allowed here
