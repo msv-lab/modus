@@ -499,6 +499,7 @@ mod tests {
 
         assert_eq!("foo :- ((a, b))::merge.", r1.to_string());
         assert_eq!(Ok(r1.clone()), "foo :- ((a, b))::merge.".parse());
+        assert_eq!(Ok(r1.clone()), "foo :- (a, b)::merge.".parse());
 
         assert_eq!("foo :- (a)::merge.", r2.to_string());
         assert_eq!(Ok(r2.clone()), "foo :- ( a )::merge.".parse());
@@ -506,6 +507,7 @@ mod tests {
 
     #[test]
     fn modusclause_to_clause() {
+        crate::translate::reset_operator_pair_id();
         let foo = Literal {
             predicate: logic::Predicate("foo".into()),
             args: Vec::new(),
@@ -535,11 +537,12 @@ mod tests {
         // Convert to the simpler syntax
         let c: Vec<logic::Clause> = (&r).into();
         assert_eq!(1, c.len());
-        assert_eq!("foo :- a, b", c[0].to_string());
+        assert_eq!(r#"foo :- _operator_merge_begin("0"), a, b, _operator_merge_end("0")"#, c[0].to_string());
     }
 
     #[test]
     fn modusclause_to_clause_with_or() {
+        crate::translate::reset_operator_pair_id();
         let foo: Literal = "foo".parse().unwrap();
         let a: Literal = "a".parse().unwrap();
         let b: Literal = "b".parse().unwrap();
@@ -574,8 +577,8 @@ mod tests {
 
         let c1: Vec<logic::Clause> = (&r1).into();
         assert_eq!(2, c1.len());
-        assert_eq!("foo :- a", c1[0].to_string());
-        assert_eq!("foo :- b", c1[1].to_string());
+        assert_eq!(r#"foo :- _operator_merge_begin("0"), a, _operator_merge_end("0")"#, c1[0].to_string());
+        assert_eq!(r#"foo :- _operator_merge_begin("1"), b, _operator_merge_end("1")"#, c1[1].to_string());
 
         let c2: Vec<logic::Clause> = (&r2).into();
         assert_eq!(2, c2.len());
@@ -615,5 +618,64 @@ mod tests {
         assert_eq!(expr_str, expr.to_string());
         let rule = format!("foo :- {}.", expr_str);
         assert_eq!(Ok(Some(expr)), rule.parse().map(|r: ModusClause| r.body));
+    }
+
+    #[test]
+    fn multiple_clause_with_different_ops() {
+        let foo = Literal {
+            predicate: logic::Predicate("foo".into()),
+            args: vec![ModusTerm::UserVariable("x".to_owned())],
+        };
+        let bar = Literal {
+            predicate: logic::Predicate("bar".into()),
+            args: Vec::new(),
+        };
+        let baz = Literal {
+            predicate: logic::Predicate("baz".into()),
+            args: Vec::new(),
+        };
+        let a = Rule {
+            head: logic::Literal {
+                predicate: logic::Predicate("a".to_owned()),
+                args: vec![],
+            },
+            body: Some(Expression::And(
+                Box::new(Expression::OperatorApplication(
+                    Box::new(Expression::And(Box::new(foo.into()), Box::new(bar.into()))),
+                    Operator {
+                        predicate: logic::Predicate("setenv".into()),
+                        args: vec![
+                            ModusTerm::Constant("a".to_owned()),
+                            ModusTerm::Constant("foobar".to_owned()),
+                        ],
+                    },
+                )),
+                Box::new(Expression::OperatorApplication(
+                    Box::new(baz.into()),
+                    Operator {
+                        predicate: logic::Predicate("setenv".into()),
+                        args: vec![
+                            ModusTerm::Constant("a".to_owned()),
+                            ModusTerm::Constant("baz".to_owned()),
+                        ],
+                    },
+                )),
+            )),
+        };
+        // assert_eq!(&a, &(r#"a:-(foo(x),bar)::setenv("a","foobar"), baz::setenv("a" "baz")."#.parse().unwrap()));
+        // assert_eq!(&a, &(r#"a:-(foo(x),bar)::setenv("a","foobar"), baz()::setenv("a" "baz")."#.parse().unwrap()));
+        assert_eq!(
+            &a,
+            &(r#"a:-(foo(x),bar)::setenv("a","foobar"), (baz)::setenv("a", "baz")."#
+                .parse()
+                .unwrap())
+        );
+        // assert_eq!(
+        //     &a,
+        //     &(r#"a:-(foo(x),bar)::setenv("a","foobar"), (baz())::setenv("a" "baz")."#
+        //         .parse()
+        //         .unwrap())
+        // );
+        // assert_eq!(&a, &(r#"a:-(foo(x),bar)::setenv("a","foobar"), baz::setenv("a" "baz")."#.parse().unwrap()));
     }
 }

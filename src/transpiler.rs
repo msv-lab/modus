@@ -16,18 +16,22 @@
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     str::FromStr,
     sync::atomic::{AtomicU32, Ordering},
 };
 
 use crate::{
     dockerfile::{Dockerfile, Image, Instruction, ResolvedDockerfile, ResolvedParent, Run},
-    logic::{self, Clause},
+    imagegen::{BuildPlan, NodeId},
+    logic::{self, Clause, IRTerm, Literal, Predicate},
     modusfile::Modusfile,
     sld::{self, ClauseId},
 };
 
+use crate::imagegen::BuildNode;
+
+// TODO: remove/rewrite
 pub fn prove_goal(
     mf: &Modusfile,
     goal: &Vec<logic::Literal>,
@@ -50,44 +54,109 @@ pub fn prove_goal(
 
 pub fn transpile(mf: Modusfile, query: logic::Literal) -> Dockerfile<ResolvedParent> {
     let goal = vec![query];
-    let proofs = prove_goal(&mf, &goal).unwrap();
-    assert_eq!(proofs.len(), 1);
-    let proof = proofs.into_iter().next().unwrap();
-    proof_to_docker(proof)
+    let max_depth = 50;
+    let clauses: Vec<Clause> =
+        mf.0.iter()
+            .flat_map(|mc| {
+                let clauses: Vec<Clause> = mc.into();
+                clauses
+            })
+            .collect();
+
+    let res_tree = sld::sld(&clauses, &goal, max_depth).expect("Failed in SLD tree construction.");
+    // TODO: sld::proofs should return the ground query corresponding to each proof.
+    let proofs = sld::proofs(&res_tree, &clauses, &goal);
+    let query_and_proofs = proofs
+        .into_iter()
+        .enumerate()
+        .map(|(i, p)| {
+            (
+                Literal {
+                    predicate: Predicate("_output".to_owned()),
+                    args: vec![IRTerm::Constant(i.to_string())],
+                },
+                p,
+            )
+        })
+        .collect::<Vec<_>>();
+    let build_plan = crate::imagegen::build_dag_from_proofs(&query_and_proofs[..], &clauses);
+    plan_to_docker(&build_plan)
 }
 
-static AVAILABLE_STAGE_INDEX: AtomicU32 = AtomicU32::new(0);
-pub fn new_stage() -> ResolvedParent {
-    ResolvedParent::Stage(format!(
-        "_t{}",
-        AVAILABLE_STAGE_INDEX.fetch_add(1, Ordering::SeqCst)
-    ))
-}
-
-pub fn proof_to_docker(proof: sld::Proof) -> ResolvedDockerfile {
-    let mut instructions = Vec::new();
-    fn dfs(proof: &sld::Proof, instructions: &mut Vec<Instruction<ResolvedParent>>) {
-        match &proof.clause {
-            ClauseId::Builtin(lit) => match &lit.predicate.0[..] {
-                "run" => {
-                    let arg = lit.args[0].as_constant().unwrap();
-                    instructions.push(Instruction::Run(Run(arg.to_owned())));
-                }
-                "from" => {
-                    let arg = lit.args[0].as_constant().unwrap();
-                    instructions.push(Instruction::From(crate::dockerfile::From {
-                        parent: ResolvedParent::Image(Image::from_str(arg).unwrap()),
-                        alias: None,
-                    }));
-                }
-                _ => {}
-            },
-            _ => {}
+fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
+    let mut topological_order = Vec::with_capacity(plan.node.len());
+    let mut seen = HashSet::new();
+    fn dfs(
+        plan: &BuildPlan,
+        node: NodeId,
+        topological_order: &mut Vec<NodeId>,
+        seen: &mut HashSet<NodeId>,
+    ) {
+        if seen.contains(&node) {
+            return;
         }
-        for c in proof.children.iter() {
-            dfs(c, instructions);
+        for &deps in plan.dependencies[node].iter() {
+            dfs(plan, deps, topological_order, seen);
         }
+        topological_order.push(node);
+        seen.insert(node);
     }
-    dfs(&proof, &mut instructions);
-    Dockerfile::<ResolvedParent>(instructions)
+    for output in plan.outputs.iter() {
+        dfs(&plan, output.node, &mut topological_order, &mut seen);
+    }
+
+    let instructions = topological_order
+        .into_iter()
+        .map(|node_id| {
+            use crate::dockerfile::*;
+            let node = &plan.node[node_id];
+            let str_id = format!("n_{}", node_id);
+            match node {
+                BuildNode::From { image_ref } => vec![Instruction::From(From {
+                    parent: ResolvedParent::Image(Image::from_str(image_ref).unwrap()),
+                    alias: Some(str_id),
+                })],
+                BuildNode::Run {
+                    parent,
+                    command,
+                    cwd,
+                } => vec![
+                    Instruction::From(From {
+                        parent: ResolvedParent::Stage(format!("n_{}", parent)),
+                        alias: Some(str_id),
+                    }),
+                    Instruction::Workdir(Workdir(cwd.to_owned())),
+                    Instruction::Run(Run(command.to_owned())),
+                ],
+                BuildNode::CopyFromImage {
+                    parent,
+                    src_image,
+                    src_path,
+                    dst_path,
+                } => vec![
+                    Instruction::From(From {
+                        parent: ResolvedParent::Stage(format!("n_{}", parent)),
+                        alias: Some(str_id),
+                    }),
+                    Instruction::Copy(Copy(format!(
+                        "--from=n_{} {:?} {:?}",
+                        src_image, src_path, dst_path
+                    ))),
+                ],
+                BuildNode::CopyFromLocal {
+                    parent,
+                    src_path,
+                    dst_path,
+                } => vec![
+                    Instruction::From(From {
+                        parent: ResolvedParent::Stage(format!("n_{}", parent)),
+                        alias: Some(str_id),
+                    }),
+                    Instruction::Copy(Copy(format!("{:?} {:?}", src_path, dst_path))),
+                ],
+            }
+        })
+        .flatten()
+        .collect::<Vec<_>>();
+    Dockerfile(instructions)
 }
