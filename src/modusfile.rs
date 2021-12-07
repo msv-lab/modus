@@ -238,7 +238,7 @@ pub mod parser {
         map(
             separated_pair(
                 modus_term,
-                delimited(multispace1, tag("="), multispace1),
+                delimited(multispace0, tag("="), multispace0),
                 cut(modus_term),
             ),
             |(t1, t2)| Literal {
