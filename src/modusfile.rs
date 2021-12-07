@@ -199,11 +199,12 @@ impl str::FromStr for Literal {
 
 pub mod parser {
     use crate::logic::parser::{literal, literal_identifier, IResult};
+    use crate::logic::Predicate;
 
     use super::*;
 
     use nom::bytes::complete::is_not;
-    use nom::character::complete::multispace0;
+    use nom::character::complete::{multispace0, multispace1};
     use nom::combinator::cut;
     use nom::error::context;
     use nom::multi::{fold_many0, separated_list1};
@@ -232,13 +233,27 @@ pub mod parser {
         literal(modus_term)(i)
     }
 
+    /// Parses `<term> = <term>` into a builtin call, `string_concat("", term1, term2)`.
+    fn unification_sugar(i: &str) -> IResult<&str, Literal> {
+        map(
+            separated_pair(
+                modus_term,
+                delimited(multispace0, tag("="), multispace0),
+                cut(modus_term),
+            ),
+            |(t1, t2)| Literal {
+                predicate: Predicate("string_concat".to_owned()),
+                args: vec![ModusTerm::Constant("".to_owned()), t1, t2],
+            },
+        )(i)
+    }
+
     fn expression_inner(i: &str) -> IResult<&str, Expression> {
         let l_paren_with_comments = |i| terminated(tag("("), comments)(i);
         let r_paren_with_comments = |i| preceded(comments, cut(tag(")")))(i);
 
-        let lit_parser = map(literal(modus_term), |lit| {
-            Expression::Literal(lit)
-        });
+        let lit_parser = map(literal(modus_term), Expression::Literal);
+        let unification_expr_parser = map(unification_sugar, Expression::Literal);
         // These inner expression parsers can fully recurse.
         let op_application_parser = map(
             separated_pair(
@@ -249,7 +264,12 @@ pub mod parser {
             |(expr, operator)| Expression::OperatorApplication(Box::new(expr), operator),
         );
         let parenthesized_expr = delimited(l_paren_with_comments, body, r_paren_with_comments);
-        alt((lit_parser, op_application_parser, parenthesized_expr))(i)
+        alt((
+            unification_expr_parser,
+            lit_parser,
+            op_application_parser,
+            parenthesized_expr,
+        ))(i)
     }
 
     fn body(i: &str) -> IResult<&str, Expression> {
@@ -410,6 +430,8 @@ pub mod parser {
 
 #[cfg(test)]
 mod tests {
+    use serial_test::serial;
+
     use super::*;
 
     #[test]
@@ -490,11 +512,7 @@ mod tests {
         };
         let r2 = Rule {
             head: foo,
-            body: Expression::OperatorApplication(
-                Box::new(Expression::Literal(a)),
-                merge,
-            )
-            .into(),
+            body: Expression::OperatorApplication(Box::new(Expression::Literal(a)), merge).into(),
         };
 
         assert_eq!("foo :- ((a, b))::merge.", r1.to_string());
@@ -506,6 +524,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn modusclause_to_clause() {
         crate::translate::reset_operator_pair_id();
         let foo = Literal {
@@ -537,10 +556,14 @@ mod tests {
         // Convert to the simpler syntax
         let c: Vec<logic::Clause> = (&r).into();
         assert_eq!(1, c.len());
-        assert_eq!(r#"foo :- _operator_merge_begin("0"), a, b, _operator_merge_end("0")"#, c[0].to_string());
+        assert_eq!(
+            r#"foo :- _operator_merge_begin("0"), a, b, _operator_merge_end("0")"#,
+            c[0].to_string()
+        );
     }
 
     #[test]
+    #[serial]
     fn modusclause_to_clause_with_or() {
         crate::translate::reset_operator_pair_id();
         let foo: Literal = "foo".parse().unwrap();
@@ -577,8 +600,14 @@ mod tests {
 
         let c1: Vec<logic::Clause> = (&r1).into();
         assert_eq!(2, c1.len());
-        assert_eq!(r#"foo :- _operator_merge_begin("0"), a, _operator_merge_end("0")"#, c1[0].to_string());
-        assert_eq!(r#"foo :- _operator_merge_begin("1"), b, _operator_merge_end("1")"#, c1[1].to_string());
+        assert_eq!(
+            r#"foo :- _operator_merge_begin("0"), a, _operator_merge_end("0")"#,
+            c1[0].to_string()
+        );
+        assert_eq!(
+            r#"foo :- _operator_merge_begin("1"), b, _operator_merge_end("1")"#,
+            c1[1].to_string()
+        );
 
         let c2: Vec<logic::Clause> = (&r2).into();
         assert_eq!(2, c2.len());
@@ -618,6 +647,17 @@ mod tests {
         assert_eq!(expr_str, expr.to_string());
         let rule = format!("foo :- {}.", expr_str);
         assert_eq!(Ok(Some(expr)), rule.parse().map(|r: ModusClause| r.body));
+    }
+
+    #[test]
+    fn modus_unification() {
+        let inp = "foo(X, Y) :- X = Y.";
+
+        let expected_lit: Literal = "string_concat(\"\", X, Y)".parse().unwrap();
+        assert_eq!(
+            Ok(Some(Expression::Literal(expected_lit))),
+            inp.parse().map(|r: ModusClause| r.body)
+        )
     }
 
     #[test]
