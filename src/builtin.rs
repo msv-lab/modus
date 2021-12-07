@@ -17,21 +17,45 @@
 
 use crate::logic::{Clause, IRTerm, Literal, Predicate};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SelectBuiltinResult {
+    Match,
+    GroundnessMismatch,
+    NoMatch,
+}
+
+impl SelectBuiltinResult {
+    pub fn is_match(&self) -> bool {
+        match self {
+            SelectBuiltinResult::Match => true,
+            _ => false,
+        }
+    }
+}
+
 pub trait BuiltinPredicate {
     fn name(&self) -> &'static str;
+
+    /// Return if the argument is allowed to be ungrounded. This means that a "false" here will force a constant.
     fn arg_groundness(&self) -> &'static [bool];
 
-    fn select(&self, lit: &Literal) -> bool {
+    fn select(&self, lit: &Literal) -> SelectBuiltinResult {
         let Literal {
             ref predicate,
             ref args,
         } = lit;
         if &predicate.0 != self.name() {
-            return false;
+            return SelectBuiltinResult::NoMatch;
         }
-        args.iter()
+        if args
+            .iter()
             .zip(self.arg_groundness().into_iter())
             .all(|pair| matches!(pair, (_, true) | (IRTerm::Constant(_), false)))
+        {
+            SelectBuiltinResult::Match
+        } else {
+            SelectBuiltinResult::GroundnessMismatch
+        }
     }
 
     /// Return a new literal specifically constructed to unify with the input
@@ -125,87 +149,76 @@ mod string_concat {
     }
 }
 
-mod run {
-    use crate::logic::{IRTerm, Literal};
+macro_rules! intrinsic_predicate {
+    ($name:ident, $($arg_groundness:expr),*) => {
+        #[allow(non_camel_case_types)]
+        pub struct $name;
+        impl BuiltinPredicate for $name {
+            fn name(&self) -> &'static str {
+                stringify!($name)
+            }
 
-    use super::BuiltinPredicate;
+            fn arg_groundness(&self) -> &'static [bool] {
+                &[$($arg_groundness),*]
+            }
 
-    pub struct Run;
-    impl BuiltinPredicate for Run {
-        fn name(&self) -> &'static str {
-            "run"
-        }
-
-        fn arg_groundness(&self) -> &'static [bool] {
-            &[false]
-        }
-
-        fn apply(&self, lit: &Literal) -> Option<Literal> {
-            let l = (*lit).clone();
-            match lit.args[0] {
-                // it's valid as long as we're given a constant
-                IRTerm::Constant(_) => Some(l),
-                _ => None,
+            fn apply(&self, lit: &Literal) -> Option<Literal> {
+                Some(lit.clone())
             }
         }
-    }
-}
-
-mod from {
-    use crate::logic::{IRTerm, Literal};
-
-    use super::BuiltinPredicate;
-
-    pub struct From;
-    impl BuiltinPredicate for From {
-        fn name(&self) -> &'static str {
-            "from"
-        }
-
-        fn arg_groundness(&self) -> &'static [bool] {
-            &[false]
-        }
-
-        fn apply(&self, lit: &Literal) -> Option<Literal> {
-            let l = (*lit).clone();
-            match lit.args[0] {
-                // it's valid as long as we're given a constant
-                IRTerm::Constant(_) => Some(l),
-                _ => None,
-            }
-        }
-    }
-}
-
-/// Convenience macro that returns Some(b) for the first b that can be selected.
-macro_rules! select_builtins {
-    ( $lit:expr, $x1:expr, $( $x:expr ),* ) => {
-        if $x1.select($lit) {
-            return Some(&$x1);
-        }
-        $(
-            else if $x.select($lit) {
-                return Some(&$x);
-            }
-        )*
     };
 }
 
-pub fn select_builtin<'a>(lit: &Literal) -> Option<&'a dyn BuiltinPredicate> {
+intrinsic_predicate!(run, false);
+intrinsic_predicate!(from, false);
+intrinsic_predicate!(_operator_copy_begin, false, false, false);
+intrinsic_predicate!(_operator_copy_end, false, false, false);
+intrinsic_predicate!(_operator_workdir_begin, false, false);
+intrinsic_predicate!(_operator_workdir_end, false, false);
+intrinsic_predicate!(copy, false, false);
+
+/// Convenience macro that returns Some(b) for the first b that can be selected.
+macro_rules! select_builtins {
+    ( $lit:expr, $( $x:expr ),+ ) => {{
+        let mut has_ground_mismatch = false;
+        $(
+            match $x.select($lit) {
+                SelectBuiltinResult::Match => return (SelectBuiltinResult::Match, Some(&$x)),
+                SelectBuiltinResult::GroundnessMismatch => {
+                    has_ground_mismatch = true;
+                },
+                _ => {}
+            }
+        );+
+        if has_ground_mismatch {
+            return (SelectBuiltinResult::GroundnessMismatch, None);
+        } else {
+            return (SelectBuiltinResult::NoMatch, None);
+        }
+    }};
+}
+
+pub fn select_builtin<'a>(
+    lit: &Literal,
+) -> (SelectBuiltinResult, Option<&'a dyn BuiltinPredicate>) {
     select_builtins!(
         lit,
         string_concat::StringConcat1,
         string_concat::StringConcat2,
         string_concat::StringConcat3,
-        run::Run,
-        from::From
-    );
-    None
+        run,
+        from,
+        _operator_copy_begin,
+        _operator_copy_end,
+        _operator_workdir_begin,
+        _operator_workdir_end,
+        copy
+    )
 }
 
 #[cfg(test)]
 mod test {
-    use crate::logic::IRTerm;
+    use crate::{builtin::SelectBuiltinResult, logic::IRTerm};
 
     #[test]
     pub fn test_select() {
@@ -216,8 +229,8 @@ mod test {
             args: vec![IRTerm::Constant("hello".to_owned())],
         };
         let b = super::select_builtin(&lit);
-        assert!(b.is_some());
-        let b = b.unwrap();
+        assert!(b.0.is_match());
+        let b = b.1.unwrap();
         assert_eq!(b.name(), "run");
         assert_eq!(b.apply(&lit), Some(lit));
 
@@ -230,8 +243,8 @@ mod test {
             ],
         };
         let b = super::select_builtin(&lit);
-        assert!(b.is_some());
-        let b = b.unwrap();
+        assert!(b.0.is_match());
+        let b = b.1.unwrap();
         assert_eq!(b.name(), "string_concat");
         assert_eq!(
             b.apply(&lit),
@@ -250,7 +263,7 @@ mod test {
             args: vec![IRTerm::Constant("hello".to_owned())],
         };
         let b = super::select_builtin(&lit);
-        assert!(b.is_none());
+        assert_eq!(b.0, SelectBuiltinResult::NoMatch);
     }
 
     #[test]
