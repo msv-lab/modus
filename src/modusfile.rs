@@ -430,6 +430,8 @@ pub mod parser {
 
 #[cfg(test)]
 mod tests {
+    use serial_test::serial;
+
     use super::*;
 
     #[test]
@@ -522,6 +524,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn modusclause_to_clause() {
         crate::translate::reset_operator_pair_id();
         let foo = Literal {
@@ -557,6 +560,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn modusclause_to_clause_with_or() {
         crate::translate::reset_operator_pair_id();
         let foo: Literal = "foo".parse().unwrap();
