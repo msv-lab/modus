@@ -556,7 +556,10 @@ mod tests {
         // Convert to the simpler syntax
         let c: Vec<logic::Clause> = (&r).into();
         assert_eq!(1, c.len());
-        assert_eq!(r#"foo :- _operator_merge_begin("0"), a, b, _operator_merge_end("0")"#, c[0].to_string());
+        assert_eq!(
+            r#"foo :- _operator_merge_begin("0"), a, b, _operator_merge_end("0")"#,
+            c[0].to_string()
+        );
     }
 
     #[test]
@@ -597,8 +600,14 @@ mod tests {
 
         let c1: Vec<logic::Clause> = (&r1).into();
         assert_eq!(2, c1.len());
-        assert_eq!(r#"foo :- _operator_merge_begin("0"), a, _operator_merge_end("0")"#, c1[0].to_string());
-        assert_eq!(r#"foo :- _operator_merge_begin("1"), b, _operator_merge_end("1")"#, c1[1].to_string());
+        assert_eq!(
+            r#"foo :- _operator_merge_begin("0"), a, _operator_merge_end("0")"#,
+            c1[0].to_string()
+        );
+        assert_eq!(
+            r#"foo :- _operator_merge_begin("1"), b, _operator_merge_end("1")"#,
+            c1[1].to_string()
+        );
 
         let c2: Vec<logic::Clause> = (&r2).into();
         assert_eq!(2, c2.len());
