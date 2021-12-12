@@ -230,7 +230,7 @@ pub mod parser {
     }
 
     fn head(i: &str) -> IResult<&str, Literal> {
-        literal(modus_term)(i)
+        context(stringify!(head), literal(modus_term))(i)
     }
 
     /// Parses `<term> = <term>` into a builtin call, `string_concat("", term1, term2)`.
@@ -300,23 +300,29 @@ pub mod parser {
     fn fact(i: &str) -> IResult<&str, ModusClause> {
         // Custom definition of fact since datalog facts are normally "head :- ", but Moduslog
         // defines it as "head."
-        map(terminated(head, tag(".")), |h| ModusClause {
-            head: h,
-            body: None,
-        })(i)
+        context(
+            stringify!(fact),
+            map(terminated(head, tag(".")), |h| ModusClause {
+                head: h,
+                body: None,
+            }),
+        )(i)
     }
 
     fn rule(i: &str) -> IResult<&str, ModusClause> {
-        map(
-            separated_pair(
-                head,
-                delimited(space0, tag(":-"), multispace0),
-                cut(terminated(body, tag("."))),
+        context(
+            stringify!(rule),
+            map(
+                separated_pair(
+                    head,
+                    delimited(space0, tag(":-"), multispace0),
+                    context("rule_body", cut(terminated(body, tag(".")))),
+                ),
+                |(head, body)| ModusClause {
+                    head,
+                    body: Some(body),
+                },
             ),
-            |(head, body)| ModusClause {
-                head,
-                body: Some(body),
-            },
         )(i)
     }
 
@@ -374,7 +380,10 @@ pub mod parser {
     }
 
     pub fn modus_const(i: &str) -> IResult<&str, String> {
-        delimited(tag("\""), string_content, cut(tag("\"")))(i)
+        context(
+            stringify!(modus_const),
+            delimited(tag("\""), string_content, cut(tag("\""))),
+        )(i)
     }
 
     /// Parses a substring outside of the expansion part of a format string's content.
@@ -391,7 +400,10 @@ pub mod parser {
     fn modus_format_string(i: &str) -> IResult<&str, String> {
         // TODO: check that the token(s) inside "${...}" conform to the variable syntax.
         // Note that if it's escaped, "\${...}", it does not need to conform to the variable syntax.
-        delimited(tag("f\""), string_content, cut(tag("\"")))(i)
+        context(
+            stringify!(modus_format_string),
+            delimited(tag("f\""), string_content, cut(tag("\""))),
+        )(i)
     }
 
     pub fn variable_identifier(i: &str) -> IResult<&str, &str> {
@@ -399,7 +411,7 @@ pub mod parser {
     }
 
     pub fn modus_var(i: &str) -> IResult<&str, &str> {
-        variable_identifier(i)
+        context(stringify!(modus_var), variable_identifier)(i)
     }
 
     pub fn modus_term(i: &str) -> IResult<&str, ModusTerm> {
@@ -411,7 +423,7 @@ pub mod parser {
     }
 
     pub fn modus_clause(i: &str) -> IResult<&str, ModusClause> {
-        context("modus_clause", alt((fact, rule)))(i)
+        alt((fact, rule))(i)
     }
 
     pub fn modusfile(i: &str) -> IResult<&str, Modusfile> {
