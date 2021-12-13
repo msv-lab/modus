@@ -35,8 +35,8 @@ fn convert_format_string(format_string_content: &str) -> (Vec<logic::Literal>, I
     let concat_predicate = "string_concat";
     let mut curr_string = format_string_content;
     let mut prev_variable: IRTerm = Auxiliary::aux();
-    let mut new_literals = vec![logic::Literal {
-        // this initial literal is a no-op that makes the code simpler
+    let mut new_literals = vec![logic::Literal { // this initial literal is a no-op that makes the code simpler
+        position: None,
         predicate: logic::Predicate(concat_predicate.to_owned()),
         args: vec![
             IRTerm::Constant("".to_owned()),
@@ -54,6 +54,7 @@ fn convert_format_string(format_string_content: &str) -> (Vec<logic::Literal>, I
         let constant_str = constant_str.replace("\\$", "$");
         let new_var: IRTerm = Auxiliary::aux();
         let new_literal = logic::Literal {
+            position: None,
             predicate: logic::Predicate(concat_predicate.to_string()),
             args: vec![
                 prev_variable,
@@ -69,6 +70,7 @@ fn convert_format_string(format_string_content: &str) -> (Vec<logic::Literal>, I
         if let Ok((rest, variable)) = variable_res {
             let new_var: IRTerm = Auxiliary::aux();
             let new_literal = logic::Literal {
+                position: None,
                 predicate: logic::Predicate(concat_predicate.to_string()),
                 args: vec![
                     prev_variable,
@@ -127,6 +129,7 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                     literals.extend_from_slice(&new_literals);
                 }
                 literals.push(logic::Literal {
+                    position: l.position,
                     predicate: l.predicate.clone(),
                     args: new_literal_args,
                 });
@@ -152,11 +155,13 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                         t
                     }));
                     body.push(logic::Literal {
+                        position: op.position,
                         predicate: Predicate(format!("_operator_{}_begin", &op.predicate.0)),
                         args: op_args.clone(),
                     });
                     body.extend_from_slice(&c.body);
                     body.push(logic::Literal {
+                        position: None,
                         predicate: Predicate(format!("_operator_{}_end", &op.predicate.0)),
                         args: op_args,
                     });
@@ -235,6 +240,7 @@ mod tests {
 
         let lits = vec![
             logic::Literal {
+                position: None,
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::Constant("".to_owned()),
@@ -243,6 +249,7 @@ mod tests {
                 ],
             },
             logic::Literal {
+                position: None,
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(0),
@@ -251,6 +258,7 @@ mod tests {
                 ],
             },
             logic::Literal {
+                position: None,
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(1),
@@ -275,6 +283,7 @@ mod tests {
 
         let lits = vec![
             logic::Literal {
+                position: None,
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::Constant("".to_owned()),
@@ -283,6 +292,7 @@ mod tests {
                 ],
             },
             logic::Literal {
+                position: None,
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(0),
@@ -291,6 +301,7 @@ mod tests {
                 ],
             },
             logic::Literal {
+                position: None,
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(1),
@@ -299,6 +310,7 @@ mod tests {
                 ],
             },
             logic::Literal {
+                position: None,
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(2),

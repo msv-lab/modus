@@ -20,12 +20,15 @@
 //! Currently, these structures are generic, parameterized over the types they may use for constants
 //! or variables.
 
+use nom_locate::LocatedSpan;
+
 use crate::unification::Rename;
 use crate::{modusfile, sld};
 
 use std::convert::TryInto;
 use std::fmt;
 use std::fmt::{Debug, Display};
+use std::rc::Rc;
 use std::str;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::{collections::HashSet, hash::Hash};
@@ -90,8 +93,23 @@ impl IRTerm {
     }
 }
 
+// Uses a String instead of a str since it appears easier to get it `as_bytes`.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+struct SpanSource(Rc<String>);
+
+// AsBytes is needed to be used as the T in LocatedSpan<T>
+impl nom::AsBytes for SpanSource {
+    fn as_bytes(&self) -> &[u8] {
+        let s: String = *self.0;
+        return s.as_bytes();
+    }
+}
+
+pub type Span = LocatedSpan<SpanSource>;
+
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Literal<T = IRTerm> {
+    pub position: Option<Span>,
     pub predicate: Predicate,
     pub args: Vec<T>,
 }
@@ -299,6 +317,7 @@ pub mod parser {
     where
         FT: FnMut(&str) -> IResult<&str, T>,
     {
+        // FIXME
         map(
             pair(
                 literal_identifier,
@@ -346,14 +365,17 @@ mod tests {
         let va = IRTerm::UserVariable("A".into());
         let vb = IRTerm::UserVariable("B".into());
         let l1 = Literal {
+            position: None,
             predicate: Predicate("l1".into()),
             args: vec![va.clone(), vb.clone()],
         };
         let l2 = Literal {
+            position: None,
             predicate: Predicate("l2".into()),
             args: vec![va.clone(), c.clone()],
         };
         let l3 = Literal {
+            position: None,
             predicate: Predicate("l3".into()),
             args: vec![vb.clone(), c.clone()],
         };
@@ -369,10 +391,12 @@ mod tests {
     fn nullary_predicate() {
         let va = IRTerm::UserVariable("A".into());
         let l1 = Literal {
+            position: None,
             predicate: Predicate("l1".into()),
             args: Vec::new(),
         };
         let l2 = Literal {
+            position: None,
             predicate: Predicate("l2".into()),
             args: vec![va.clone()],
         };

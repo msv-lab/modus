@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 nom = { version = "7" }
+nom_locate = "4.0.0"
 clap = "2.33.3"
 lazy_static = "1.4.0"
 fp-core = "0.1.9"

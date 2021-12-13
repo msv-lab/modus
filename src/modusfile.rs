@@ -99,6 +99,7 @@ type Literal = logic::Literal<ModusTerm>;
 impl From<Literal> for logic::Literal {
     fn from(modus_literal: Literal) -> Self {
         Self {
+            position: modus_literal.position,
             predicate: modus_literal.predicate,
             args: modus_literal
                 .args
@@ -235,6 +236,7 @@ pub mod parser {
 
     /// Parses `<term> = <term>` into a builtin call, `string_concat("", term1, term2)`.
     fn unification_sugar(i: &str) -> IResult<&str, Literal> {
+        // FIXME
         map(
             separated_pair(
                 modus_term,
@@ -449,6 +451,7 @@ mod tests {
     #[test]
     fn fact() {
         let l1 = Literal {
+            position: None,
             predicate: logic::Predicate("l1".into()),
             args: Vec::new(),
         };
@@ -463,14 +466,17 @@ mod tests {
     #[test]
     fn rule() {
         let l1 = Literal {
+            position: None,
             predicate: logic::Predicate("l1".into()),
             args: Vec::new(),
         };
         let l2 = Literal {
+            position: None,
             predicate: logic::Predicate("l2".into()),
             args: Vec::new(),
         };
         let l3 = Literal {
+            position: None,
             predicate: logic::Predicate("l3".into()),
             args: Vec::new(),
         };
@@ -499,18 +505,22 @@ mod tests {
     #[test]
     fn rule_with_operator() {
         let foo = Literal {
+            position: None,
             predicate: logic::Predicate("foo".into()),
             args: Vec::new(),
         };
         let a = Literal {
+            position: None,
             predicate: logic::Predicate("a".into()),
             args: Vec::new(),
         };
         let b = Literal {
+            position: None,
             predicate: logic::Predicate("b".into()),
             args: Vec::new(),
         };
         let merge = Operator {
+            position: None,
             predicate: logic::Predicate("merge".into()),
             args: Vec::new(),
         };
@@ -540,18 +550,22 @@ mod tests {
     fn modusclause_to_clause() {
         crate::translate::reset_operator_pair_id();
         let foo = Literal {
+            position: None,
             predicate: logic::Predicate("foo".into()),
             args: Vec::new(),
         };
         let a = Literal {
+            position: None,
             predicate: logic::Predicate("a".into()),
             args: Vec::new(),
         };
         let b = Literal {
+            position: None,
             predicate: logic::Predicate("b".into()),
             args: Vec::new(),
         };
         let merge = Operator {
+            position: None,
             predicate: logic::Predicate("merge".into()),
             args: Vec::new(),
         };
@@ -582,6 +596,7 @@ mod tests {
         let a: Literal = "a".parse().unwrap();
         let b: Literal = "b".parse().unwrap();
         let merge = Operator {
+            position: None,
             predicate: logic::Predicate("merge".into()),
             args: Vec::new(),
         };
@@ -675,19 +690,23 @@ mod tests {
     #[test]
     fn multiple_clause_with_different_ops() {
         let foo = Literal {
+            position: None,
             predicate: logic::Predicate("foo".into()),
             args: vec![ModusTerm::UserVariable("x".to_owned())],
         };
         let bar = Literal {
+            position: None,
             predicate: logic::Predicate("bar".into()),
             args: Vec::new(),
         };
         let baz = Literal {
+            position: None,
             predicate: logic::Predicate("baz".into()),
             args: Vec::new(),
         };
         let a = Rule {
             head: logic::Literal {
+                position: None,
                 predicate: logic::Predicate("a".to_owned()),
                 args: vec![],
             },
@@ -695,6 +714,7 @@ mod tests {
                 Box::new(Expression::OperatorApplication(
                     Box::new(Expression::And(Box::new(foo.into()), Box::new(bar.into()))),
                     Operator {
+                        position: None,
                         predicate: logic::Predicate("setenv".into()),
                         args: vec![
                             ModusTerm::Constant("a".to_owned()),
@@ -705,6 +725,7 @@ mod tests {
                 Box::new(Expression::OperatorApplication(
                     Box::new(baz.into()),
                     Operator {
+                        position: None,
                         predicate: logic::Predicate("setenv".into()),
                         args: vec![
                             ModusTerm::Constant("a".to_owned()),

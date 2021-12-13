@@ -72,6 +72,7 @@ pub fn transpile(mf: Modusfile, query: logic::Literal) -> Dockerfile<ResolvedPar
         .map(|(i, p)| {
             (
                 Literal {
+                    position: None,
                     predicate: Predicate("_output".to_owned()),
                     args: vec![IRTerm::Constant(i.to_string())],
                 },
