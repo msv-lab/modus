@@ -32,10 +32,10 @@ use crate::{
 use crate::imagegen::BuildNode;
 
 // TODO: remove/rewrite
-pub fn prove_goal(
-    mf: &Modusfile,
-    goal: &Vec<logic::Literal>,
-) -> Result<Vec<sld::Proof>, &'static str> {
+pub fn prove_goal<'a>(
+    mf: &'a Modusfile,
+    goal: &'a Vec<logic::Literal>,
+) -> Result<Vec<sld::Proof<'a>>, &'static str> {
     let max_depth = 20;
     let clauses: Vec<Clause> =
         mf.0.iter()

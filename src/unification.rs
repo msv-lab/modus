@@ -72,8 +72,8 @@ impl RenameWithSubstitution<IRTerm> for IRTerm {
     }
 }
 
-impl Substitute<IRTerm> for Literal<IRTerm> {
-    type Output = Literal;
+impl<'a> Substitute<IRTerm> for Literal<'a, IRTerm> {
+    type Output = Literal<'a, IRTerm>;
     fn substitute(&self, s: &Substitution<IRTerm>) -> Self::Output {
         Literal {
             position: self.position,
@@ -83,8 +83,8 @@ impl Substitute<IRTerm> for Literal<IRTerm> {
     }
 }
 
-impl RenameWithSubstitution<IRTerm> for Literal<IRTerm> {
-    type Output = Literal<IRTerm>;
+impl<'a> RenameWithSubstitution<IRTerm> for Literal<'a, IRTerm> {
+    type Output = Literal<'a, IRTerm>;
     fn rename_with_sub(&self) -> (Self::Output, Substitution<IRTerm>) {
         let s: Substitution = self
             .variables()
@@ -104,15 +104,15 @@ impl RenameWithSubstitution<IRTerm> for Literal<IRTerm> {
     }
 }
 
-impl Substitute<IRTerm> for Vec<Literal<IRTerm>> {
-    type Output = Vec<Literal<IRTerm>>;
+impl<'a> Substitute<IRTerm> for Vec<Literal<'a, IRTerm>> {
+    type Output = Vec<Literal<'a, IRTerm>>;
     fn substitute(&self, s: &Substitution<IRTerm>) -> Self::Output {
         self.iter().map(|l| l.substitute(s)).collect()
     }
 }
 
-impl RenameWithSubstitution<IRTerm> for Vec<Literal<IRTerm>> {
-    type Output = Vec<Literal<IRTerm>>;
+impl<'a> RenameWithSubstitution<IRTerm> for Vec<Literal<'a, IRTerm>> {
+    type Output = Vec<Literal<'a, IRTerm>>;
     fn rename_with_sub(&self) -> (Self::Output, Substitution<IRTerm>) {
         let s: Substitution<IRTerm> = self
             .iter()
@@ -132,8 +132,8 @@ impl RenameWithSubstitution<IRTerm> for Vec<Literal<IRTerm>> {
     }
 }
 
-impl Substitute<IRTerm> for Clause<IRTerm> {
-    type Output = Clause<IRTerm>;
+impl<'a> Substitute<IRTerm> for Clause<'a, IRTerm> {
+    type Output = Clause<'a, IRTerm>;
     fn substitute(&self, s: &Substitution<IRTerm>) -> Self::Output {
         Clause {
             head: self.head.substitute(s),
@@ -142,8 +142,8 @@ impl Substitute<IRTerm> for Clause<IRTerm> {
     }
 }
 
-impl RenameWithSubstitution<IRTerm> for Clause<IRTerm> {
-    type Output = Clause<IRTerm>;
+impl<'a> RenameWithSubstitution<IRTerm> for Clause<'a, IRTerm> {
+    type Output = Clause<'a, IRTerm>;
     fn rename_with_sub(&self) -> (Self::Output, Substitution<IRTerm>) {
         let s: Substitution<IRTerm> = self
             .variables()
@@ -180,7 +180,7 @@ pub fn compose_extend(l: &Substitution<IRTerm>, r: &Substitution<IRTerm>) -> Sub
     result
 }
 
-impl Literal<IRTerm> {
+impl Literal<'_, IRTerm> {
     pub fn unify(&self, other: &Literal<IRTerm>) -> Option<Substitution<IRTerm>> {
         if self.signature() != other.signature() {
             return None;

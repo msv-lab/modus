@@ -6,14 +6,14 @@ use crate::sld::{ClauseId, Proof};
 use crate::unification::Substitute;
 
 #[derive(Debug, Clone)]
-pub struct BuildPlan {
+pub struct BuildPlan<'a> {
     pub node: Vec<BuildNode>,
     pub dependencies: Vec<Vec<NodeId>>,
-    pub outputs: Vec<Output>,
+    pub outputs: Vec<Output<'a>>,
 }
 
-impl BuildPlan {
-    pub fn new() -> BuildPlan {
+impl<'a> BuildPlan<'a> {
+    pub fn new() -> BuildPlan<'a> {
         BuildPlan {
             node: Vec::new(),
             dependencies: Vec::new(),
@@ -66,17 +66,17 @@ pub enum BuildNode {
 }
 
 #[derive(Debug, Clone)]
-pub struct Output {
+pub struct Output<'a> {
     pub node: NodeId,
-    pub query: Literal,
+    pub query: Literal<'a>,
 }
 
 /// Given a list of pairs of ground (solved) queries and their proof tree, output
 /// a build graph which builds all the queried images.
-pub fn build_dag_from_proofs(
-    query_and_proofs: &[(Literal, Proof)],
-    rules: &Vec<Clause<IRTerm>>,
-) -> BuildPlan {
+pub fn build_dag_from_proofs<'a>(
+    query_and_proofs: &'a [(Literal, Proof)],
+    rules: &'a Vec<Clause<IRTerm>>,
+) -> BuildPlan<'a> {
     let mut res = BuildPlan::new();
     let mut image_literals: HashMap<Literal, NodeId> = HashMap::new();
 
@@ -89,11 +89,11 @@ pub fn build_dag_from_proofs(
     /// an image, for example because there is no call to any intrinsic. It
     /// should, however, report an error if there is no `from` but there is a
     /// `run`.
-    fn process_image(
-        subtree: &[&Proof],
-        rules: &Vec<Clause<IRTerm>>,
+    fn process_image<'a>(
+        subtree: &[&'a Proof],
+        rules: &Vec<Clause<'a, IRTerm>>,
         res: &mut BuildPlan,
-        image_literals: &mut HashMap<Literal, NodeId>,
+        image_literals: &mut HashMap<Literal<'a>, NodeId>,
     ) -> Option<NodeId> {
         let mut last_node = None;
         let mut curr_state = State {
@@ -118,12 +118,12 @@ pub fn build_dag_from_proofs(
          * built from going into that literal into the image_literals store, to
          * be re-used later.
          */
-        fn process_tree(
-            proof: &Proof,
+        fn process_tree<'a>(
+            proof: &'a Proof,
             last_node: &mut Option<NodeId>,
-            rules: &Vec<Clause<IRTerm>>,
+            rules: &Vec<Clause<'a, IRTerm>>,
             res: &mut BuildPlan,
-            image_literals: &mut HashMap<Literal, NodeId>,
+            image_literals: &mut HashMap<Literal<'a>, NodeId>,
             curr_state: &mut State,
         ) {
             match proof.clause {
@@ -177,12 +177,12 @@ pub fn build_dag_from_proofs(
             );
         }
 
-        fn process_intrinsic(
-            intrinsic: &Literal,
+        fn process_intrinsic<'a>(
+            intrinsic: &'a Literal,
             last_node: &mut Option<NodeId>,
-            rules: &Vec<Clause<IRTerm>>,
+            rules: &Vec<Clause<'a, IRTerm>>,
             res: &mut BuildPlan,
-            image_literals: &mut HashMap<Literal, NodeId>,
+            image_literals: &mut HashMap<Literal<'a>, NodeId>,
             curr_state: &mut State,
         ) {
             let name = &intrinsic.predicate.0[..];
@@ -245,12 +245,12 @@ pub fn build_dag_from_proofs(
             }
         }
 
-        fn process_children(
-            children: &[&Proof],
+        fn process_children<'a>(
+            children: &[&'a Proof],
             last_node: &mut Option<NodeId>,
-            rules: &Vec<Clause<IRTerm>>,
+            rules: &Vec<Clause<'a, IRTerm>>,
             res: &mut BuildPlan,
-            image_literals: &mut HashMap<Literal, NodeId>,
+            image_literals: &mut HashMap<Literal<'a>, NodeId>,
             curr_state: &mut State,
         ) {
             let mut i = 0usize;
