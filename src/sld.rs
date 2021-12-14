@@ -156,7 +156,7 @@ pub fn sld<'a>(
 
     fn resolve<'a>(
         lid: LiteralGoalId,
-        rid: ClauseId,
+        rid: ClauseId<'a>,
         goal: &'a GoalWithHistory,
         mgu: &'a Substitution,
         rule: &'a Clause,
@@ -478,19 +478,21 @@ pub fn proofs<'a>(tree: &'a Tree, rules: &'a Vec<Clause>, goal: &'a Goal) -> Vec
 
 #[cfg(test)]
 mod tests {
+    use std::convert::TryInto;
+
     use super::*;
 
     #[test]
     fn simple_solving() {
-        let goal: Goal<logic::IRTerm> = vec!["a(X)".parse().unwrap()];
+        let goal: Goal<logic::IRTerm> = vec!["a(X)".try_into().unwrap()];
         let clauses: Vec<logic::Clause> = vec![
-            "a(X) :- b(X).".parse().unwrap(),
+            "a(X) :- b(X).".try_into().unwrap(),
             logic::Clause {
-                head: "b(\"c\")".parse().unwrap(),
+                head: "b(\"c\")".try_into().unwrap(),
                 body: vec![],
             },
             logic::Clause {
-                head: "b(\"d\")".parse().unwrap(),
+                head: "b(\"d\")".try_into().unwrap(),
                 body: vec![],
             },
         ];
@@ -498,29 +500,29 @@ mod tests {
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 2);
-        assert!(solutions.contains(&vec!["a(\"c\")".parse::<logic::Literal>().unwrap()]));
-        assert!(solutions.contains(&vec!["a(\"d\")".parse::<logic::Literal>().unwrap()]));
+        assert!(solutions.contains(&vec!["a(\"c\")".try_into().unwrap()]));
+        assert!(solutions.contains(&vec!["a(\"d\")".try_into().unwrap()]));
     }
 
     #[test]
     fn simple_nongrounded() {
-        let goal: Goal<logic::IRTerm> = vec!["a(\"b\")".parse().unwrap()];
+        let goal: Goal<logic::IRTerm> = vec!["a(\"b\")".try_into().unwrap()];
         let clauses: Vec<logic::Clause> = vec![logic::Clause {
-            head: "a(X)".parse().unwrap(),
+            head: "a(X)".try_into().unwrap(),
             body: vec![],
         }];
         let result = sld(&clauses, &goal, 10);
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 1);
-        assert!(solutions.contains(&vec!["a(\"b\")".parse::<logic::Literal>().unwrap()]));
+        assert!(solutions.contains(&vec!["a(\"b\")".try_into().unwrap()]));
     }
 
     #[test]
     fn simple_nongrounded_invalid() {
-        let goal: Goal<logic::IRTerm> = vec!["a(X)".parse().unwrap()];
+        let goal: Goal<logic::IRTerm> = vec!["a(X)".try_into().unwrap()];
         let clauses: Vec<logic::Clause> = vec![logic::Clause {
-            head: "a(X)".parse().unwrap(),
+            head: "a(X)".try_into().unwrap(),
             body: vec![],
         }];
         let result = sld(&clauses, &goal, 10);
@@ -529,22 +531,22 @@ mod tests {
 
     #[test]
     fn complex_goal() {
-        let goal: Goal<logic::IRTerm> = vec!["a(X)".parse().unwrap(), "b(X)".parse().unwrap()];
+        let goal: Goal<logic::IRTerm> = vec!["a(X)".try_into().unwrap(), "b(X)".try_into().unwrap()];
         let clauses: Vec<logic::Clause> = vec![
             logic::Clause {
-                head: "a(\"t\")".parse().unwrap(),
+                head: "a(\"t\")".try_into().unwrap(),
                 body: vec![],
             },
             logic::Clause {
-                head: "a(\"f\")".parse().unwrap(),
+                head: "a(\"f\")".try_into().unwrap(),
                 body: vec![],
             },
             logic::Clause {
-                head: "b(\"g\")".parse().unwrap(),
+                head: "b(\"g\")".try_into().unwrap(),
                 body: vec![],
             },
             logic::Clause {
-                head: "b(\"t\")".parse().unwrap(),
+                head: "b(\"t\")".try_into().unwrap(),
                 body: vec![],
             },
         ];
@@ -553,30 +555,30 @@ mod tests {
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 1);
         assert!(solutions.contains(&vec![
-            "a(\"t\")".parse().unwrap(),
-            "b(\"t\")".parse().unwrap()
+            "a(\"t\")".try_into().unwrap(),
+            "b(\"t\")".try_into().unwrap()
         ]));
     }
 
     #[test]
     fn solving_with_binary_relations() {
-        let goal: Goal<logic::IRTerm> = vec!["a(X)".parse().unwrap()];
+        let goal: Goal<logic::IRTerm> = vec!["a(X)".try_into().unwrap()];
         let clauses: Vec<logic::Clause> = vec![
-            "a(X) :- b(X, Y), c(Y).".parse().unwrap(),
+            "a(X) :- b(X, Y), c(Y).".try_into().unwrap(),
             logic::Clause {
-                head: "b(\"t\", \"f\")".parse().unwrap(),
+                head: "b(\"t\", \"f\")".try_into().unwrap(),
                 body: vec![],
             },
             logic::Clause {
-                head: "b(\"f\", \"t\")".parse().unwrap(),
+                head: "b(\"f\", \"t\")".try_into().unwrap(),
                 body: vec![],
             },
             logic::Clause {
-                head: "b(\"g\", \"t\")".parse().unwrap(),
+                head: "b(\"g\", \"t\")".try_into().unwrap(),
                 body: vec![],
             },
             logic::Clause {
-                head: "c(\"t\")".parse().unwrap(),
+                head: "c(\"t\")".try_into().unwrap(),
                 body: vec![],
             },
         ];
@@ -584,42 +586,42 @@ mod tests {
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 2);
-        assert!(solutions.contains(&vec!["a(\"f\")".parse().unwrap()]));
-        assert!(solutions.contains(&vec!["a(\"g\")".parse().unwrap()]));
+        assert!(solutions.contains(&vec!["a(\"f\")".try_into().unwrap()]));
+        assert!(solutions.contains(&vec!["a(\"g\")".try_into().unwrap()]));
     }
 
     #[test]
     fn simple_recursion() {
-        let goal: Goal<logic::IRTerm> = vec!["reach(\"a\", X)".parse().unwrap()];
+        let goal: Goal<logic::IRTerm> = vec!["reach(\"a\", X)".try_into().unwrap()];
         let clauses: Vec<logic::Clause> = vec![
-            "reach(X, Y) :- reach(X, Z), arc(Z, Y).".parse().unwrap(),
-            "reach(X, Y) :- arc(X, Y).".parse().unwrap(),
+            "reach(X, Y) :- reach(X, Z), arc(Z, Y).".try_into().unwrap(),
+            "reach(X, Y) :- arc(X, Y).".try_into().unwrap(),
             logic::Clause {
-                head: "arc(\"a\", \"b\")".parse().unwrap(),
+                head: "arc(\"a\", \"b\")".try_into().unwrap(),
                 body: vec![],
             },
             logic::Clause {
-                head: "arc(\"b\", \"c\")".parse().unwrap(),
+                head: "arc(\"b\", \"c\")".try_into().unwrap(),
                 body: vec![],
             },
             logic::Clause {
-                head: "arc(\"c\", \"d\")".parse().unwrap(),
+                head: "arc(\"c\", \"d\")".try_into().unwrap(),
                 body: vec![],
             },
             logic::Clause {
-                head: "arc(\"d\", \"e\")".parse().unwrap(),
+                head: "arc(\"d\", \"e\")".try_into().unwrap(),
                 body: vec![],
             },
             logic::Clause {
-                head: "arc(\"f\", \"e\")".parse().unwrap(),
+                head: "arc(\"f\", \"e\")".try_into().unwrap(),
                 body: vec![],
             },
             logic::Clause {
-                head: "arc(\"g\", \"f\")".parse().unwrap(),
+                head: "arc(\"g\", \"f\")".try_into().unwrap(),
                 body: vec![],
             },
             logic::Clause {
-                head: "arc(\"g\", \"a\")".parse().unwrap(),
+                head: "arc(\"g\", \"a\")".try_into().unwrap(),
                 body: vec![],
             },
         ];
@@ -627,16 +629,16 @@ mod tests {
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 4);
-        assert!(solutions.contains(&vec!["reach(\"a\", \"b\")".parse().unwrap()]));
-        assert!(solutions.contains(&vec!["reach(\"a\", \"c\")".parse().unwrap()]));
-        assert!(solutions.contains(&vec!["reach(\"a\", \"d\")".parse().unwrap()]));
-        assert!(solutions.contains(&vec!["reach(\"a\", \"e\")".parse().unwrap()]));
+        assert!(solutions.contains(&vec!["reach(\"a\", \"b\")".try_into().unwrap()]));
+        assert!(solutions.contains(&vec!["reach(\"a\", \"c\")".try_into().unwrap()]));
+        assert!(solutions.contains(&vec!["reach(\"a\", \"d\")".try_into().unwrap()]));
+        assert!(solutions.contains(&vec!["reach(\"a\", \"e\")".try_into().unwrap()]));
     }
 
     #[test]
     fn string_concat() {
         let goal: Goal<logic::IRTerm> =
-            vec!["string_concat(\"hello\", \"world\", X)".parse().unwrap()];
+            vec!["string_concat(\"hello\", \"world\", X)".try_into().unwrap()];
         let clauses: Vec<logic::Clause> = vec![];
         let result = sld(&clauses, &goal, 10);
         assert!(result.is_some());
@@ -644,7 +646,7 @@ mod tests {
         assert_eq!(solutions.len(), 1);
         assert!(
             solutions.contains(&vec!["string_concat(\"hello\", \"world\", \"helloworld\")"
-                .parse()
+                .try_into()
                 .unwrap()])
         );
     }
@@ -659,14 +661,14 @@ mod tests {
             .map(|x| (*x, true))
             .chain(bad.iter().map(|x| (*x, false)))
         {
-            let goal: Goal<logic::IRTerm> = vec![format!("a(\"{}\")", s).parse().unwrap()];
+            let goal: Goal<logic::IRTerm> = vec![format!("a(\"{}\")", s).as_str().try_into().unwrap()];
             let clauses: Vec<logic::Clause> = vec![
                 logic::Clause {
-                    head: "a(\"ab\")".parse().unwrap(),
+                    head: "a(\"ab\")".try_into().unwrap(),
                     body: vec![],
                 },
                 "a(S) :- string_concat(\"a\", X, S), string_concat(Y, \"b\", X), a(Y)"
-                    .parse()
+                    .try_into()
                     .unwrap(),
             ];
             let result = sld(&clauses, &goal, 50);
@@ -674,7 +676,7 @@ mod tests {
                 assert!(result.is_some());
                 let solutions = solutions(&result.unwrap());
                 assert_eq!(solutions.len(), 1);
-                assert!(solutions.contains(&vec![format!("a(\"{}\")", s).parse().unwrap()]));
+                assert!(solutions.contains(&vec![format!("a(\"{}\")", s).as_str().try_into().unwrap()]));
             } else {
                 assert!(result.is_none());
             }

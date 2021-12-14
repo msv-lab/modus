@@ -33,12 +33,12 @@ extern crate fp_core;
 
 use clap::{crate_version, App, Arg};
 use colored::Colorize;
-use std::fs;
+use std::{convert::{TryFrom, TryInto}, fs};
 
 use dockerfile::ResolvedDockerfile;
 use modusfile::Modusfile;
 
-use crate::transpiler::prove_goal;
+use crate::{modusfile::ModusClause, transpiler::prove_goal};
 
 fn main() {
     let matches = App::new("modus")
@@ -92,10 +92,10 @@ fn main() {
     match matches.subcommand() {
         ("transpile", Some(sub)) => {
             let input_file = sub.value_of("FILE").unwrap();
-            let query: logic::Literal = sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
+            let query: logic::Literal = sub.value_of("QUERY").map(|s| s.try_into().unwrap()).unwrap();
 
             let file_content = fs::read_to_string(input_file).unwrap();
-            let mf: Modusfile = file_content.parse().unwrap();
+            let mf: Modusfile = file_content.as_str().try_into().unwrap();
 
             let df: ResolvedDockerfile = transpiler::transpile(mf, query);
 
@@ -103,10 +103,11 @@ fn main() {
         }
         ("proof", Some(sub)) => {
             let input_file = sub.value_of("FILE").unwrap();
-            let query: Option<logic::Literal> = sub.value_of("QUERY").map(|l| l.parse().unwrap());
+            let query: Option<logic::Literal> = sub.value_of("QUERY").map(|l| l.into());
 
             let file_content = fs::read_to_string(input_file).unwrap();
-            match (file_content.parse::<Modusfile>(), query) {
+            let mf_res = Modusfile::try_from(file_content.as_str());
+            match (mf_res, query) {
                 (Ok(modus_f), None) => println!(
                     "Parsed {} successfully. Found {} clauses.",
                     input_file,

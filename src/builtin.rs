@@ -72,16 +72,21 @@ pub trait BuiltinPredicate {
     /// Renaming will not be done on this literal, so if variables are needed
     /// they must all be either auxillary or some existing variables from the
     /// input.
-    fn apply(&self, lit: &Literal) -> Option<Literal>;
+    fn apply<'a>(&self, lit: &'a Literal) -> Option<Literal<'a>>;
 }
 
 mod string_concat {
     use super::BuiltinPredicate;
     use crate::logic::{IRTerm, Literal, Predicate, Span};
 
-    fn string_concat_result(a: &str, b: &str, c: &str, pos: Option<Span>) -> Option<Literal> {
+    fn string_concat_result<'a, 'b>(
+        a: &'b str,
+        b: &'b str,
+        c: &'b str,
+        pos: Option<Span<'a>>,
+    ) -> Option<Literal<'a>> {
         Some(Literal {
-            position: pos,
+            position: pos.to_owned(),
             predicate: Predicate("string_concat".to_owned()),
             args: vec![
                 IRTerm::Constant(a.to_owned()),
@@ -101,7 +106,7 @@ mod string_concat {
             &[false, false, true]
         }
 
-        fn apply(&self, lit: &Literal) -> Option<Literal> {
+        fn apply<'a>(&self, lit: &'a Literal) -> Option<Literal<'a>> {
             let a = lit.args[0].as_constant()?;
             let b = lit.args[1].as_constant()?;
             let c = a.to_owned() + b;
@@ -118,7 +123,7 @@ mod string_concat {
         fn arg_groundness(&self) -> &'static [bool] {
             &[true, false, false]
         }
-        fn apply(&self, lit: &Literal) -> Option<Literal> {
+        fn apply<'a>(&self, lit: &'a Literal) -> Option<Literal<'a>> {
             let b = lit.args[1].as_constant()?;
             let c = lit.args[2].as_constant()?;
             if let Some(a) = c.strip_suffix(&b) {
@@ -139,7 +144,7 @@ mod string_concat {
             &[false, true, false]
         }
 
-        fn apply(&self, lit: &Literal) -> Option<Literal> {
+        fn apply<'a>(&self, lit: &'a Literal) -> Option<Literal<'a>> {
             let a = lit.args[0].as_constant()?;
             let c = lit.args[2].as_constant()?;
             if let Some(b) = c.strip_prefix(&a) {
@@ -164,7 +169,7 @@ macro_rules! intrinsic_predicate {
                 &[$($arg_groundness),*]
             }
 
-            fn apply(&self, lit: &Literal) -> Option<Literal> {
+            fn apply<'a>(&self, lit: &'a Literal) -> Option<Literal<'a>> {
                 Some(lit.clone())
             }
         }

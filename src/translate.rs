@@ -19,14 +19,10 @@ use std::sync::atomic::AtomicUsize;
 
 use nom::{bytes::streaming::tag, sequence::delimited};
 
-use crate::{
-    logic::{self, IRTerm, Predicate},
-    modusfile::{
+use crate::{logic::{self, IRTerm, Predicate, Span}, modusfile::{
         parser::{modus_var, outside_format_expansion},
         Expression, ModusClause, ModusTerm,
-    },
-    sld::Auxiliary,
-};
+    }, sld::Auxiliary};
 
 /// Takes the content of a format string.
 /// Returns an IRTerm to be used instead of the format string term, and a list of literals
@@ -35,7 +31,8 @@ fn convert_format_string(format_string_content: &str) -> (Vec<logic::Literal>, I
     let concat_predicate = "string_concat";
     let mut curr_string = format_string_content;
     let mut prev_variable: IRTerm = Auxiliary::aux();
-    let mut new_literals = vec![logic::Literal { // this initial literal is a no-op that makes the code simpler
+    let mut new_literals = vec![logic::Literal {
+        // this initial literal is a no-op that makes the code simpler
         position: None,
         predicate: logic::Predicate(concat_predicate.to_owned()),
         args: vec![
@@ -49,8 +46,9 @@ fn convert_format_string(format_string_content: &str) -> (Vec<logic::Literal>, I
     // if the last var we created was R1 and we just parsed some (constant) string c, we
     // add a literal `string_concat(R1, c, R2)`, creating a new variable R2.
     while !curr_string.is_empty() {
+        let temp_span = Span::new(curr_string);
         let (i, constant_str) =
-            outside_format_expansion(curr_string).expect("can parse outside format expansion");
+            outside_format_expansion(temp_span).expect("can parse outside format expansion");
         let constant_str = constant_str.replace("\\$", "$");
         let new_var: IRTerm = Auxiliary::aux();
         let new_literal = logic::Literal {
@@ -74,13 +72,13 @@ fn convert_format_string(format_string_content: &str) -> (Vec<logic::Literal>, I
                 predicate: logic::Predicate(concat_predicate.to_string()),
                 args: vec![
                     prev_variable,
-                    IRTerm::UserVariable(variable.to_owned()),
+                    IRTerm::UserVariable(variable.fragment().to_string()),
                     new_var.clone(),
                 ],
             };
             new_literals.push(new_literal);
             prev_variable = new_var;
-            curr_string = rest;
+            curr_string = &rest;
         } else {
             curr_string = "";
         }
@@ -111,10 +109,10 @@ fn translate_term(t: &ModusTerm) -> (IRTerm, Vec<logic::Literal>) {
     }
 }
 
-impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
+impl<'a> From<&'a crate::modusfile::ModusClause<'a>> for Vec<logic::Clause<'a>> {
     /// Convert a ModusClause into one supported by the IR.
     /// It converts logical or/; into multiple rules, which should be equivalent.
-    fn from(modus_clause: &crate::modusfile::ModusClause) -> Self {
+    fn from(modus_clause: &'a crate::modusfile::ModusClause) -> Self {
         let mut clauses: Vec<logic::Clause> = Vec::new();
 
         // REVIEW: lots of cloning going on below, double check if this is necessary.

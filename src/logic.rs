@@ -93,23 +93,11 @@ impl IRTerm {
     }
 }
 
-// Uses a String instead of a str since it appears easier to get it `as_bytes`.
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-struct SpanSource(Rc<String>);
-
-// AsBytes is needed to be used as the T in LocatedSpan<T>
-impl nom::AsBytes for SpanSource {
-    fn as_bytes(&self) -> &[u8] {
-        let s: String = *self.0;
-        return s.as_bytes();
-    }
-}
-
-pub type Span = LocatedSpan<SpanSource>;
+pub type Span<'a> = LocatedSpan<&'a str>;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct Literal<T = IRTerm> {
-    pub position: Option<Span>,
+pub struct Literal<'a, T = IRTerm> {
+    pub position: Option<Span<'a>>,
     pub predicate: Predicate,
     pub args: Vec<T>,
 }
@@ -118,9 +106,9 @@ pub struct Literal<T = IRTerm> {
 pub struct Signature(pub Predicate, pub u32);
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Clause<T = IRTerm> {
-    pub head: Literal<T>,
-    pub body: Vec<Literal<T>>,
+pub struct Clause<'a, T = IRTerm> {
+    pub head: Literal<'a, T>,
+    pub body: Vec<Literal<'a, T>>,
 }
 
 pub trait Ground {
@@ -139,7 +127,7 @@ impl IRTerm {
     }
 }
 
-impl Literal {
+impl Literal<'_> {
     pub fn signature(&self) -> Signature {
         Signature(self.predicate.clone(), self.args.len().try_into().unwrap())
     }
@@ -155,7 +143,7 @@ impl Literal {
     }
 }
 
-impl Clause {
+impl Clause<'_> {
     pub fn variables(&self) -> HashSet<IRTerm> {
         let mut body = self
             .body
@@ -181,13 +169,13 @@ impl Ground for IRTerm {
     }
 }
 
-impl Ground for Literal {
+impl Ground for Literal<'_> {
     fn is_ground(&self) -> bool {
         self.variables().is_empty()
     }
 }
 
-impl Ground for Clause {
+impl Ground for Clause<'_> {
     fn is_ground(&self) -> bool {
         self.variables().is_empty()
     }
@@ -213,7 +201,7 @@ fn display_sep<T: fmt::Display>(seq: &[T], sep: &str) -> String {
         .join(sep);
 }
 
-impl fmt::Display for Literal {
+impl fmt::Display for Literal<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &*self.args {
             [] => write!(f, "{}", self.predicate),
@@ -222,30 +210,30 @@ impl fmt::Display for Literal {
     }
 }
 
-impl fmt::Display for Clause {
+impl fmt::Display for Clause<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} :- {}", self.head, display_sep(&self.body, ", "))
     }
 }
 
-impl str::FromStr for Clause {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match parser::clause(parser::term)(s) {
-            Result::Ok((_, o)) => Ok(o),
-            Result::Err(e) => Result::Err(format!("{}", e)),
+// Parses the string into a type that depends on the lifetime of the input string,
+// so we can't use FromStr.
+impl<'a> From<&'a str> for Clause<'a> {
+    fn from(s: &'a str) -> Self {
+        let span = Span::new(s);
+        match parser::clause(parser::term)(span) {
+            Result::Ok((_, o)) => o,
+            Result::Err(e) => panic!("Couldn't convert string to clause: {}", e),
         }
     }
 }
 
-impl str::FromStr for Literal {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match parser::literal(parser::term)(s) {
-            Result::Ok((_, o)) => Ok(o),
-            Result::Err(e) => Result::Err(format!("{}", e)),
+impl<'a> From<&'a str> for Literal<'a> {
+    fn from(s: &'a str) -> Self {
+        let span = Span::new(s);
+        match parser::literal(parser::term)(span) {
+            Result::Ok((_, o)) => o,
+            Result::Err(e) => panic!("Couldn't convert string to literal: {}", e),
         }
     }
 }
@@ -258,54 +246,41 @@ pub mod parser {
     use nom::{
         branch::alt,
         bytes::complete::{is_not, tag},
-        character::complete::{alpha1, alphanumeric1, one_of},
+        character::complete::{alpha1, alphanumeric1, one_of, space0},
         combinator::{map, opt, recognize, value},
         error::VerboseError,
         multi::{many0, separated_list0, separated_list1},
         sequence::{delimited, pair, preceded, separated_pair, terminated},
     };
+    use nom_locate::position;
 
     /// Redeclaration that uses VerboseError instead of the default nom::Error.
     pub type IResult<T, O> = nom::IResult<T, O, VerboseError<T>>;
 
-    fn space(i: &str) -> IResult<&str, ()> {
-        value(
-            (), // Output is thrown away.
-            one_of(" \t"),
-        )(i)
-    }
-
-    fn optional_space(i: &str) -> IResult<&str, ()> {
-        value(
-            (), // Output is thrown away.
-            many0(space),
-        )(i)
-    }
-
-    fn ws<'a, F: 'a, O>(inner: F) -> impl FnMut(&'a str) -> IResult<&'a str, O>
+    fn ws<'a, F: 'a, O>(inner: F) -> impl FnMut(Span<'a>) -> IResult<Span<'a>, O>
     where
-        F: FnMut(&'a str) -> IResult<&'a str, O>,
+        F: FnMut(Span<'a>) -> IResult<Span<'a>, O>,
     {
-        delimited(optional_space, inner, optional_space)
+        delimited(space0, inner, space0)
     }
 
-    fn constant(i: &str) -> IResult<&str, &str> {
+    fn constant(i: Span) -> IResult<Span, Span> {
         delimited(tag("\""), is_not("\""), tag("\""))(i)
     }
 
-    fn variable(i: &str) -> IResult<&str, &str> {
+    fn variable(i: Span) -> IResult<Span, Span> {
         literal_identifier(i)
     }
 
-    pub fn term(i: &str) -> IResult<&str, IRTerm> {
+    pub fn term(i: Span) -> IResult<Span, IRTerm> {
         alt((
-            map(constant, |s| IRTerm::Constant(s.to_owned())),
-            map(variable, |s| IRTerm::UserVariable(s.to_owned())),
+            map(constant, |s| IRTerm::Constant(s.fragment().to_string())),
+            map(variable, |s| IRTerm::UserVariable(s.fragment().to_string())),
         ))(i)
     }
 
     //TODO: I need to think more carefully how to connect this to stage name
-    pub fn literal_identifier(i: &str) -> IResult<&str, &str> {
+    pub fn literal_identifier(i: Span) -> IResult<Span, Span> {
         recognize(pair(
             alpha1,
             many0(alt((alphanumeric1, tag("_"), tag("-")))),
@@ -313,36 +288,44 @@ pub mod parser {
     }
 
     /// Parses a literal with a generic term type.
-    pub fn literal<'a, FT: 'a, T>(term: FT) -> impl FnMut(&'a str) -> IResult<&'a str, Literal<T>>
+    pub fn literal<'a, FT: 'a, T>(term: FT) -> impl FnMut(Span) -> IResult<Span, Literal<T>>
     where
-        FT: FnMut(&str) -> IResult<&str, T>,
+        FT: FnMut(Span) -> IResult<Span, T> + Clone,
     {
-        // FIXME
-        map(
-            pair(
-                literal_identifier,
-                opt(delimited(
-                    terminated(tag("("), optional_space),
-                    separated_list1(ws(tag(",")), term),
-                    preceded(optional_space, tag(")")),
-                )),
-            ),
-            |(name, args)| match args {
-                Some(args) => Literal {
-                    predicate: Predicate(name.into()),
-                    args,
+        move |i| {
+            let (i, pos) = position(i)?;
+
+            let x = map(
+                pair(
+                    literal_identifier,
+                    opt(delimited(
+                        terminated(tag("("), space0),
+                        separated_list1(ws(tag(",")), term.clone()),
+                        preceded(space0, tag(")")),
+                    )),
+                ),
+                |(name, args)| match args {
+                    Some(args) => Literal {
+                        position: Some(pos),
+                        predicate: Predicate(name.fragment().to_string()),
+                        args,
+                    },
+                    None => Literal {
+                        position: Some(pos),
+                        predicate: Predicate(name.fragment().to_string()),
+                        args: Vec::new(),
+                    },
                 },
-                None => Literal {
-                    predicate: Predicate(name.into()),
-                    args: Vec::new(),
-                },
-            },
-        )
+            )(i);
+            x
+        }
     }
 
-    pub fn clause<'a, FT: 'a, T>(term: FT) -> impl FnMut(&'a str) -> IResult<&'a str, Clause<T>>
+    pub fn clause<'a, FT: 'a, T>(
+        term: FT,
+    ) -> impl FnMut(Span<'a>) -> IResult<Span<'a>, Clause<'a, T>>
     where
-        FT: FnMut(&str) -> IResult<&str, T> + Clone,
+        FT: FnMut(Span) -> IResult<Span, T> + Clone,
     {
         map(
             separated_pair(
@@ -384,7 +367,7 @@ mod tests {
             body: vec![l2, l3],
         };
         assert_eq!("l1(A, B) :- l2(A, \"c\"), l3(B, \"c\")", r.to_string());
-        assert_eq!(Ok(r), "l1(A, B) :- l2(A, \"c\"), l3(B, \"c\")".parse());
+        assert_eq!(r, "l1(A, B) :- l2(A, \"c\"), l3(B, \"c\")".into());
     }
 
     #[test]
@@ -405,6 +388,6 @@ mod tests {
             body: vec![l2],
         };
         assert_eq!("l1 :- l2(A)", r.to_string());
-        assert_eq!(Ok(r), "l1 :- l2(A)".parse());
+        assert_eq!(r, "l1 :- l2(A)".into());
     }
 }
