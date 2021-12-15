@@ -1,13 +1,17 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use crate::logic::{Clause, IRTerm, Literal, Predicate};
-use crate::sld::{ClauseId, Proof};
+use crate::modusfile::Modusfile;
+use crate::sld::{self, ClauseId, Proof};
 use crate::unification::Substitute;
 
-#[derive(Debug, Clone)]
+use serde::{Deserialize, Serialize};
+
+/// A build plan, designed to be easy to translate to buildkit and Dockerfile.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildPlan {
-    pub node: Vec<BuildNode>,
+    pub nodes: Vec<BuildNode>,
     pub dependencies: Vec<Vec<NodeId>>,
     pub outputs: Vec<Output>,
 }
@@ -15,18 +19,44 @@ pub struct BuildPlan {
 impl BuildPlan {
     pub fn new() -> BuildPlan {
         BuildPlan {
-            node: Vec::new(),
+            nodes: Vec::new(),
             dependencies: Vec::new(),
             outputs: Vec::new(),
         }
     }
 
     pub fn new_node(&mut self, node: BuildNode, deps: Vec<NodeId>) -> NodeId {
-        let id = self.node.len();
-        self.node.push(node);
+        let id = self.nodes.len();
+        self.nodes.push(node);
         self.dependencies.push(deps);
-        debug_assert_eq!(self.node.len(), self.dependencies.len());
+        debug_assert_eq!(self.nodes.len(), self.dependencies.len());
         id
+    }
+
+    /// Return an ordering of nodes in which dependencies of a node comes before
+    /// the node itself.
+    pub fn topological_order(&self) -> Vec<NodeId> {
+        let mut topological_order = Vec::with_capacity(self.nodes.len());
+        let mut seen = vec![false; self.nodes.len()];
+        fn dfs(
+            plan: &BuildPlan,
+            node: NodeId,
+            topological_order: &mut Vec<NodeId>,
+            seen: &mut Vec<bool>,
+        ) {
+            if seen[node] {
+                return;
+            }
+            for &deps in plan.dependencies[node].iter() {
+                dfs(plan, deps, topological_order, seen);
+            }
+            topological_order.push(node);
+            seen[node] = true;
+        }
+        for output in self.outputs.iter() {
+            dfs(&self, output.node, &mut topological_order, &mut seen);
+        }
+        topological_order
     }
 }
 
@@ -41,8 +71,19 @@ pub type NodeId = usize;
 ///
 /// Think of it as one line of a Dockerfile, or one node in the buildkit graph.
 ///
+/// ## Paths
+///
+/// All the paths in this structure can either be absolute or relative path. In
+/// the case of relative paths, they are relative to the working
+/// directory of the parent image (as stored in the image config). Translators from
+/// this to e.g. buildkit LLB should resolve the paths as necessary.
+///
+/// In the case of copy, src_path and dst_path should be resolved relative to
+/// the source image's workdir and the destination (parent) image's workdir,
+/// respectively.
+///
 /// TODO: add caching control
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BuildNode {
     From {
         image_ref: String,
@@ -65,10 +106,10 @@ pub enum BuildNode {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Output {
     pub node: NodeId,
-    pub query: Literal,
+    pub query_index: usize,
 }
 
 /// Given a list of pairs of ground (solved) queries and their proof tree, output
@@ -97,7 +138,7 @@ pub fn build_dag_from_proofs(
     ) -> Option<NodeId> {
         let mut last_node = None;
         let mut curr_state = State {
-            cwd: "/".to_string(),
+            cwd: "".to_string(),
         };
 
         /* We go through the proof tree in depth-first order, since this is
@@ -339,13 +380,13 @@ pub fn build_dag_from_proofs(
         last_node
     }
 
-    for (query, proof) in query_and_proofs {
+    for (i, (query, proof)) in query_and_proofs.into_iter().enumerate() {
         debug_assert!(query.args.iter().all(|x| x.as_constant().is_some()));
         if let Some(&existing_node_id) = image_literals.get(&query) {
             // TODO: unreachable?
             res.outputs.push(Output {
                 node: existing_node_id,
-                query: query.clone(),
+                query_index: i,
             });
             continue;
         }
@@ -353,7 +394,7 @@ pub fn build_dag_from_proofs(
             image_literals.insert(query.clone(), node_id);
             res.outputs.push(Output {
                 node: node_id,
-                query: query.clone(),
+                query_index: i,
             });
         } else {
             panic!("{} does not resolve to any docker instructions.", query);
@@ -361,4 +402,34 @@ pub fn build_dag_from_proofs(
     }
 
     res
+}
+
+pub fn plan_from_modusfile(mf: Modusfile, query: Literal) -> BuildPlan {
+    let goal = vec![query];
+    let max_depth = 50;
+    let clauses: Vec<Clause> =
+        mf.0.iter()
+            .flat_map(|mc| {
+                let clauses: Vec<Clause> = mc.into();
+                clauses
+            })
+            .collect();
+
+    let res_tree = sld::sld(&clauses, &goal, max_depth).expect("Failed in SLD tree construction.");
+    // TODO: sld::proofs should return the ground query corresponding to each proof.
+    let proofs = sld::proofs(&res_tree, &clauses, &goal);
+    let query_and_proofs = proofs
+        .into_iter()
+        .enumerate()
+        .map(|(i, p)| {
+            (
+                Literal {
+                    predicate: Predicate("_output".to_owned()),
+                    args: vec![IRTerm::Constant(i.to_string())],
+                },
+                p,
+            )
+        })
+        .collect::<Vec<_>>();
+    build_dag_from_proofs(&query_and_proofs[..], &clauses)
 }

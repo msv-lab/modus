@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
+mod buildkit;
 mod builtin;
 mod dockerfile;
 mod imagegen;
@@ -74,6 +75,21 @@ fn main() {
                 ),
         )
         .subcommand(
+            App::new("build")
+                .arg(
+                    Arg::with_name("FILE")
+                        .required(true)
+                        .help("Sets the input Modusfile")
+                        .index(1),
+                )
+                .arg(
+                    Arg::with_name("QUERY")
+                        .required(true)
+                        .help("Specifies the build target(s)")
+                        .index(2),
+                ),
+        )
+        .subcommand(
             App::new("proof")
                 .arg(
                     Arg::with_name("FILE")
@@ -100,6 +116,14 @@ fn main() {
             let df: ResolvedDockerfile = transpiler::transpile(mf, query);
 
             println!("{}", df);
+        }
+        ("build", Some(sub)) => {
+            let input_file = sub.value_of("FILE").unwrap();
+            let query: logic::Literal = sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
+
+            let file_content = fs::read_to_string(input_file).unwrap();
+            let mf: Modusfile = file_content.parse().unwrap();
+            buildkit::build_modusfile(mf, query);
         }
         ("proof", Some(sub)) => {
             let input_file = sub.value_of("FILE").unwrap();

@@ -23,7 +23,7 @@ use std::{
 
 use crate::{
     dockerfile::{Dockerfile, Image, Instruction, ResolvedDockerfile, ResolvedParent, Run},
-    imagegen::{BuildPlan, NodeId},
+    imagegen::{self, BuildPlan, NodeId},
     logic::{self, Clause, IRTerm, Literal, Predicate},
     modusfile::Modusfile,
     sld::{self, ClauseId},
@@ -53,63 +53,18 @@ pub fn prove_goal(
 }
 
 pub fn transpile(mf: Modusfile, query: logic::Literal) -> Dockerfile<ResolvedParent> {
-    let goal = vec![query];
-    let max_depth = 50;
-    let clauses: Vec<Clause> =
-        mf.0.iter()
-            .flat_map(|mc| {
-                let clauses: Vec<Clause> = mc.into();
-                clauses
-            })
-            .collect();
-
-    let res_tree = sld::sld(&clauses, &goal, max_depth).expect("Failed in SLD tree construction.");
-    // TODO: sld::proofs should return the ground query corresponding to each proof.
-    let proofs = sld::proofs(&res_tree, &clauses, &goal);
-    let query_and_proofs = proofs
-        .into_iter()
-        .enumerate()
-        .map(|(i, p)| {
-            (
-                Literal {
-                    predicate: Predicate("_output".to_owned()),
-                    args: vec![IRTerm::Constant(i.to_string())],
-                },
-                p,
-            )
-        })
-        .collect::<Vec<_>>();
-    let build_plan = crate::imagegen::build_dag_from_proofs(&query_and_proofs[..], &clauses);
+    let build_plan = imagegen::plan_from_modusfile(mf, query);
     plan_to_docker(&build_plan)
 }
 
 fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
-    let mut topological_order = Vec::with_capacity(plan.node.len());
-    let mut seen = HashSet::new();
-    fn dfs(
-        plan: &BuildPlan,
-        node: NodeId,
-        topological_order: &mut Vec<NodeId>,
-        seen: &mut HashSet<NodeId>,
-    ) {
-        if seen.contains(&node) {
-            return;
-        }
-        for &deps in plan.dependencies[node].iter() {
-            dfs(plan, deps, topological_order, seen);
-        }
-        topological_order.push(node);
-        seen.insert(node);
-    }
-    for output in plan.outputs.iter() {
-        dfs(&plan, output.node, &mut topological_order, &mut seen);
-    }
+    let topological_order = plan.topological_order();
 
-    let instructions = topological_order
+    let mut instructions = topological_order
         .into_iter()
         .map(|node_id| {
             use crate::dockerfile::*;
-            let node = &plan.node[node_id];
+            let node = &plan.nodes[node_id];
             let str_id = format!("n_{}", node_id);
             match node {
                 BuildNode::From { image_ref } => vec![Instruction::From(From {
@@ -125,8 +80,11 @@ fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
                         parent: ResolvedParent::Stage(format!("n_{}", parent)),
                         alias: Some(str_id),
                     }),
-                    Instruction::Workdir(Workdir(cwd.to_owned())),
-                    Instruction::Run(Run(command.to_owned())),
+                    Instruction::Run(Run(if cwd.is_empty() {
+                        command.to_owned()
+                    } else {
+                        format!("cd {:?} || exit 1; {}", cwd, command)
+                    })),
                 ],
                 BuildNode::CopyFromImage {
                     parent,
@@ -139,7 +97,7 @@ fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
                         alias: Some(str_id),
                     }),
                     Instruction::Copy(Copy(format!(
-                        "--from=n_{} {:?} {:?}",
+                        "--from=n_{} {:?} {:?}", // TODO: is this really correct?
                         src_image, src_path, dst_path
                     ))),
                 ],
@@ -158,5 +116,22 @@ fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
         })
         .flatten()
         .collect::<Vec<_>>();
+
+    if plan.outputs.len() > 1 {
+        use crate::dockerfile::{From, Run};
+        instructions.push(Instruction::From(From {
+            parent: ResolvedParent::Stage("busybox".to_owned()),
+            alias: Some("force_multioutput".to_owned()),
+        }));
+
+        for o in plan.outputs.iter() {
+            let k = format!("n_{}", o.node);
+            instructions.push(Instruction::Run(Run(format!(
+                "--mount=type=bind,from={},source=/,target=/mnt true",
+                k,
+            ))));
+        }
+    }
+
     Dockerfile(instructions)
 }
