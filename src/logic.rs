@@ -98,7 +98,7 @@ impl IRTerm {
 pub mod source_span {
     use std::{ops::{Range, RangeFrom, RangeTo}, rc::Rc};
 
-    use nom::{InputIter, InputTake, Needed, Slice};
+    use nom::{InputIter, InputLength, InputTake, Needed, Slice};
     use nom_locate::LocatedSpan;
     use owned_chars::{OwnedCharIndices, OwnedChars, OwnedCharsExt};
 
@@ -139,6 +139,12 @@ pub mod source_span {
         }
     }
 
+    impl nom::InputLength for SourceSpanType {
+        fn input_len(&self) -> usize {
+            self.0.len()
+        }
+    }
+
     impl nom::InputTakeAtPosition for SourceSpanType {
         type Item = char;
 
@@ -158,7 +164,11 @@ pub mod source_span {
         ) -> nom::IResult<Self, Self, E>
         where
             P: Fn(Self::Item) -> bool {
-            todo!()
+            match self.position(predicate) {
+                Some(0) => Err(nom::Err::Error(E::from_error_kind(self.clone(), e))),
+                Some(n) => Ok(self.take_split(n)),
+                None => Err(nom::Err::Incomplete(nom::Needed::new(1))),
+            }
         }
 
         fn split_at_position_complete<P, E: nom::error::ParseError<Self>>(
@@ -167,7 +177,10 @@ pub mod source_span {
         ) -> nom::IResult<Self, Self, E>
         where
             P: Fn(Self::Item) -> bool {
-            todo!()
+            match self.split_at_position(predicate) {
+                Err(nom::Err::Incomplete(_)) => Ok(self.take_split(self.input_len())),
+                res => res,
+            }
         }
 
         fn split_at_position1_complete<P, E: nom::error::ParseError<Self>>(
@@ -177,13 +190,17 @@ pub mod source_span {
         ) -> nom::IResult<Self, Self, E>
         where
             P: Fn(Self::Item) -> bool {
-            todo!()
-        }
-    }
-
-    impl nom::InputLength for SourceSpanType {
-        fn input_len(&self) -> usize {
-            self.0.len()
+            match self.position(predicate) {
+                Some(0) => Err(nom::Err::Error(E::from_error_kind(self.clone(), e))),
+                Some(n) => Ok(self.take_split(n)),
+                None => {
+                    if self.input_len() == 0 {
+                        Err(nom::Err::Error(E::from_error_kind(self.clone(), e)))
+                    } else {
+                        Ok(self.take_split(self.input_len()))
+                    }
+                }
+            }
         }
     }
 
