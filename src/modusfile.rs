@@ -23,6 +23,7 @@ use std::str;
 
 use crate::dockerfile;
 use crate::logic;
+use crate::logic::source_span::Span;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Expression {
@@ -99,6 +100,7 @@ type Literal = logic::Literal<ModusTerm>;
 impl From<Literal> for logic::Literal {
     fn from(modus_literal: Literal) -> Self {
         Self {
+            position: modus_literal.position,
             predicate: modus_literal.predicate,
             args: modus_literal
                 .args
@@ -129,10 +131,13 @@ impl str::FromStr for Modusfile {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match parser::modusfile(s) {
+        let span = Span::new(s.into());
+        match parser::modusfile(span) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(nom::Err::Error(e) | nom::Err::Failure(e)) => {
-                Result::Err(convert_error(s, e))
+                // FIXME: VerboseError with span?
+                // The span needs to be able to be deref'd to str.
+                todo!("Result::Err(convert_error(s, e))")
             }
             _ => unimplemented!(),
         }
@@ -169,7 +174,8 @@ impl str::FromStr for ModusClause {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match parser::modus_clause(s) {
+        let span = Span::new(s.into());
+        match parser::modus_clause(span) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
@@ -190,7 +196,8 @@ impl str::FromStr for Literal {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match logic::parser::literal(parser::modus_term)(s) {
+        let span = Span::new(s.into());
+        match logic::parser::literal(parser::modus_term)(span) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
@@ -203,8 +210,8 @@ pub mod parser {
 
     use super::*;
 
-    use nom::bytes::complete::is_not;
-    use nom::character::complete::{multispace0, multispace1};
+    use nom::bytes::complete::{escaped, is_not};
+    use nom::character::complete::{multispace0, multispace1, none_of, one_of};
     use nom::combinator::cut;
     use nom::error::context;
     use nom::multi::{fold_many0, separated_list1};
@@ -216,12 +223,13 @@ pub mod parser {
         multi::{many0, separated_list0},
         sequence::{delimited, preceded, separated_pair, terminated},
     };
+    use nom_locate::position;
 
-    fn comment(s: &str) -> IResult<&str, &str> {
+    fn comment(s: Span) -> IResult<Span, Span> {
         delimited(tag("#"), not_line_ending, line_ending)(s)
     }
 
-    fn comments(s: &str) -> IResult<&str, Vec<&str>> {
+    fn comments(s: Span) -> IResult<Span, Vec<Span>> {
         delimited(
             multispace0,
             separated_list0(multispace0, comment),
@@ -229,26 +237,29 @@ pub mod parser {
         )(s)
     }
 
-    fn head(i: &str) -> IResult<&str, Literal> {
+    fn head(i: Span) -> IResult<Span, Literal> {
         context(stringify!(head), literal(modus_term))(i)
     }
 
     /// Parses `<term> = <term>` into a builtin call, `string_concat("", term1, term2)`.
-    fn unification_sugar(i: &str) -> IResult<&str, Literal> {
-        map(
+    fn unification_sugar(i: Span) -> IResult<Span, Literal> {
+        let (i, pos) = position(i)?;
+
+        let x = map(
             separated_pair(
                 modus_term,
                 delimited(multispace0, tag("="), multispace0),
                 cut(modus_term),
             ),
             |(t1, t2)| Literal {
+                position: Some(pos.clone()),
                 predicate: Predicate("string_concat".to_owned()),
                 args: vec![ModusTerm::Constant("".to_owned()), t1, t2],
             },
-        )(i)
+        )(i); x
     }
 
-    fn expression_inner(i: &str) -> IResult<&str, Expression> {
+    fn expression_inner(i: Span) -> IResult<Span, Expression> {
         let l_paren_with_comments = |i| terminated(tag("("), comments)(i);
         let r_paren_with_comments = |i| preceded(comments, cut(tag(")")))(i);
 
@@ -272,7 +283,7 @@ pub mod parser {
         ))(i)
     }
 
-    fn body(i: &str) -> IResult<&str, Expression> {
+    fn body(i: Span) -> IResult<Span, Expression> {
         let comma_separated_exprs = map(
             separated_list1(delimited(comments, tag(","), comments), expression_inner),
             |es| {
@@ -297,7 +308,7 @@ pub mod parser {
         preceded(comments, semi_separated_exprs)(i)
     }
 
-    fn fact(i: &str) -> IResult<&str, ModusClause> {
+    fn fact(i: Span) -> IResult<Span, ModusClause> {
         // Custom definition of fact since datalog facts are normally "head :- ", but Moduslog
         // defines it as "head."
         context(
@@ -309,7 +320,7 @@ pub mod parser {
         )(i)
     }
 
-    fn rule(i: &str) -> IResult<&str, ModusClause> {
+    fn rule(i: Span) -> IResult<Span, ModusClause> {
         context(
             stringify!(rule),
             map(
@@ -331,10 +342,10 @@ pub mod parser {
     /// This also supports string continuation, This allows users to write strings like: "Hello, \
     ///                                                                                 World!"
     /// which is actually just "Hello, World!".
-    fn process_raw_string(s: &str) -> String {
+    fn process_raw_string(s: Span) -> String {
         let mut processed = String::new();
 
-        let mut chars = s.chars().peekable();
+        let mut chars = s.0.chars().peekable();
         while let Some(c) = chars.next() {
             if c == '\\' {
                 match chars.next() {
@@ -367,19 +378,12 @@ pub mod parser {
         processed
     }
 
-    fn string_content(i: &str) -> IResult<&str, String> {
-        let (a, b) = recognize(fold_many0(
-            // Either an escaped double quote or anything that's not a double quote.
-            // It should try the escaped double quote first.
-            alt((tag("\\\""), is_not("\""))),
-            || "".to_string(),
-            |a, b| a + b,
-        ))(i)?;
-        let s = process_raw_string(b);
-        Ok((a, s))
+    fn string_content(i: Span) -> IResult<Span, String> {
+        let (i, o) = escaped(none_of("\\\""), '\\', one_of("\""))(i)?;
+        Ok((i, process_raw_string(o)))
     }
 
-    pub fn modus_const(i: &str) -> IResult<&str, String> {
+    pub fn modus_const(i: Span) -> IResult<Span, String> {
         context(
             stringify!(modus_const),
             delimited(tag("\""), string_content, cut(tag("\""))),
@@ -387,17 +391,12 @@ pub mod parser {
     }
 
     /// Parses a substring outside of the expansion part of a format string's content.
-    pub fn outside_format_expansion(i: &str) -> IResult<&str, String> {
-        fold_many0(
-            // We want to parse until we see '$', except if it was preceded with escape char.
-            // Here we rely on the ordering of `alt`.
-            alt((tag("\\$"), tag("\\"), is_not("\\$"))),
-            || "".to_owned(),
-            |a, b| a + b,
-        )(i)
+    pub fn outside_format_expansion(i: Span) -> IResult<Span, Span> {
+        // We want to parse until we see '$', except if it was preceded with escape char.
+        escaped(none_of("\\$"), '\\', one_of("$"))(i)
     }
 
-    fn modus_format_string(i: &str) -> IResult<&str, String> {
+    fn modus_format_string(i: Span) -> IResult<Span, String> {
         // TODO: check that the token(s) inside "${...}" conform to the variable syntax.
         // Note that if it's escaped, "\${...}", it does not need to conform to the variable syntax.
         context(
@@ -406,34 +405,34 @@ pub mod parser {
         )(i)
     }
 
-    pub fn variable_identifier(i: &str) -> IResult<&str, &str> {
+    pub fn variable_identifier(i: Span) -> IResult<Span, Span> {
         literal_identifier(i)
     }
 
-    pub fn modus_var(i: &str) -> IResult<&str, &str> {
+    pub fn modus_var(i: Span) -> IResult<Span, Span> {
         context(stringify!(modus_var), variable_identifier)(i)
     }
 
-    pub fn modus_term(i: &str) -> IResult<&str, ModusTerm> {
+    pub fn modus_term(i: Span) -> IResult<Span, ModusTerm> {
         alt((
             map(modus_const, ModusTerm::Constant),
             map(modus_format_string, ModusTerm::FormatString),
-            map(modus_var, |s| ModusTerm::UserVariable(s.to_owned())),
+            map(modus_var, |s| ModusTerm::UserVariable((*s.fragment()).clone().into())),
         ))(i)
     }
 
-    pub fn modus_clause(i: &str) -> IResult<&str, ModusClause> {
+    pub fn modus_clause(i: Span) -> IResult<Span, ModusClause> {
         alt((fact, rule))(i)
     }
 
-    pub fn modusfile(i: &str) -> IResult<&str, Modusfile> {
+    pub fn modusfile(i: Span) -> IResult<Span, Modusfile> {
         map(
             terminated(
                 many0(preceded(
-                    many0(dockerfile::parser::ignored_line),
+                    many0(dockerfile::parser::ignored_line_for_span),
                     modus_clause,
                 )),
-                terminated(many0(dockerfile::parser::ignored_line), eof),
+                terminated(many0(dockerfile::parser::ignored_line_for_span), eof),
             ),
             Modusfile,
         )(i)
@@ -449,6 +448,7 @@ mod tests {
     #[test]
     fn fact() {
         let l1 = Literal {
+            position: None,
             predicate: logic::Predicate("l1".into()),
             args: Vec::new(),
         };
@@ -463,14 +463,17 @@ mod tests {
     #[test]
     fn rule() {
         let l1 = Literal {
+            position: None,
             predicate: logic::Predicate("l1".into()),
             args: Vec::new(),
         };
         let l2 = Literal {
+            position: None,
             predicate: logic::Predicate("l2".into()),
             args: Vec::new(),
         };
         let l3 = Literal {
+            position: None,
             predicate: logic::Predicate("l3".into()),
             args: Vec::new(),
         };
@@ -499,18 +502,22 @@ mod tests {
     #[test]
     fn rule_with_operator() {
         let foo = Literal {
+            position: None,
             predicate: logic::Predicate("foo".into()),
             args: Vec::new(),
         };
         let a = Literal {
+            position: None,
             predicate: logic::Predicate("a".into()),
             args: Vec::new(),
         };
         let b = Literal {
+            position: None,
             predicate: logic::Predicate("b".into()),
             args: Vec::new(),
         };
         let merge = Operator {
+            position: None,
             predicate: logic::Predicate("merge".into()),
             args: Vec::new(),
         };
@@ -540,18 +547,22 @@ mod tests {
     fn modusclause_to_clause() {
         crate::translate::reset_operator_pair_id();
         let foo = Literal {
+            position: None,
             predicate: logic::Predicate("foo".into()),
             args: Vec::new(),
         };
         let a = Literal {
+            position: None,
             predicate: logic::Predicate("a".into()),
             args: Vec::new(),
         };
         let b = Literal {
+            position: None,
             predicate: logic::Predicate("b".into()),
             args: Vec::new(),
         };
         let merge = Operator {
+            position: None,
             predicate: logic::Predicate("merge".into()),
             args: Vec::new(),
         };
@@ -582,6 +593,7 @@ mod tests {
         let a: Literal = "a".parse().unwrap();
         let b: Literal = "b".parse().unwrap();
         let merge = Operator {
+            position: None,
             predicate: logic::Predicate("merge".into()),
             args: Vec::new(),
         };
@@ -634,9 +646,9 @@ mod tests {
         let inp2 = r#""Tabs\tare\tbetter\tthan\tspaces""#;
         let inp3 = r#""Testing \
                        multiline.""#;
-        let (_, s1) = parser::modus_const(inp1).unwrap();
-        let (_, s2) = parser::modus_const(inp2).unwrap();
-        let (_, s3) = parser::modus_const(inp3).unwrap();
+        let (_, s1) = parser::modus_const(Span::new(inp1.into())).unwrap();
+        let (_, s2) = parser::modus_const(Span::new(inp2.into())).unwrap();
+        let (_, s3) = parser::modus_const(Span::new(inp3.into())).unwrap();
 
         assert_eq!(s1, "Hello\nWorld");
         assert_eq!(s2, "Tabs\tare\tbetter\tthan\tspaces");
@@ -675,19 +687,23 @@ mod tests {
     #[test]
     fn multiple_clause_with_different_ops() {
         let foo = Literal {
+            position: None,
             predicate: logic::Predicate("foo".into()),
             args: vec![ModusTerm::UserVariable("x".to_owned())],
         };
         let bar = Literal {
+            position: None,
             predicate: logic::Predicate("bar".into()),
             args: Vec::new(),
         };
         let baz = Literal {
+            position: None,
             predicate: logic::Predicate("baz".into()),
             args: Vec::new(),
         };
         let a = Rule {
             head: logic::Literal {
+                position: None,
                 predicate: logic::Predicate("a".to_owned()),
                 args: vec![],
             },
@@ -695,6 +711,7 @@ mod tests {
                 Box::new(Expression::OperatorApplication(
                     Box::new(Expression::And(Box::new(foo.into()), Box::new(bar.into()))),
                     Operator {
+                        position: None,
                         predicate: logic::Predicate("setenv".into()),
                         args: vec![
                             ModusTerm::Constant("a".to_owned()),
@@ -705,6 +722,7 @@ mod tests {
                 Box::new(Expression::OperatorApplication(
                     Box::new(baz.into()),
                     Operator {
+                        position: None,
                         predicate: logic::Predicate("setenv".into()),
                         args: vec![
                             ModusTerm::Constant("a".to_owned()),

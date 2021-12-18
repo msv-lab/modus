@@ -20,15 +20,20 @@
 //! Currently, these structures are generic, parameterized over the types they may use for constants
 //! or variables.
 
+use nom_locate::LocatedSpan;
+
 use crate::unification::Rename;
 use crate::{modusfile, sld};
 
 use std::convert::TryInto;
 use std::fmt;
 use std::fmt::{Debug, Display};
+use std::rc::Rc;
 use std::str;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::{collections::HashSet, hash::Hash};
+
+use self::source_span::Span;
 
 impl fmt::Display for IRTerm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -90,8 +95,206 @@ impl IRTerm {
     }
 }
 
+pub mod source_span {
+    use std::{ops::{Range, RangeFrom, RangeTo}, rc::Rc};
+
+    use nom::{InputIter, InputTake, Needed, Slice};
+    use nom_locate::LocatedSpan;
+    use owned_chars::{OwnedCharIndices, OwnedChars, OwnedCharsExt};
+
+    #[derive(Clone, PartialEq, Eq, Hash, Debug)]
+    pub struct SourceSpanType(pub Rc<String>);
+
+    impl From<&SourceSpanType> for String {
+        fn from(span: &SourceSpanType) -> Self {
+            (*(*span).0).clone()
+        }
+    }
+
+    impl From<SourceSpanType> for String {
+        fn from(span: SourceSpanType) -> Self {
+            (*span.0).clone()
+        }
+    }
+
+    impl From<String> for SourceSpanType {
+        fn from(s: String) -> Self {
+            SourceSpanType(Rc::new(s))
+        }
+    }
+
+    impl From<&str> for SourceSpanType {
+        fn from(s: &str) -> Self {
+            SourceSpanType(Rc::new(s.to_owned().into()))
+        }
+    }
+
+    impl nom::InputTake for SourceSpanType {
+        fn take(&self, count: usize) -> Self {
+            self.slice(..count)
+        }
+
+        fn take_split(&self, count: usize) -> (Self, Self) {
+            (self.slice(count..), self.slice(..count))
+        }
+    }
+
+    impl nom::InputTakeAtPosition for SourceSpanType {
+        type Item = char;
+
+        fn split_at_position<P, E: nom::error::ParseError<Self>>(&self, predicate: P) -> nom::IResult<Self, Self, E>
+        where
+            P: Fn(Self::Item) -> bool {
+            match self.position(predicate) {
+                Some(n) => Ok((*self).take_split(n)),
+                None => Err(nom::Err::Incomplete(nom::Needed::new(1))),
+            }
+        }
+
+        fn split_at_position1<P, E: nom::error::ParseError<Self>>(
+            &self,
+            predicate: P,
+            e: nom::error::ErrorKind,
+        ) -> nom::IResult<Self, Self, E>
+        where
+            P: Fn(Self::Item) -> bool {
+            todo!()
+        }
+
+        fn split_at_position_complete<P, E: nom::error::ParseError<Self>>(
+            &self,
+            predicate: P,
+        ) -> nom::IResult<Self, Self, E>
+        where
+            P: Fn(Self::Item) -> bool {
+            todo!()
+        }
+
+        fn split_at_position1_complete<P, E: nom::error::ParseError<Self>>(
+            &self,
+            predicate: P,
+            e: nom::error::ErrorKind,
+        ) -> nom::IResult<Self, Self, E>
+        where
+            P: Fn(Self::Item) -> bool {
+            todo!()
+        }
+    }
+
+    impl nom::InputLength for SourceSpanType {
+        fn input_len(&self) -> usize {
+            self.0.len()
+        }
+    }
+
+    impl nom::Slice<Range<usize>> for SourceSpanType {
+        fn slice(&self, range: Range<usize>) -> Self {
+            let s: &str = &self.0;
+            SourceSpanType(Rc::new(s[range].to_owned()))
+        }
+    }
+
+    impl nom::Slice<RangeTo<usize>> for SourceSpanType {
+        fn slice(&self, range: RangeTo<usize>) -> Self {
+            let s: &str = &self.0;
+            SourceSpanType(Rc::new(s[range].to_owned()))
+        }
+    }
+
+    impl nom::Slice<RangeFrom<usize>> for SourceSpanType {
+        fn slice(&self, range: RangeFrom<usize>) -> Self {
+            let s: &str = &self.0;
+            SourceSpanType(Rc::new(s[range].to_owned()))
+        }
+    }
+
+    impl nom::Compare<&str> for SourceSpanType {
+        fn compare(&self, t: &str) -> nom::CompareResult {
+            let s1 = self.0.as_str();
+            s1.compare(t)
+        }
+
+        fn compare_no_case(&self, t: &str) -> nom::CompareResult {
+            let s1 = self.0.as_str();
+            s1.compare_no_case(t)
+        }
+    }
+
+    impl nom::InputIter for SourceSpanType {
+        type Item = char;
+        type Iter = OwnedCharIndices;
+        type IterElem = OwnedChars;
+
+        #[inline]
+        fn iter_indices(&self) -> Self::Iter {
+            (*(*self).0).clone().into_char_indices()
+        }
+
+        #[inline]
+        fn iter_elements(&self) -> Self::IterElem {
+            (*(*self).0).clone().into_chars()
+        }
+
+        fn position<P>(&self, predicate: P) -> Option<usize>
+        where
+            P: Fn(Self::Item) -> bool,
+        {
+            for (o, c) in self.0.char_indices() {
+                if predicate(c) {
+                    return Some(o);
+                }
+            }
+            None
+        }
+
+        #[inline]
+        fn slice_index(&self, count: usize) -> Result<usize, Needed> {
+            let mut cnt = 0;
+            for (index, _) in self.0.char_indices() {
+                if cnt == count {
+                    return Ok(index);
+                }
+                cnt += 1;
+            }
+            if cnt == count {
+                return Ok(self.0.len());
+            }
+            Err(Needed::Unknown)
+        }
+    }
+
+    impl nom::Offset for SourceSpanType {
+        fn offset(&self, second: &Self) -> usize {
+            self.0.offset(&second.0)
+        }
+    }
+
+    impl nom::FindSubstring<SourceSpanType> for SourceSpanType {
+        fn find_substring(&self, substr: SourceSpanType) -> Option<usize> {
+            let s: &str = &self.0;
+            s.find_substring(&substr.0)
+        }
+    }
+
+    impl<R: std::str::FromStr> nom::ParseTo<R> for SourceSpanType {
+        fn parse_to(&self) -> Option<R> {
+            let s: &str = &self.0;
+            s.parse().ok()
+        }
+    }
+
+    impl nom::AsBytes for SourceSpanType {
+        fn as_bytes(&self) -> &[u8] {
+            self.0.as_bytes()
+        }
+    }
+
+    pub type Span = LocatedSpan<SourceSpanType>;
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Literal<T = IRTerm> {
+    pub position: Option<Span>,
     pub predicate: Predicate,
     pub args: Vec<T>,
 }
@@ -214,7 +417,8 @@ impl str::FromStr for Clause {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match parser::clause(parser::term)(s) {
+        let span = Span::new(s.into());
+        match parser::clause(parser::term)(span) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
@@ -225,7 +429,8 @@ impl str::FromStr for Literal {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match parser::literal(parser::term)(s) {
+        let span = Span::new(s.into());
+        match parser::literal(parser::term)(span) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
@@ -237,57 +442,36 @@ pub mod parser {
 
     use super::*;
 
-    use nom::{
-        branch::alt,
-        bytes::complete::{is_not, tag},
-        character::complete::{alpha1, alphanumeric1, one_of},
-        combinator::{map, opt, recognize, value},
-        error::VerboseError,
-        multi::{many0, separated_list0, separated_list1},
-        sequence::{delimited, pair, preceded, separated_pair, terminated},
-    };
+    use nom::{branch::alt, bytes::complete::{is_not, tag}, character::complete::{alpha1, alphanumeric1, one_of, space0}, combinator::{map, opt, recognize, value}, error::VerboseError, multi::{many0, separated_list0, separated_list1}, sequence::{delimited, pair, preceded, separated_pair, terminated}};
+    use nom_locate::position;
 
     /// Redeclaration that uses VerboseError instead of the default nom::Error.
     pub type IResult<T, O> = nom::IResult<T, O, VerboseError<T>>;
 
-    fn space(i: &str) -> IResult<&str, ()> {
-        value(
-            (), // Output is thrown away.
-            one_of(" \t"),
-        )(i)
-    }
-
-    fn optional_space(i: &str) -> IResult<&str, ()> {
-        value(
-            (), // Output is thrown away.
-            many0(space),
-        )(i)
-    }
-
-    fn ws<'a, F: 'a, O>(inner: F) -> impl FnMut(&'a str) -> IResult<&'a str, O>
+    fn ws<'a, F: 'a, O>(inner: F) -> impl FnMut(Span) -> IResult<Span, O>
     where
-        F: FnMut(&'a str) -> IResult<&'a str, O>,
+        F: FnMut(Span) -> IResult<Span, O>,
     {
-        delimited(optional_space, inner, optional_space)
+        delimited(space0, inner, space0)
     }
 
-    fn constant(i: &str) -> IResult<&str, &str> {
+    fn constant(i: Span) -> IResult<Span, Span> {
         delimited(tag("\""), is_not("\""), tag("\""))(i)
     }
 
-    fn variable(i: &str) -> IResult<&str, &str> {
+    fn variable(i: Span) -> IResult<Span, Span> {
         literal_identifier(i)
     }
 
-    pub fn term(i: &str) -> IResult<&str, IRTerm> {
+    pub fn term(i: Span) -> IResult<Span, IRTerm> {
         alt((
-            map(constant, |s| IRTerm::Constant(s.to_owned())),
-            map(variable, |s| IRTerm::UserVariable(s.to_owned())),
+            map(constant, |s| IRTerm::Constant(s.fragment().0.to_string())),
+            map(variable, |s| IRTerm::UserVariable(s.fragment().0.to_string())),
         ))(i)
     }
 
     //TODO: I need to think more carefully how to connect this to stage name
-    pub fn literal_identifier(i: &str) -> IResult<&str, &str> {
+    pub fn literal_identifier(i: Span) -> IResult<Span, Span> {
         recognize(pair(
             alpha1,
             many0(alt((alphanumeric1, tag("_"), tag("-")))),
@@ -295,35 +479,41 @@ pub mod parser {
     }
 
     /// Parses a literal with a generic term type.
-    pub fn literal<'a, FT: 'a, T>(term: FT) -> impl FnMut(&'a str) -> IResult<&'a str, Literal<T>>
+    pub fn literal<FT: 'static, T>(term: FT) -> impl FnMut(Span) -> IResult<Span, Literal<T>>
     where
-        FT: FnMut(&str) -> IResult<&str, T>,
+        FT: FnMut(Span) -> IResult<Span, T> + Clone,
     {
-        map(
-            pair(
-                literal_identifier,
-                opt(delimited(
-                    terminated(tag("("), optional_space),
-                    separated_list1(ws(tag(",")), term),
-                    preceded(optional_space, tag(")")),
-                )),
-            ),
-            |(name, args)| match args {
-                Some(args) => Literal {
-                    predicate: Predicate(name.into()),
-                    args,
+        move |i| {
+            let (i, pos) = position(i)?;
+
+            let x = map(
+                pair(
+                    literal_identifier,
+                    opt(delimited(
+                        terminated(tag("("), space0),
+                        separated_list1(ws(tag(",")), term.clone()),
+                        preceded(space0, tag(")")),
+                    )),
+                ),
+                |(name, args)| match args {
+                    Some(args) => Literal {
+                        position: Some(pos.clone()),
+                        predicate: Predicate(name.fragment().0.to_string()),
+                        args,
+                    },
+                    None => Literal {
+                        position: Some(pos.clone()),
+                        predicate: Predicate(name.fragment().0.to_string()),
+                        args: Vec::new(),
+                    },
                 },
-                None => Literal {
-                    predicate: Predicate(name.into()),
-                    args: Vec::new(),
-                },
-            },
-        )
+            )(i); x
+        }
     }
 
-    pub fn clause<'a, FT: 'a, T>(term: FT) -> impl FnMut(&'a str) -> IResult<&'a str, Clause<T>>
+    pub fn clause<FT: 'static, T>(term: FT) -> impl FnMut(Span) -> IResult<Span, Clause<T>>
     where
-        FT: FnMut(&str) -> IResult<&str, T> + Clone,
+        FT: FnMut(Span) -> IResult<Span, T> + Clone,
     {
         map(
             separated_pair(
@@ -346,14 +536,17 @@ mod tests {
         let va = IRTerm::UserVariable("A".into());
         let vb = IRTerm::UserVariable("B".into());
         let l1 = Literal {
+            position: None,
             predicate: Predicate("l1".into()),
             args: vec![va.clone(), vb.clone()],
         };
         let l2 = Literal {
+            position: None,
             predicate: Predicate("l2".into()),
             args: vec![va.clone(), c.clone()],
         };
         let l3 = Literal {
+            position: None,
             predicate: Predicate("l3".into()),
             args: vec![vb.clone(), c.clone()],
         };
@@ -369,10 +562,12 @@ mod tests {
     fn nullary_predicate() {
         let va = IRTerm::UserVariable("A".into());
         let l1 = Literal {
+            position: None,
             predicate: Predicate("l1".into()),
             args: Vec::new(),
         };
         let l2 = Literal {
+            position: None,
             predicate: Predicate("l2".into()),
             args: vec![va.clone()],
         };

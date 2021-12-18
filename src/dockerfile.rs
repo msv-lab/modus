@@ -211,7 +211,7 @@ where
 }
 
 pub mod parser {
-    use crate::logic::parser::IResult;
+    use crate::logic::{parser::IResult, source_span::Span};
 
     use super::*;
 
@@ -259,10 +259,24 @@ pub mod parser {
         )(i)
     }
 
+    fn empty_line_for_span(i: Span) -> IResult<Span, ()> {
+        value(
+            (), // Output is thrown away.
+            alt((preceded(space0, line_ending), preceded(space1, peek(eof)))),
+        )(i)
+    }
+
     pub fn ignored_line(i: &str) -> IResult<&str, ()> {
         value(
             (), // Output is thrown away.
             alt((comment_line, empty_line)),
+        )(i)
+    }
+
+    pub fn ignored_line_for_span(i: Span) -> IResult<Span, ()> {
+        value(
+            (), // Output is thrown away.
+            alt((comment_line_for_span, empty_line_for_span)),
         )(i)
     }
 
@@ -299,10 +313,21 @@ pub mod parser {
         preceded(char('#'), is_not("\n\r"))(i)
     }
 
+    fn comment_for_span(i: Span) -> IResult<Span, Span> {
+        preceded(char('#'), is_not("\n\r"))(i)
+    }
+
     fn comment_line(i: &str) -> IResult<&str, ()> {
         value(
             (), // Output is thrown away.
             delimited(space0, comment, alt((line_ending, peek(eof)))),
+        )(i)
+    }
+
+    fn comment_line_for_span(i: Span) -> IResult<Span, ()> {
+        value(
+            (), // Output is thrown away.
+            delimited(space0, comment_for_span, alt((line_ending, peek(eof)))),
         )(i)
     }
 
