@@ -256,7 +256,8 @@ pub mod parser {
                 predicate: Predicate("string_concat".to_owned()),
                 args: vec![ModusTerm::Constant("".to_owned()), t1, t2],
             },
-        )(i); x
+        )(i);
+        x
     }
 
     fn expression_inner(i: Span) -> IResult<Span, Expression> {
@@ -417,7 +418,9 @@ pub mod parser {
         alt((
             map(modus_const, ModusTerm::Constant),
             map(modus_format_string, ModusTerm::FormatString),
-            map(modus_var, |s| ModusTerm::UserVariable((*s.fragment()).clone().into())),
+            map(modus_var, |s| {
+                ModusTerm::UserVariable((*s.fragment()).clone().into())
+            }),
         ))(i)
     }
 

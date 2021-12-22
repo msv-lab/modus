@@ -19,10 +19,14 @@ use std::sync::atomic::AtomicUsize;
 
 use nom::{bytes::streaming::tag, sequence::delimited};
 
-use crate::{logic::{self, IRTerm, Predicate, source_span::Span}, modusfile::{
+use crate::{
+    logic::{self, source_span::Span, IRTerm, Predicate},
+    modusfile::{
         parser::{modus_var, outside_format_expansion},
         Expression, ModusClause, ModusTerm,
-    }, sld::Auxiliary};
+    },
+    sld::Auxiliary,
+};
 
 /// Takes the content of a format string.
 /// Returns an IRTerm to be used instead of the format string term, and a list of literals
@@ -46,8 +50,8 @@ fn convert_format_string(format_string_content: &str) -> (Vec<logic::Literal>, I
     // if the last var we created was R1 and we just parsed some (constant) string c, we
     // add a literal `string_concat(R1, c, R2)`, creating a new variable R2.
     while !curr_string.is_empty() {
-        let (i, constant_str) =
-            outside_format_expansion(Span::new(curr_string.into())).expect("can parse outside format expansion");
+        let (i, constant_str) = outside_format_expansion(Span::new(curr_string.into()))
+            .expect("can parse outside format expansion");
         let constant_string: String = constant_str.fragment().into();
         let new_var: IRTerm = Auxiliary::aux();
         let new_literal = logic::Literal {

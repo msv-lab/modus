@@ -77,7 +77,7 @@ pub trait BuiltinPredicate {
 
 mod string_concat {
     use super::BuiltinPredicate;
-    use crate::logic::{IRTerm, Literal, Predicate, source_span::Span};
+    use crate::logic::{source_span::Span, IRTerm, Literal, Predicate};
 
     fn string_concat_result(a: &str, b: &str, c: &str, pos: &Option<Span>) -> Option<Literal> {
         Some(Literal {

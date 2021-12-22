@@ -96,7 +96,10 @@ impl IRTerm {
 }
 
 pub mod source_span {
-    use std::{ops::{Range, RangeFrom, RangeTo}, rc::Rc};
+    use std::{
+        ops::{Range, RangeFrom, RangeTo},
+        rc::Rc,
+    };
 
     use nom::{InputIter, InputLength, InputTake, Needed, Slice};
     use nom_locate::LocatedSpan;
@@ -107,7 +110,7 @@ pub mod source_span {
 
     impl From<&SourceSpanType> for String {
         fn from(span: &SourceSpanType) -> Self {
-            (*(*span).0).clone()
+            (*span.0).clone()
         }
     }
 
@@ -125,7 +128,7 @@ pub mod source_span {
 
     impl From<&str> for SourceSpanType {
         fn from(s: &str) -> Self {
-            SourceSpanType(Rc::new(s.to_owned().into()))
+            SourceSpanType(Rc::new(s.to_owned()))
         }
     }
 
@@ -135,7 +138,8 @@ pub mod source_span {
         }
 
         fn take_split(&self, count: usize) -> (Self, Self) {
-            (self.slice(count..), self.slice(..count))
+            // FIXME
+            (self.slice(..count), self.slice(count..))
         }
     }
 
@@ -148,9 +152,13 @@ pub mod source_span {
     impl nom::InputTakeAtPosition for SourceSpanType {
         type Item = char;
 
-        fn split_at_position<P, E: nom::error::ParseError<Self>>(&self, predicate: P) -> nom::IResult<Self, Self, E>
+        fn split_at_position<P, E: nom::error::ParseError<Self>>(
+            &self,
+            predicate: P,
+        ) -> nom::IResult<Self, Self, E>
         where
-            P: Fn(Self::Item) -> bool {
+            P: Fn(Self::Item) -> bool,
+        {
             match self.position(predicate) {
                 Some(n) => Ok((*self).take_split(n)),
                 None => Err(nom::Err::Incomplete(nom::Needed::new(1))),
@@ -163,7 +171,8 @@ pub mod source_span {
             e: nom::error::ErrorKind,
         ) -> nom::IResult<Self, Self, E>
         where
-            P: Fn(Self::Item) -> bool {
+            P: Fn(Self::Item) -> bool,
+        {
             match self.position(predicate) {
                 Some(0) => Err(nom::Err::Error(E::from_error_kind(self.clone(), e))),
                 Some(n) => Ok(self.take_split(n)),
@@ -176,7 +185,8 @@ pub mod source_span {
             predicate: P,
         ) -> nom::IResult<Self, Self, E>
         where
-            P: Fn(Self::Item) -> bool {
+            P: Fn(Self::Item) -> bool,
+        {
             match self.split_at_position(predicate) {
                 Err(nom::Err::Incomplete(_)) => Ok(self.take_split(self.input_len())),
                 res => res,
@@ -189,7 +199,8 @@ pub mod source_span {
             e: nom::error::ErrorKind,
         ) -> nom::IResult<Self, Self, E>
         where
-            P: Fn(Self::Item) -> bool {
+            P: Fn(Self::Item) -> bool,
+        {
             match self.position(predicate) {
                 Some(0) => Err(nom::Err::Error(E::from_error_kind(self.clone(), e))),
                 Some(n) => Ok(self.take_split(n)),
@@ -244,12 +255,14 @@ pub mod source_span {
 
         #[inline]
         fn iter_indices(&self) -> Self::Iter {
-            (*(*self).0).clone().into_char_indices()
+            let s = (*(self.0)).clone();
+            s.into_char_indices()
         }
 
         #[inline]
         fn iter_elements(&self) -> Self::IterElem {
-            (*(*self).0).clone().into_chars()
+            let s = (*(self.0)).clone();
+            s.into_chars()
         }
 
         fn position<P>(&self, predicate: P) -> Option<usize>
@@ -283,20 +296,6 @@ pub mod source_span {
     impl nom::Offset for SourceSpanType {
         fn offset(&self, second: &Self) -> usize {
             self.0.offset(&second.0)
-        }
-    }
-
-    impl nom::FindSubstring<SourceSpanType> for SourceSpanType {
-        fn find_substring(&self, substr: SourceSpanType) -> Option<usize> {
-            let s: &str = &self.0;
-            s.find_substring(&substr.0)
-        }
-    }
-
-    impl<R: std::str::FromStr> nom::ParseTo<R> for SourceSpanType {
-        fn parse_to(&self) -> Option<R> {
-            let s: &str = &self.0;
-            s.parse().ok()
         }
     }
 
@@ -459,7 +458,15 @@ pub mod parser {
 
     use super::*;
 
-    use nom::{branch::alt, bytes::complete::{is_not, tag}, character::complete::{alpha1, alphanumeric1, one_of, space0}, combinator::{map, opt, recognize, value}, error::VerboseError, multi::{many0, separated_list0, separated_list1}, sequence::{delimited, pair, preceded, separated_pair, terminated}};
+    use nom::{
+        branch::alt,
+        bytes::complete::{is_not, tag},
+        character::complete::{alpha1, alphanumeric1, space0},
+        combinator::{map, opt, recognize},
+        error::VerboseError,
+        multi::{many0, separated_list0, separated_list1},
+        sequence::{delimited, pair, preceded, separated_pair, terminated},
+    };
     use nom_locate::position;
 
     /// Redeclaration that uses VerboseError instead of the default nom::Error.
@@ -483,7 +490,9 @@ pub mod parser {
     pub fn term(i: Span) -> IResult<Span, IRTerm> {
         alt((
             map(constant, |s| IRTerm::Constant(s.fragment().0.to_string())),
-            map(variable, |s| IRTerm::UserVariable(s.fragment().0.to_string())),
+            map(variable, |s| {
+                IRTerm::UserVariable(s.fragment().0.to_string())
+            }),
         ))(i)
     }
 
@@ -524,7 +533,8 @@ pub mod parser {
                         args: Vec::new(),
                     },
                 },
-            )(i); x
+            )(i);
+            x
         }
     }
 
@@ -546,6 +556,18 @@ pub mod parser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn literals() {
+        let l1 = Literal {
+            position: None,
+            predicate: Predicate("l1".into()),
+            args: vec![IRTerm::Constant("c".into())],
+        };
+
+        assert_eq!("l1(\"c\")", l1.to_string());
+        assert_eq!(Ok(l1), "l1(\"c\")".parse());
+    }
 
     #[test]
     fn simple_rule() {
