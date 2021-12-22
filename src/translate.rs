@@ -20,7 +20,7 @@ use std::sync::atomic::AtomicUsize;
 use nom::{bytes::streaming::tag, sequence::delimited};
 
 use crate::{
-    logic::{self, source_span::Span, IRTerm, Predicate},
+    logic::{self, parser::Span, IRTerm, Predicate},
     modusfile::{
         parser::{modus_var, outside_format_expansion},
         Expression, ModusClause, ModusTerm,
@@ -33,7 +33,7 @@ use crate::{
 /// needed to make this equivalent.
 fn convert_format_string(format_string_content: &str) -> (Vec<logic::Literal>, IRTerm) {
     let concat_predicate = "string_concat";
-    let mut curr_string = format_string_content.to_owned();
+    let mut curr_string = format_string_content;
     let mut prev_variable: IRTerm = Auxiliary::aux();
     let mut new_literals = vec![logic::Literal {
         // this initial literal is a no-op that makes the code simpler, it does not have an equivalent position.
@@ -50,9 +50,9 @@ fn convert_format_string(format_string_content: &str) -> (Vec<logic::Literal>, I
     // if the last var we created was R1 and we just parsed some (constant) string c, we
     // add a literal `string_concat(R1, c, R2)`, creating a new variable R2.
     while !curr_string.is_empty() {
-        let (i, constant_str) = outside_format_expansion(Span::new(curr_string.into()))
+        let (i, constant_str) = outside_format_expansion(Span::new(curr_string))
             .expect("can parse outside format expansion");
-        let constant_string: String = constant_str.fragment().into();
+        let constant_string = constant_str.fragment().replace("\\$", "$");
         let new_var: IRTerm = Auxiliary::aux();
         let new_literal = logic::Literal {
             // TODO: More precise position
@@ -60,7 +60,7 @@ fn convert_format_string(format_string_content: &str) -> (Vec<logic::Literal>, I
             predicate: logic::Predicate(concat_predicate.to_string()),
             args: vec![
                 prev_variable,
-                IRTerm::Constant(constant_string.replace("\\$", "$")),
+                IRTerm::Constant(constant_string.to_owned()),
                 new_var.clone(),
             ],
         };
@@ -76,15 +76,15 @@ fn convert_format_string(format_string_content: &str) -> (Vec<logic::Literal>, I
                 predicate: logic::Predicate(concat_predicate.to_string()),
                 args: vec![
                     prev_variable,
-                    IRTerm::UserVariable(variable.fragment().into()),
+                    IRTerm::UserVariable(variable.fragment().to_string()),
                     new_var.clone(),
                 ],
             };
             new_literals.push(new_literal);
             prev_variable = new_var;
-            curr_string = String::from(rest.fragment().clone());
+            curr_string = rest.fragment();
         } else {
-            curr_string = "".to_owned();
+            curr_string = "";
         }
     }
     (new_literals, prev_variable)

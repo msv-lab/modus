@@ -23,7 +23,7 @@ use std::str;
 
 use crate::dockerfile;
 use crate::logic;
-use crate::logic::source_span::Span;
+use crate::logic::parser::Span;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Expression {
@@ -206,7 +206,7 @@ impl str::FromStr for Literal {
 
 pub mod parser {
     use crate::logic::parser::{literal, literal_identifier, IResult};
-    use crate::logic::Predicate;
+    use crate::logic::{Predicate, SpannedPosition};
 
     use super::*;
 
@@ -252,7 +252,7 @@ pub mod parser {
                 cut(modus_term),
             ),
             |(t1, t2)| Literal {
-                position: Some(pos.clone()),
+                position: Some(pos.into()),
                 predicate: Predicate("string_concat".to_owned()),
                 args: vec![ModusTerm::Constant("".to_owned()), t1, t2],
             },
@@ -346,7 +346,7 @@ pub mod parser {
     fn process_raw_string(s: Span) -> String {
         let mut processed = String::new();
 
-        let mut chars = s.0.chars().peekable();
+        let mut chars = s.chars().peekable();
         while let Some(c) = chars.next() {
             if c == '\\' {
                 match chars.next() {

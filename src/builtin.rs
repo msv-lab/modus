@@ -77,11 +77,16 @@ pub trait BuiltinPredicate {
 
 mod string_concat {
     use super::BuiltinPredicate;
-    use crate::logic::{source_span::Span, IRTerm, Literal, Predicate};
+    use crate::logic::{IRTerm, Literal, Predicate, SpannedPosition};
 
-    fn string_concat_result(a: &str, b: &str, c: &str, pos: &Option<Span>) -> Option<Literal> {
+    fn string_concat_result(
+        a: &str,
+        b: &str,
+        c: &str,
+        pos: &Option<SpannedPosition>,
+    ) -> Option<Literal> {
         Some(Literal {
-            position: (*pos).clone(),
+            position: pos.clone(),
             predicate: Predicate("string_concat".to_owned()),
             args: vec![
                 IRTerm::Constant(a.to_owned()),

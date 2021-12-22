@@ -22,6 +22,7 @@
 
 use nom_locate::LocatedSpan;
 
+use crate::logic::parser::Span;
 use crate::unification::Rename;
 use crate::{modusfile, sld};
 
@@ -32,8 +33,6 @@ use std::rc::Rc;
 use std::str;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::{collections::HashSet, hash::Hash};
-
-use self::source_span::Span;
 
 impl fmt::Display for IRTerm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -95,222 +94,44 @@ impl IRTerm {
     }
 }
 
-pub mod source_span {
-    use std::{
-        ops::{Range, RangeFrom, RangeTo},
-        rc::Rc,
-    };
+/// Structure that holds information about the position of some section of the source code.
+///
+/// Not to be confused with `parser::Span`.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct SpannedPosition {
+    pub line: u32,
 
-    use nom::{InputIter, InputLength, InputTake, Needed, Slice};
-    use nom_locate::LocatedSpan;
-    use owned_chars::{OwnedCharIndices, OwnedChars, OwnedCharsExt};
+    /// Index of the column. Assumes ASCII text (i.e. each character is a byte).
+    pub column: usize,
 
-    #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-    pub struct SourceSpanType(pub Rc<String>);
+    /// The relative offset of this spanned position from the original input.
+    offset: usize,
+    // TODO: length of the span
+}
 
-    impl From<&SourceSpanType> for String {
-        fn from(span: &SourceSpanType) -> Self {
-            (*span.0).clone()
+impl From<Span<'_>> for SpannedPosition {
+    fn from(s: Span) -> Self {
+        SpannedPosition {
+            line: s.location_line(),
+            column: s.get_column(),
+            offset: s.location_offset(),
         }
     }
+}
 
-    impl From<SourceSpanType> for String {
-        fn from(span: SourceSpanType) -> Self {
-            (*span.0).clone()
+impl Default for SpannedPosition {
+    fn default() -> Self {
+        Self {
+            line: 1,
+            column: 1,
+            offset: 0,
         }
     }
-
-    impl From<String> for SourceSpanType {
-        fn from(s: String) -> Self {
-            SourceSpanType(Rc::new(s))
-        }
-    }
-
-    impl From<&str> for SourceSpanType {
-        fn from(s: &str) -> Self {
-            SourceSpanType(Rc::new(s.to_owned()))
-        }
-    }
-
-    impl nom::InputTake for SourceSpanType {
-        fn take(&self, count: usize) -> Self {
-            self.slice(..count)
-        }
-
-        fn take_split(&self, count: usize) -> (Self, Self) {
-            // FIXME
-            (self.slice(..count), self.slice(count..))
-        }
-    }
-
-    impl nom::InputLength for SourceSpanType {
-        fn input_len(&self) -> usize {
-            self.0.len()
-        }
-    }
-
-    impl nom::InputTakeAtPosition for SourceSpanType {
-        type Item = char;
-
-        fn split_at_position<P, E: nom::error::ParseError<Self>>(
-            &self,
-            predicate: P,
-        ) -> nom::IResult<Self, Self, E>
-        where
-            P: Fn(Self::Item) -> bool,
-        {
-            match self.position(predicate) {
-                Some(n) => Ok((*self).take_split(n)),
-                None => Err(nom::Err::Incomplete(nom::Needed::new(1))),
-            }
-        }
-
-        fn split_at_position1<P, E: nom::error::ParseError<Self>>(
-            &self,
-            predicate: P,
-            e: nom::error::ErrorKind,
-        ) -> nom::IResult<Self, Self, E>
-        where
-            P: Fn(Self::Item) -> bool,
-        {
-            match self.position(predicate) {
-                Some(0) => Err(nom::Err::Error(E::from_error_kind(self.clone(), e))),
-                Some(n) => Ok(self.take_split(n)),
-                None => Err(nom::Err::Incomplete(nom::Needed::new(1))),
-            }
-        }
-
-        fn split_at_position_complete<P, E: nom::error::ParseError<Self>>(
-            &self,
-            predicate: P,
-        ) -> nom::IResult<Self, Self, E>
-        where
-            P: Fn(Self::Item) -> bool,
-        {
-            match self.split_at_position(predicate) {
-                Err(nom::Err::Incomplete(_)) => Ok(self.take_split(self.input_len())),
-                res => res,
-            }
-        }
-
-        fn split_at_position1_complete<P, E: nom::error::ParseError<Self>>(
-            &self,
-            predicate: P,
-            e: nom::error::ErrorKind,
-        ) -> nom::IResult<Self, Self, E>
-        where
-            P: Fn(Self::Item) -> bool,
-        {
-            match self.position(predicate) {
-                Some(0) => Err(nom::Err::Error(E::from_error_kind(self.clone(), e))),
-                Some(n) => Ok(self.take_split(n)),
-                None => {
-                    if self.input_len() == 0 {
-                        Err(nom::Err::Error(E::from_error_kind(self.clone(), e)))
-                    } else {
-                        Ok(self.take_split(self.input_len()))
-                    }
-                }
-            }
-        }
-    }
-
-    impl nom::Slice<Range<usize>> for SourceSpanType {
-        fn slice(&self, range: Range<usize>) -> Self {
-            let s: &str = &self.0;
-            SourceSpanType(Rc::new(s[range].to_owned()))
-        }
-    }
-
-    impl nom::Slice<RangeTo<usize>> for SourceSpanType {
-        fn slice(&self, range: RangeTo<usize>) -> Self {
-            let s: &str = &self.0;
-            SourceSpanType(Rc::new(s[range].to_owned()))
-        }
-    }
-
-    impl nom::Slice<RangeFrom<usize>> for SourceSpanType {
-        fn slice(&self, range: RangeFrom<usize>) -> Self {
-            let s: &str = &self.0;
-            SourceSpanType(Rc::new(s[range].to_owned()))
-        }
-    }
-
-    impl nom::Compare<&str> for SourceSpanType {
-        fn compare(&self, t: &str) -> nom::CompareResult {
-            let s1 = self.0.as_str();
-            s1.compare(t)
-        }
-
-        fn compare_no_case(&self, t: &str) -> nom::CompareResult {
-            let s1 = self.0.as_str();
-            s1.compare_no_case(t)
-        }
-    }
-
-    impl nom::InputIter for SourceSpanType {
-        type Item = char;
-        type Iter = OwnedCharIndices;
-        type IterElem = OwnedChars;
-
-        #[inline]
-        fn iter_indices(&self) -> Self::Iter {
-            let s = (*(self.0)).clone();
-            s.into_char_indices()
-        }
-
-        #[inline]
-        fn iter_elements(&self) -> Self::IterElem {
-            let s = (*(self.0)).clone();
-            s.into_chars()
-        }
-
-        fn position<P>(&self, predicate: P) -> Option<usize>
-        where
-            P: Fn(Self::Item) -> bool,
-        {
-            for (o, c) in self.0.char_indices() {
-                if predicate(c) {
-                    return Some(o);
-                }
-            }
-            None
-        }
-
-        #[inline]
-        fn slice_index(&self, count: usize) -> Result<usize, Needed> {
-            let mut cnt = 0;
-            for (index, _) in self.0.char_indices() {
-                if cnt == count {
-                    return Ok(index);
-                }
-                cnt += 1;
-            }
-            if cnt == count {
-                return Ok(self.0.len());
-            }
-            Err(Needed::Unknown)
-        }
-    }
-
-    impl nom::Offset for SourceSpanType {
-        fn offset(&self, second: &Self) -> usize {
-            self.0.offset(&second.0)
-        }
-    }
-
-    impl nom::AsBytes for SourceSpanType {
-        fn as_bytes(&self) -> &[u8] {
-            self.0.as_bytes()
-        }
-    }
-
-    pub type Span = LocatedSpan<SourceSpanType>;
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Literal<T = IRTerm> {
-    pub position: Option<Span>,
+    pub position: Option<SpannedPosition>,
     pub predicate: Predicate,
     pub args: Vec<T>,
 }
@@ -469,12 +290,14 @@ pub mod parser {
     };
     use nom_locate::position;
 
+    pub type Span<'a> = LocatedSpan<&'a str>;
+
     /// Redeclaration that uses VerboseError instead of the default nom::Error.
     pub type IResult<T, O> = nom::IResult<T, O, VerboseError<T>>;
 
-    fn ws<'a, F: 'a, O>(inner: F) -> impl FnMut(Span) -> IResult<Span, O>
+    fn ws<'a, F: 'a, O>(inner: F) -> impl FnMut(Span<'a>) -> IResult<Span<'a>, O>
     where
-        F: FnMut(Span) -> IResult<Span, O>,
+        F: FnMut(Span<'a>) -> IResult<Span<'a>, O>,
     {
         delimited(space0, inner, space0)
     }
@@ -489,10 +312,8 @@ pub mod parser {
 
     pub fn term(i: Span) -> IResult<Span, IRTerm> {
         alt((
-            map(constant, |s| IRTerm::Constant(s.fragment().0.to_string())),
-            map(variable, |s| {
-                IRTerm::UserVariable(s.fragment().0.to_string())
-            }),
+            map(constant, |s| IRTerm::Constant(s.fragment().to_string())),
+            map(variable, |s| IRTerm::UserVariable(s.fragment().to_string())),
         ))(i)
     }
 
@@ -505,7 +326,7 @@ pub mod parser {
     }
 
     /// Parses a literal with a generic term type.
-    pub fn literal<FT: 'static, T>(term: FT) -> impl FnMut(Span) -> IResult<Span, Literal<T>>
+    pub fn literal<'a, FT: 'a, T>(term: FT) -> impl FnMut(Span) -> IResult<Span, Literal<T>>
     where
         FT: FnMut(Span) -> IResult<Span, T> + Clone,
     {
@@ -523,13 +344,13 @@ pub mod parser {
                 ),
                 |(name, args)| match args {
                     Some(args) => Literal {
-                        position: Some(pos.clone()),
-                        predicate: Predicate(name.fragment().0.to_string()),
+                        position: Some(pos.into()),
+                        predicate: Predicate(name.fragment().to_string()),
                         args,
                     },
                     None => Literal {
-                        position: Some(pos.clone()),
-                        predicate: Predicate(name.fragment().0.to_string()),
+                        position: Some(pos.into()),
+                        predicate: Predicate(name.fragment().to_string()),
                         args: Vec::new(),
                     },
                 },
@@ -538,7 +359,7 @@ pub mod parser {
         }
     }
 
-    pub fn clause<FT: 'static, T>(term: FT) -> impl FnMut(Span) -> IResult<Span, Clause<T>>
+    pub fn clause<'a, FT: 'a, T>(term: FT) -> impl FnMut(Span<'a>) -> IResult<Span<'a>, Clause<T>>
     where
         FT: FnMut(Span) -> IResult<Span, T> + Clone,
     {
@@ -560,7 +381,7 @@ mod tests {
     #[test]
     fn literals() {
         let l1 = Literal {
-            position: None,
+            position: Some(Default::default()),
             predicate: Predicate("l1".into()),
             args: vec![IRTerm::Constant("c".into())],
         };

@@ -211,7 +211,7 @@ where
 }
 
 pub mod parser {
-    use crate::logic::{parser::IResult, source_span::Span};
+    use crate::logic::parser::{IResult, Span};
 
     use super::*;
 
