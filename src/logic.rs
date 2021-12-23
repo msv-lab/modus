@@ -104,9 +104,11 @@ pub struct SpannedPosition {
     /// Index of the column. Assumes ASCII text (i.e. each character is a byte).
     pub column: usize,
 
+    /// Length of this spanned position. Assumes ASCII text (i.e. each character is a byte).
+    pub length: usize,
+
     /// The relative offset of this spanned position from the original input.
     offset: usize,
-    // TODO: length of the span
 }
 
 impl From<Span<'_>> for SpannedPosition {
@@ -114,17 +116,8 @@ impl From<Span<'_>> for SpannedPosition {
         SpannedPosition {
             line: s.location_line(),
             column: s.get_column(),
+            length: s.fragment().len(),
             offset: s.location_offset(),
-        }
-    }
-}
-
-impl Default for SpannedPosition {
-    fn default() -> Self {
-        Self {
-            line: 1,
-            column: 1,
-            offset: 0,
         }
     }
 }
@@ -303,13 +296,34 @@ pub mod parser {
         error::VerboseError,
         multi::{many0, separated_list0, separated_list1},
         sequence::{delimited, pair, preceded, separated_pair, terminated},
+        Offset, Slice,
     };
-    use nom_locate::position;
 
     pub type Span<'a> = LocatedSpan<&'a str>;
 
     /// Redeclaration that uses VerboseError instead of the default nom::Error.
     pub type IResult<T, O> = nom::IResult<T, O, VerboseError<T>>;
+
+    /// Creates a parser that returns a `SpannedPosition` that spans the consumed input
+    /// of a given parser. Also returns the actual output of the parser.
+    pub fn recognized_span<'a, P, T>(
+        mut inner: P,
+    ) -> impl FnMut(Span<'a>) -> IResult<Span<'a>, (SpannedPosition, T)>
+    where
+        P: FnMut(Span<'a>) -> IResult<Span<'a>, T>,
+    {
+        move |i| {
+            let original_i = i.clone();
+
+            let (i, o) = inner(i)?;
+
+            let index = original_i.offset(&i);
+            let recognized_section = original_i.slice(..index);
+            let spanned_pos: SpannedPosition = recognized_section.into();
+
+            Ok((i, (spanned_pos, o)))
+        }
+    }
 
     fn ws<'a, F: 'a, O>(inner: F) -> impl FnMut(Span<'a>) -> IResult<Span<'a>, O>
     where
@@ -342,36 +356,35 @@ pub mod parser {
     }
 
     /// Parses a literal with a generic term type.
-    pub fn literal<'a, FT: 'a, T>(term: FT) -> impl FnMut(Span) -> IResult<Span, Literal<T>>
+    pub fn literal<'a, FT: 'a, T>(term: FT) -> impl FnMut(Span<'a>) -> IResult<Span<'a>, Literal<T>>
     where
-        FT: FnMut(Span) -> IResult<Span, T> + Clone,
+        FT: FnMut(Span<'a>) -> IResult<Span<'a>, T> + Clone,
     {
         move |i| {
-            let (i, pos) = position(i)?;
+            let (i, (spanned_pos, (name, args))) = recognized_span(pair(
+                literal_identifier,
+                opt(delimited(
+                    terminated(tag("("), space0),
+                    separated_list1(ws(tag(",")), term.clone()),
+                    cut(preceded(space0, tag(")"))),
+                )),
+            ))(i)?;
 
-            let x = map(
-                pair(
-                    literal_identifier,
-                    opt(delimited(
-                        terminated(tag("("), space0),
-                        separated_list1(ws(tag(",")), term.clone()),
-                        cut(preceded(space0, tag(")"))),
-                    )),
-                ),
-                |(name, args)| match args {
+            Ok((
+                i,
+                match args {
                     Some(args) => Literal {
-                        position: Some(pos.into()),
+                        position: Some(spanned_pos),
                         predicate: Predicate(name.fragment().to_string()),
                         args,
                     },
                     None => Literal {
-                        position: Some(pos.into()),
+                        position: Some(spanned_pos),
                         predicate: Predicate(name.fragment().to_string()),
                         args: Vec::new(),
                     },
                 },
-            )(i);
-            x
+            ))
         }
     }
 
@@ -433,6 +446,19 @@ mod tests {
 
         let actual: Literal = "l1(\"\", X)".parse().unwrap();
         assert!(l1.eq_ignoring_position(&actual));
+    }
+
+    #[test]
+    fn span_of_literal() {
+        let spanned_pos = SpannedPosition {
+            line: 1,
+            column: 1,
+            length: 22,
+            offset: 0,
+        };
+
+        let actual: Literal = "l1(\"test_constant\", X)".parse().unwrap();
+        assert_eq!(Some(spanned_pos), actual.position);
     }
 
     #[test]

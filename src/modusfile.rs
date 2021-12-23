@@ -240,7 +240,7 @@ impl str::FromStr for Literal {
 }
 
 pub mod parser {
-    use crate::logic::parser::{literal, literal_identifier, IResult};
+    use crate::logic::parser::{literal, literal_identifier, recognized_span, IResult};
     use crate::logic::{Predicate, SpannedPosition};
 
     use super::*;
@@ -278,21 +278,20 @@ pub mod parser {
 
     /// Parses `<term> = <term>` into a builtin call, `string_concat("", term1, term2)`.
     fn unification_sugar(i: Span) -> IResult<Span, Literal> {
-        let (i, pos) = position(i)?;
+        let (i, (spanned_pos, (t1, t2))) = recognized_span(separated_pair(
+            modus_term,
+            delimited(multispace0, tag("="), multispace0),
+            cut(modus_term),
+        ))(i)?;
 
-        let x = map(
-            separated_pair(
-                modus_term,
-                delimited(multispace0, tag("="), multispace0),
-                cut(modus_term),
-            ),
-            |(t1, t2)| Literal {
-                position: Some(pos.into()),
+        Ok((
+            i,
+            Literal {
+                position: Some(spanned_pos),
                 predicate: Predicate("string_concat".to_owned()),
                 args: vec![ModusTerm::Constant("".to_owned()), t1, t2],
             },
-        )(i);
-        x
+        ))
     }
 
     fn expression_inner(i: Span) -> IResult<Span, Expression> {

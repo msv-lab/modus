@@ -476,6 +476,16 @@ pub fn proofs(tree: &Tree, rules: &Vec<Clause>, goal: &Goal) -> Vec<Proof> {
 mod tests {
     use super::*;
 
+    fn contains_ignoring_position(it: &HashSet<Vec<Literal>>, lits: &Vec<Literal>) -> bool {
+        it.iter().any(|curr_lits| {
+            curr_lits.len() == lits.len()
+                && curr_lits
+                    .iter()
+                    .zip(lits)
+                    .all(|(l1, l2)| l1.eq_ignoring_position(&l2))
+        })
+    }
+
     #[test]
     fn simple_solving() {
         let goal: Goal<logic::IRTerm> = vec!["a(X)".parse().unwrap()];
@@ -494,8 +504,15 @@ mod tests {
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 2);
-        assert!(solutions.contains(&vec!["a(\"c\")".parse::<logic::Literal>().unwrap()]));
-        assert!(solutions.contains(&vec!["a(\"d\")".parse::<logic::Literal>().unwrap()]));
+
+        assert!(contains_ignoring_position(
+            &solutions,
+            &vec!["a(\"c\")".parse::<logic::Literal>().unwrap()]
+        ));
+        assert!(contains_ignoring_position(
+            &solutions,
+            &vec!["a(\"d\")".parse::<logic::Literal>().unwrap()]
+        ));
     }
 
     #[test]
@@ -509,7 +526,10 @@ mod tests {
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 1);
-        assert!(solutions.contains(&vec!["a(\"b\")".parse::<logic::Literal>().unwrap()]));
+        assert!(contains_ignoring_position(
+            &solutions,
+            &vec!["a(\"b\")".parse::<logic::Literal>().unwrap()]
+        ));
     }
 
     #[test]
@@ -548,10 +568,10 @@ mod tests {
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 1);
-        assert!(solutions.contains(&vec![
-            "a(\"t\")".parse().unwrap(),
-            "b(\"t\")".parse().unwrap()
-        ]));
+        assert!(contains_ignoring_position(
+            &solutions,
+            &vec!["a(\"t\")".parse().unwrap(), "b(\"t\")".parse().unwrap()]
+        ));
     }
 
     #[test]
@@ -580,8 +600,14 @@ mod tests {
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 2);
-        assert!(solutions.contains(&vec!["a(\"f\")".parse().unwrap()]));
-        assert!(solutions.contains(&vec!["a(\"g\")".parse().unwrap()]));
+        assert!(contains_ignoring_position(
+            &solutions,
+            &vec!["a(\"f\")".parse().unwrap()]
+        ));
+        assert!(contains_ignoring_position(
+            &solutions,
+            &vec!["a(\"g\")".parse().unwrap()]
+        ));
     }
 
     #[test]
@@ -623,10 +649,22 @@ mod tests {
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 4);
-        assert!(solutions.contains(&vec!["reach(\"a\", \"b\")".parse().unwrap()]));
-        assert!(solutions.contains(&vec!["reach(\"a\", \"c\")".parse().unwrap()]));
-        assert!(solutions.contains(&vec!["reach(\"a\", \"d\")".parse().unwrap()]));
-        assert!(solutions.contains(&vec!["reach(\"a\", \"e\")".parse().unwrap()]));
+        assert!(contains_ignoring_position(
+            &solutions,
+            &vec!["reach(\"a\", \"b\")".parse().unwrap()]
+        ));
+        assert!(contains_ignoring_position(
+            &solutions,
+            &vec!["reach(\"a\", \"c\")".parse().unwrap()]
+        ));
+        assert!(contains_ignoring_position(
+            &solutions,
+            &vec!["reach(\"a\", \"d\")".parse().unwrap()]
+        ));
+        assert!(contains_ignoring_position(
+            &solutions,
+            &vec!["reach(\"a\", \"e\")".parse().unwrap()]
+        ));
     }
 
     #[test]
@@ -638,11 +676,12 @@ mod tests {
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 1);
-        assert!(
-            solutions.contains(&vec!["string_concat(\"hello\", \"world\", \"helloworld\")"
+        assert!(contains_ignoring_position(
+            &solutions,
+            &vec!["string_concat(\"hello\", \"world\", \"helloworld\")"
                 .parse()
-                .unwrap()])
-        );
+                .unwrap()]
+        ));
     }
 
     #[test]
@@ -670,7 +709,10 @@ mod tests {
                 assert!(result.is_some());
                 let solutions = solutions(&result.unwrap());
                 assert_eq!(solutions.len(), 1);
-                assert!(solutions.contains(&vec![format!("a(\"{}\")", s).parse().unwrap()]));
+                assert!(contains_ignoring_position(
+                    &solutions,
+                    &vec![format!("a(\"{}\")", s).parse().unwrap()]
+                ));
             } else {
                 assert!(result.is_none());
             }
