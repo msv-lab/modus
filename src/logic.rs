@@ -136,6 +136,14 @@ pub struct Literal<T = IRTerm> {
     pub args: Vec<T>,
 }
 
+#[cfg(test)]
+impl<T: PartialEq> Literal<T> {
+    /// Checks for equality, ignoring the position fields.
+    pub fn eq_ignoring_position(&self, other: &Literal<T>) -> bool {
+        self.predicate == other.predicate && self.args == other.args
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Signature(pub Predicate, pub u32);
 
@@ -143,6 +151,18 @@ pub struct Signature(pub Predicate, pub u32);
 pub struct Clause<T = IRTerm> {
     pub head: Literal<T>,
     pub body: Vec<Literal<T>>,
+}
+
+#[cfg(test)]
+impl<T: PartialEq> Clause<T> {
+    fn eq_ignoring_position(&self, other: &Clause<T>) -> bool {
+        self.head.eq_ignoring_position(&other.head)
+            && self
+                .body
+                .iter()
+                .enumerate()
+                .all(|(i, l)| l.eq_ignoring_position(&other.body[i]))
+    }
 }
 
 pub trait Ground {
@@ -281,9 +301,9 @@ pub mod parser {
 
     use nom::{
         branch::alt,
-        bytes::complete::{is_not, tag},
+        bytes::complete::{is_not, tag, take_until},
         character::complete::{alpha1, alphanumeric1, space0},
-        combinator::{map, opt, recognize},
+        combinator::{cut, map, opt, recognize},
         error::VerboseError,
         multi::{many0, separated_list0, separated_list1},
         sequence::{delimited, pair, preceded, separated_pair, terminated},
@@ -303,7 +323,7 @@ pub mod parser {
     }
 
     fn constant(i: Span) -> IResult<Span, Span> {
-        delimited(tag("\""), is_not("\""), tag("\""))(i)
+        delimited(tag("\""), take_until("\""), tag("\""))(i)
     }
 
     fn variable(i: Span) -> IResult<Span, Span> {
@@ -339,7 +359,7 @@ pub mod parser {
                     opt(delimited(
                         terminated(tag("("), space0),
                         separated_list1(ws(tag(",")), term.clone()),
-                        preceded(space0, tag(")")),
+                        cut(preceded(space0, tag(")"))),
                     )),
                 ),
                 |(name, args)| match args {
@@ -379,15 +399,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn simple_term() {
+        let inp = "\"\"";
+
+        let expected = IRTerm::Constant("".into());
+        let actual: IRTerm = parser::term(Span::new(inp)).unwrap().1;
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
     fn literals() {
         let l1 = Literal {
-            position: Some(Default::default()),
+            position: None,
             predicate: Predicate("l1".into()),
             args: vec![IRTerm::Constant("c".into())],
         };
 
         assert_eq!("l1(\"c\")", l1.to_string());
-        assert_eq!(Ok(l1), "l1(\"c\")".parse());
+
+        let actual: Literal = "l1(\"c\")".parse().unwrap();
+        assert!(l1.eq_ignoring_position(&actual));
+    }
+
+    #[test]
+    fn literal_with_variable() {
+        let l1 = Literal {
+            position: None,
+            predicate: Predicate("l1".into()),
+            args: vec![
+                IRTerm::Constant("".into()),
+                IRTerm::UserVariable("X".into()),
+            ],
+        };
+
+        assert_eq!("l1(\"\", X)", l1.to_string());
+
+        let actual: Literal = "l1(\"\", X)".parse().unwrap();
+        assert!(l1.eq_ignoring_position(&actual));
     }
 
     #[test]
@@ -414,8 +463,11 @@ mod tests {
             head: l1,
             body: vec![l2, l3],
         };
+
         assert_eq!("l1(A, B) :- l2(A, \"c\"), l3(B, \"c\")", r.to_string());
-        assert_eq!(Ok(r), "l1(A, B) :- l2(A, \"c\"), l3(B, \"c\")".parse());
+
+        let actual: Clause = "l1(A, B) :- l2(A, \"c\"), l3(B, \"c\")".parse().unwrap();
+        assert!(r.eq_ignoring_position(&actual));
     }
 
     #[test]
@@ -435,7 +487,10 @@ mod tests {
             head: l1,
             body: vec![l2],
         };
+
         assert_eq!("l1 :- l2(A)", r.to_string());
-        assert_eq!(Ok(r), "l1 :- l2(A)".parse());
+
+        let actual: Clause = "l1 :- l2(A)".parse().unwrap();
+        assert!(r.eq_ignoring_position(&actual))
     }
 }

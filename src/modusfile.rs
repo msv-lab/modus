@@ -39,11 +39,39 @@ pub enum Expression {
     Or(Box<Expression>, Box<Expression>),
 }
 
+impl Expression {
+    #[cfg(test)]
+    fn eq_ignoring_position(&self, other: &Expression) -> bool {
+        match (self, other) {
+            (Expression::Literal(l), Expression::Literal(r)) => l.eq_ignoring_position(&r),
+            (Expression::OperatorApplication(l, _), Expression::OperatorApplication(r, _)) => {
+                l.eq_ignoring_position(r)
+            }
+            (Expression::And(l1, l2), Expression::And(r1, r2))
+            | (Expression::Or(l1, l2), Expression::Or(r1, r2)) => {
+                l1.eq_ignoring_position(r1) && l2.eq_ignoring_position(r2)
+            }
+            (s, o) => s.eq(o),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub struct ModusClause {
     pub head: Literal,
     // If None, this clause is a fact.
     pub body: Option<Expression>,
+}
+
+#[cfg(test)]
+impl ModusClause {
+    fn eq_ignoring_position(&self, other: &ModusClause) -> bool {
+        if let (Some(expr1), Some(expr2)) = (&self.body, &other.body) {
+            self.head.eq_ignoring_position(&other.head) && expr1.eq_ignoring_position(&expr2)
+        } else {
+            self.head.eq_ignoring_position(&other.head) && self.body.eq(&other.body)
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -212,7 +240,7 @@ pub mod parser {
 
     use nom::bytes::complete::{escaped, is_not};
     use nom::character::complete::{multispace0, multispace1, none_of, one_of};
-    use nom::combinator::cut;
+    use nom::combinator::{cut, opt};
     use nom::error::context;
     use nom::multi::{fold_many0, separated_list1};
     use nom::{
@@ -343,7 +371,7 @@ pub mod parser {
     /// This also supports string continuation, This allows users to write strings like: "Hello, \
     ///                                                                                 World!"
     /// which is actually just "Hello, World!".
-    fn process_raw_string(s: Span) -> String {
+    fn process_raw_string(s: &str) -> String {
         let mut processed = String::new();
 
         let mut chars = s.chars().peekable();
@@ -380,8 +408,10 @@ pub mod parser {
     }
 
     fn string_content(i: Span) -> IResult<Span, String> {
-        let (i, o) = escaped(none_of("\\\""), '\\', one_of("\""))(i)?;
-        Ok((i, process_raw_string(o)))
+        let escape_parser = escaped(none_of("\\\""), '\\', one_of("\"\\nrt0\n"));
+        let (i, o) = opt(escape_parser)(i)?;
+        let parsed_str: &str = o.and_then(|span| Some(*span.fragment())).unwrap_or("");
+        Ok((i, process_raw_string(parsed_str)))
     }
 
     pub fn modus_const(i: Span) -> IResult<Span, String> {
@@ -419,7 +449,7 @@ pub mod parser {
             map(modus_const, ModusTerm::Constant),
             map(modus_format_string, ModusTerm::FormatString),
             map(modus_var, |s| {
-                ModusTerm::UserVariable((*s.fragment()).clone().into())
+                ModusTerm::UserVariable(s.fragment().to_string())
             }),
         ))(i)
     }
@@ -459,8 +489,11 @@ mod tests {
             head: l1,
             body: None,
         };
+
         assert_eq!("l1.", c.to_string());
-        assert_eq!(Ok(c), "l1.".parse());
+
+        let actual: ModusClause = "l1.".parse().unwrap();
+        assert!(c.eq_ignoring_position(&actual));
     }
 
     #[test]
@@ -484,9 +517,13 @@ mod tests {
             head: l1,
             body: Expression::And(Box::new(l2.into()), Box::new(l3.into())).into(),
         };
+
         assert_eq!("l1 :- (l2, l3).", c.to_string());
-        assert_eq!(Ok(c.clone()), "l1 :- l2, l3.".parse());
-        assert_eq!(Ok(c.clone()), "l1 :- l2,\n\tl3.".parse());
+
+        let actual1: Rule = "l1 :- l2, l3.".parse().unwrap();
+        assert!(c.eq_ignoring_position(&actual1));
+        let actual2: Rule = "l1 :- l2,\n\tl3.".parse().unwrap();
+        assert!(c.eq_ignoring_position(&actual2));
     }
 
     #[test]
@@ -499,7 +536,9 @@ mod tests {
         };
 
         assert_eq!("foo :- (l1; l2).", c.to_string());
-        assert_eq!(Ok(c.clone()), "foo :- l1; l2.".parse());
+
+        let actual: Rule = "foo :- l1; l2.".parse().unwrap();
+        assert!(c.eq_ignoring_position(&actual));
     }
 
     #[test]
@@ -538,11 +577,14 @@ mod tests {
         };
 
         assert_eq!("foo :- ((a, b))::merge.", r1.to_string());
-        assert_eq!(Ok(r1.clone()), "foo :- ((a, b))::merge.".parse());
-        assert_eq!(Ok(r1.clone()), "foo :- (a, b)::merge.".parse());
+        let actual1 = "foo :- ((a, b))::merge.".parse().unwrap();
+        assert!(r1.eq_ignoring_position(&actual1));
+        let actual2 = "foo :- (a, b)::merge.".parse().unwrap();
+        assert!(r1.eq_ignoring_position(&actual2));
 
         assert_eq!("foo :- (a)::merge.", r2.to_string());
-        assert_eq!(Ok(r2.clone()), "foo :- ( a )::merge.".parse());
+        let actual3 = "foo :- ( a )::merge.".parse().unwrap();
+        assert!(r2.eq_ignoring_position(&actual3));
     }
 
     #[test]
@@ -672,8 +714,9 @@ mod tests {
 
         let expr_str = "((a, b); (c, d))";
         assert_eq!(expr_str, expr.to_string());
-        let rule = format!("foo :- {}.", expr_str);
-        assert_eq!(Ok(Some(expr)), rule.parse().map(|r: ModusClause| r.body));
+
+        let rule: ModusClause = format!("foo :- {}.", expr_str).parse().unwrap();
+        assert!(expr.eq_ignoring_position(&rule.body.unwrap()))
     }
 
     #[test]
@@ -681,10 +724,8 @@ mod tests {
         let inp = "foo(X, Y) :- X = Y.";
 
         let expected_lit: Literal = "string_concat(\"\", X, Y)".parse().unwrap();
-        assert_eq!(
-            Ok(Some(Expression::Literal(expected_lit))),
-            inp.parse().map(|r: ModusClause| r.body)
-        )
+        let actual: Expression = inp.parse().map(|r: ModusClause| r.body).unwrap().unwrap();
+        assert!(Expression::Literal(expected_lit).eq_ignoring_position(&actual));
     }
 
     #[test]
@@ -735,20 +776,10 @@ mod tests {
                 )),
             )),
         };
-        // assert_eq!(&a, &(r#"a:-(foo(x),bar)::setenv("a","foobar"), baz::setenv("a" "baz")."#.parse().unwrap()));
-        // assert_eq!(&a, &(r#"a:-(foo(x),bar)::setenv("a","foobar"), baz()::setenv("a" "baz")."#.parse().unwrap()));
-        assert_eq!(
-            &a,
-            &(r#"a:-(foo(x),bar)::setenv("a","foobar"), (baz)::setenv("a", "baz")."#
-                .parse()
-                .unwrap())
-        );
-        // assert_eq!(
-        //     &a,
-        //     &(r#"a:-(foo(x),bar)::setenv("a","foobar"), (baz())::setenv("a" "baz")."#
-        //         .parse()
-        //         .unwrap())
-        // );
-        // assert_eq!(&a, &(r#"a:-(foo(x),bar)::setenv("a","foobar"), baz::setenv("a" "baz")."#.parse().unwrap()));
+
+        let actual: Rule = r#"a:-(foo(x),bar)::setenv("a","foobar"), (baz)::setenv("a", "baz")."#
+            .parse()
+            .unwrap();
+        assert!(a.eq_ignoring_position(&actual));
     }
 }
