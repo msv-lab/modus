@@ -18,6 +18,7 @@
 use nom::character::complete::line_ending;
 use nom::character::complete::not_line_ending;
 use nom::error::convert_error;
+use nom::error::VerboseError;
 use std::fmt;
 use std::str;
 
@@ -163,9 +164,15 @@ impl str::FromStr for Modusfile {
         match parser::modusfile(span) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(nom::Err::Error(e) | nom::Err::Failure(e)) => {
-                // FIXME: VerboseError with span?
-                // The span needs to be able to be deref'd to str.
-                todo!("Result::Err(convert_error(s, e))")
+                // HACK: converts our span based errors to the standard &str based errors.
+                // This drops information that would likely be recomputed in `convert_error`.
+                let errors = e
+                    .errors
+                    .into_iter()
+                    .map(|(span, err)| (span.fragment().to_owned(), err))
+                    .collect();
+                let str_verbose_error = VerboseError { errors };
+                Result::Err(convert_error(s, str_verbose_error))
             }
             _ => unimplemented!(),
         }
