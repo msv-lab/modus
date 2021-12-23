@@ -215,11 +215,7 @@ impl Clause {
 
 impl Ground for IRTerm {
     fn is_ground(&self) -> bool {
-        return if let IRTerm::Constant(_) = self {
-            true
-        } else {
-            false
-        };
+        matches!(self, IRTerm::Constant(_))
     }
 }
 
@@ -274,7 +270,7 @@ impl str::FromStr for Clause {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let span = Span::new(s.into());
+        let span = Span::new(s);
         match parser::clause(parser::term)(span) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
@@ -286,7 +282,7 @@ impl str::FromStr for Literal {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let span = Span::new(s.into());
+        let span = Span::new(s);
         match parser::literal(parser::term)(span) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),

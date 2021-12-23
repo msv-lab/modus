@@ -160,7 +160,7 @@ impl str::FromStr for Modusfile {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let span = Span::new(s.into());
+        let span = Span::new(s);
         match parser::modusfile(span) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(nom::Err::Error(e) | nom::Err::Failure(e)) => {
@@ -209,7 +209,7 @@ impl str::FromStr for ModusClause {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let span = Span::new(s.into());
+        let span = Span::new(s);
         match parser::modus_clause(span) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
@@ -231,7 +231,7 @@ impl str::FromStr for Literal {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let span = Span::new(s.into());
+        let span = Span::new(s);
         match logic::parser::literal(parser::modus_term)(span) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
@@ -417,7 +417,7 @@ pub mod parser {
     fn string_content(i: Span) -> IResult<Span, String> {
         let escape_parser = escaped(none_of("\\\""), '\\', one_of("\"\\nrt0\n"));
         let (i, o) = opt(escape_parser)(i)?;
-        let parsed_str: &str = o.and_then(|span| Some(*span.fragment())).unwrap_or("");
+        let parsed_str: &str = o.map(|span| *span.fragment()).unwrap_or("");
         Ok((i, process_raw_string(parsed_str)))
     }
 
