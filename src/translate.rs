@@ -20,7 +20,7 @@ use std::sync::atomic::AtomicUsize;
 use nom::{bytes::streaming::tag, sequence::delimited};
 
 use crate::{
-    logic::{self, parser::Span, IRTerm, Predicate},
+    logic::{self, parser::Span, IRTerm, Predicate, SpannedPosition},
     modusfile::{
         parser::{modus_var, outside_format_expansion},
         Expression, ModusClause, ModusTerm,
@@ -31,13 +31,21 @@ use crate::{
 /// Takes the content of a format string.
 /// Returns an IRTerm to be used instead of the format string term, and a list of literals
 /// needed to make this equivalent.
-fn convert_format_string(format_string_content: &str) -> (Vec<logic::Literal>, IRTerm) {
+fn convert_format_string(
+    spanned_position: &SpannedPosition,
+    format_string_content: &str,
+) -> (Vec<logic::Literal>, IRTerm) {
     let concat_predicate = "string_concat";
     let mut curr_string = format_string_content;
     let mut prev_variable: IRTerm = Auxiliary::aux();
     let mut new_literals = vec![logic::Literal {
-        // this initial literal is a no-op that makes the code simpler, it does not have an equivalent position.
-        position: None,
+        // This initial literal is a no-op that makes the code simpler.
+        // It does not have an equivalent position, but we can link to the start
+        // of the f-string for clarity.
+        position: Some(SpannedPosition {
+            length: 1,
+            offset: spanned_position.offset,
+        }),
         predicate: logic::Predicate(concat_predicate.to_owned()),
         args: vec![
             IRTerm::Constant("".to_owned()),
@@ -46,6 +54,10 @@ fn convert_format_string(format_string_content: &str) -> (Vec<logic::Literal>, I
         ],
     }];
 
+    // FIXME: Need to take the original string, no escape character processing
+    // since we need the original to interpolate the spanned position.
+
+    let mut curr_string_offset = 2; // skip the `f"` at the start of the f-string.
     // Approach is to parse sections of the string and create new literals, e.g.
     // if the last var we created was R1 and we just parsed some (constant) string c, we
     // add a literal `string_concat(R1, c, R2)`, creating a new variable R2.
@@ -54,9 +66,12 @@ fn convert_format_string(format_string_content: &str) -> (Vec<logic::Literal>, I
             .expect("can parse outside format expansion");
         let constant_string = constant_str.fragment().replace("\\$", "$");
         let new_var: IRTerm = Auxiliary::aux();
+        let span_length = constant_str.len();
         let new_literal = logic::Literal {
-            // TODO: More precise position
-            position: None,
+            position: Some(SpannedPosition {
+                offset: spanned_position.offset + curr_string_offset,
+                length: span_length,
+            }),
             predicate: logic::Predicate(concat_predicate.to_string()),
             args: vec![
                 prev_variable,
@@ -64,6 +79,7 @@ fn convert_format_string(format_string_content: &str) -> (Vec<logic::Literal>, I
                 new_var.clone(),
             ],
         };
+        curr_string_offset += span_length;
         new_literals.push(new_literal);
         prev_variable = new_var;
 
@@ -71,8 +87,12 @@ fn convert_format_string(format_string_content: &str) -> (Vec<logic::Literal>, I
         let variable_res = delimited(tag("${"), modus_var, tag("}"))(i);
         if let Ok((rest, variable)) = variable_res {
             let new_var: IRTerm = Auxiliary::aux();
+            let span_length = 2 + variable.fragment().len() + 1; // the variable string surrounded by ${...}
             let new_literal = logic::Literal {
-                position: None,
+                position: Some(SpannedPosition {
+                    offset: spanned_position.offset + curr_string_offset,
+                    length: span_length,
+                }),
                 predicate: logic::Predicate(concat_predicate.to_string()),
                 args: vec![
                     prev_variable,
@@ -80,6 +100,7 @@ fn convert_format_string(format_string_content: &str) -> (Vec<logic::Literal>, I
                     new_var.clone(),
                 ],
             };
+            curr_string_offset += span_length;
             new_literals.push(new_literal);
             prev_variable = new_var;
             curr_string = rest.fragment();
@@ -105,8 +126,11 @@ pub(crate) fn reset_operator_pair_id() {
 fn translate_term(t: &ModusTerm) -> (IRTerm, Vec<logic::Literal>) {
     match t {
         ModusTerm::Constant(c) => (IRTerm::Constant(c.to_owned()), Vec::new()),
-        ModusTerm::FormatString(s) => {
-            let (new_literals, new_var) = convert_format_string(s);
+        ModusTerm::FormatString {
+            position,
+            format_string_literal,
+        } => {
+            let (new_literals, new_var) = convert_format_string(position, format_string_literal);
             (new_var, new_literals)
         }
         ModusTerm::UserVariable(v) => (IRTerm::UserVariable(v.to_owned()), Vec::new()),
@@ -242,7 +266,7 @@ mod tests {
 
         let lits = vec![
             logic::Literal {
-                position: None,
+                position: Some(SpannedPosition { offset: 0, length: 1 }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::Constant("".to_owned()),
@@ -251,7 +275,7 @@ mod tests {
                 ],
             },
             logic::Literal {
-                position: None,
+                position: Some(SpannedPosition { offset: 2, length: 7 }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(0),
@@ -260,7 +284,7 @@ mod tests {
                 ],
             },
             logic::Literal {
-                position: None,
+                position: Some(SpannedPosition { offset: 9, length: 16 }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(1),
@@ -272,7 +296,7 @@ mod tests {
 
         assert_eq!(
             (lits, IRTerm::AuxiliaryVariable(2)),
-            convert_format_string(case)
+            convert_format_string(&SpannedPosition { length: case.len() + 3, offset: 0 }, case)
         );
     }
 
@@ -285,7 +309,7 @@ mod tests {
 
         let lits = vec![
             logic::Literal {
-                position: None,
+                position: Some(SpannedPosition { offset: 0, length: 1 }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::Constant("".to_owned()),
@@ -294,7 +318,7 @@ mod tests {
                 ],
             },
             logic::Literal {
-                position: None,
+                position: Some(SpannedPosition { offset: 2, length: 4 }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(0),
@@ -303,7 +327,7 @@ mod tests {
                 ],
             },
             logic::Literal {
-                position: None,
+                position: Some(SpannedPosition { offset: 6, length: 10 }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(1),
@@ -312,7 +336,7 @@ mod tests {
                 ],
             },
             logic::Literal {
-                position: None,
+                position: Some(SpannedPosition { offset: 16, length: 18 }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(2),
@@ -324,7 +348,7 @@ mod tests {
 
         assert_eq!(
             (lits, IRTerm::AuxiliaryVariable(3)),
-            convert_format_string(case)
+            convert_format_string(&SpannedPosition { length: case.len() + 3, offset: 0 }, case)
         );
     }
 }

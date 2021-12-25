@@ -25,6 +25,7 @@ use std::str;
 use crate::dockerfile;
 use crate::logic;
 use crate::logic::parser::Span;
+use crate::logic::SpannedPosition;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Expression {
@@ -80,7 +81,11 @@ pub enum ModusTerm {
     Constant(String),
     /// A format string with '\$' left unhandled. This should be dealt with when
     /// converting to the IR.
-    FormatString(String),
+    FormatString {
+        /// The position of this term, beginning from the 'f' in the source
+        position: SpannedPosition,
+        format_string_literal: String,
+    },
     UserVariable(String),
 }
 
@@ -89,7 +94,10 @@ impl fmt::Display for ModusTerm {
         match self {
             ModusTerm::Constant(s) => write!(f, "\"{}\"", s),
             ModusTerm::UserVariable(s) => write!(f, "{}", s),
-            ModusTerm::FormatString(s) => write!(f, "\"{}\"", s),
+            ModusTerm::FormatString {
+                position: _,
+                format_string_literal,
+            } => write!(f, "\"{}\"", format_string_literal),
         }
     }
 }
@@ -100,7 +108,10 @@ impl From<ModusTerm> for logic::IRTerm {
             ModusTerm::Constant(c) => logic::IRTerm::Constant(c),
             // TODO: return a Result type and propogate the error up properly if we want to warn about
             // this. Example: the user might try to use a format string in a head literal.
-            ModusTerm::FormatString(_) => panic!("Cannot convert a format string to an IRTerm."),
+            ModusTerm::FormatString {
+                position: _,
+                format_string_literal: _,
+            } => panic!("Cannot convert a format string to an IRTerm."),
             ModusTerm::UserVariable(v) => logic::IRTerm::UserVariable(v),
         }
     }
@@ -241,24 +252,23 @@ impl str::FromStr for Literal {
 
 pub mod parser {
     use crate::logic::parser::{literal, literal_identifier, recognized_span, IResult};
-    use crate::logic::{Predicate, SpannedPosition};
+    use crate::logic::Predicate;
 
     use super::*;
 
-    use nom::bytes::complete::{escaped, is_not};
-    use nom::character::complete::{multispace0, multispace1, none_of, one_of};
+    use nom::bytes::complete::escaped;
+    use nom::character::complete::{multispace0, none_of, one_of};
     use nom::combinator::{cut, opt};
     use nom::error::context;
-    use nom::multi::{fold_many0, separated_list1};
+    use nom::multi::separated_list1;
     use nom::{
         branch::alt,
         bytes::complete::tag,
         character::complete::space0,
-        combinator::{eof, map, recognize},
+        combinator::{eof, map},
         multi::{many0, separated_list0},
         sequence::{delimited, preceded, separated_pair, terminated},
     };
-    use nom_locate::position;
 
     fn comment(s: Span) -> IResult<Span, Span> {
         delimited(tag("#"), not_line_ending, line_ending)(s)
@@ -433,12 +443,12 @@ pub mod parser {
         escaped(none_of("\\$"), '\\', one_of("$"))(i)
     }
 
-    fn modus_format_string(i: Span) -> IResult<Span, String> {
-        // TODO: check that the token(s) inside "${...}" conform to the variable syntax.
-        // Note that if it's escaped, "\${...}", it does not need to conform to the variable syntax.
+    fn modus_format_string(i: Span) -> IResult<Span, (SpannedPosition, String)> {
         context(
             stringify!(modus_format_string),
-            delimited(tag("f\""), string_content, cut(tag("\""))),
+            // TODO: check that the token(s) inside "${...}" conform to the variable syntax.
+            // Note that if it's escaped, "\${...}", it does not need to conform to the variable syntax.
+            recognized_span(delimited(tag("f\""), string_content, cut(tag("\"")))),
         )(i)
     }
 
@@ -453,7 +463,12 @@ pub mod parser {
     pub fn modus_term(i: Span) -> IResult<Span, ModusTerm> {
         alt((
             map(modus_const, ModusTerm::Constant),
-            map(modus_format_string, ModusTerm::FormatString),
+            map(modus_format_string, |(position, format_string_literal)| {
+                ModusTerm::FormatString {
+                    position,
+                    format_string_literal,
+                }
+            }),
             map(modus_var, |s| {
                 ModusTerm::UserVariable(s.fragment().to_string())
             }),

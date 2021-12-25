@@ -23,13 +23,12 @@
 use nom_locate::LocatedSpan;
 
 use crate::logic::parser::Span;
+use crate::sld;
 use crate::unification::Rename;
-use crate::{modusfile, sld};
 
 use std::convert::TryInto;
 use std::fmt;
-use std::fmt::{Debug, Display};
-use std::rc::Rc;
+use std::fmt::Debug;
 use std::str;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::{collections::HashSet, hash::Hash};
@@ -99,23 +98,16 @@ impl IRTerm {
 /// Not to be confused with `parser::Span`.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct SpannedPosition {
-    pub line: u32,
-
-    /// Index of the column. Assumes ASCII text (i.e. each character is a byte).
-    pub column: usize,
+    /// The relative offset of this spanned position from the original input.
+    pub offset: usize,
 
     /// Length of this spanned position. Assumes ASCII text (i.e. each character is a byte).
     pub length: usize,
-
-    /// The relative offset of this spanned position from the original input.
-    offset: usize,
 }
 
 impl From<Span<'_>> for SpannedPosition {
     fn from(s: Span) -> Self {
         SpannedPosition {
-            line: s.location_line(),
-            column: s.get_column(),
             length: s.fragment().len(),
             offset: s.location_offset(),
         }
@@ -290,7 +282,7 @@ pub mod parser {
 
     use nom::{
         branch::alt,
-        bytes::complete::{is_not, tag, take_until},
+        bytes::complete::{tag, take_until},
         character::complete::{alpha1, alphanumeric1, space0},
         combinator::{cut, map, opt, recognize},
         error::VerboseError,
@@ -451,8 +443,6 @@ mod tests {
     #[test]
     fn span_of_literal() {
         let spanned_pos = SpannedPosition {
-            line: 1,
-            column: 1,
             length: 22,
             offset: 0,
         };
