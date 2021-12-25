@@ -58,6 +58,7 @@ fn convert_format_string(
     // since we need the original to interpolate the spanned position.
 
     let mut curr_string_offset = 2; // skip the `f"` at the start of the f-string.
+
     // Approach is to parse sections of the string and create new literals, e.g.
     // if the last var we created was R1 and we just parsed some (constant) string c, we
     // add a literal `string_concat(R1, c, R2)`, creating a new variable R2.
@@ -266,7 +267,10 @@ mod tests {
 
         let lits = vec![
             logic::Literal {
-                position: Some(SpannedPosition { offset: 0, length: 1 }),
+                position: Some(SpannedPosition {
+                    offset: 0,
+                    length: 1,
+                }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::Constant("".to_owned()),
@@ -275,7 +279,10 @@ mod tests {
                 ],
             },
             logic::Literal {
-                position: Some(SpannedPosition { offset: 2, length: 7 }),
+                position: Some(SpannedPosition {
+                    offset: 2,
+                    length: 7,
+                }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(0),
@@ -284,7 +291,10 @@ mod tests {
                 ],
             },
             logic::Literal {
-                position: Some(SpannedPosition { offset: 9, length: 16 }),
+                position: Some(SpannedPosition {
+                    offset: 9,
+                    length: 16,
+                }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(1),
@@ -296,7 +306,13 @@ mod tests {
 
         assert_eq!(
             (lits, IRTerm::AuxiliaryVariable(2)),
-            convert_format_string(&SpannedPosition { length: case.len() + 3, offset: 0 }, case)
+            convert_format_string(
+                &SpannedPosition {
+                    length: case.len() + 3,
+                    offset: 0
+                },
+                case
+            )
         );
     }
 
@@ -309,7 +325,10 @@ mod tests {
 
         let lits = vec![
             logic::Literal {
-                position: Some(SpannedPosition { offset: 0, length: 1 }),
+                position: Some(SpannedPosition {
+                    offset: 0,
+                    length: 1,
+                }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::Constant("".to_owned()),
@@ -318,7 +337,10 @@ mod tests {
                 ],
             },
             logic::Literal {
-                position: Some(SpannedPosition { offset: 2, length: 4 }),
+                position: Some(SpannedPosition {
+                    offset: 2,
+                    length: 4,
+                }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(0),
@@ -327,7 +349,10 @@ mod tests {
                 ],
             },
             logic::Literal {
-                position: Some(SpannedPosition { offset: 6, length: 10 }),
+                position: Some(SpannedPosition {
+                    offset: 6,
+                    length: 10,
+                }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(1),
@@ -336,7 +361,10 @@ mod tests {
                 ],
             },
             logic::Literal {
-                position: Some(SpannedPosition { offset: 16, length: 18 }),
+                position: Some(SpannedPosition {
+                    offset: 16,
+                    length: 18,
+                }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(2),
@@ -348,7 +376,13 @@ mod tests {
 
         assert_eq!(
             (lits, IRTerm::AuxiliaryVariable(3)),
-            convert_format_string(&SpannedPosition { length: case.len() + 3, offset: 0 }, case)
+            convert_format_string(
+                &SpannedPosition {
+                    length: case.len() + 3,
+                    offset: 0
+                },
+                case
+            )
         );
     }
 }

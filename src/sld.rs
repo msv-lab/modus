@@ -31,6 +31,7 @@ use crate::{
     unification::Substitute,
     wellformed,
 };
+use codespan_reporting::diagnostic::{Diagnostic, Label};
 use logic::{Clause, IRTerm, Literal};
 
 pub trait Auxiliary: Rename<Self> + Sized {
@@ -109,45 +110,58 @@ impl Substitute<IRTerm> for GoalWithHistory {
     }
 }
 
-pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> Option<Tree> {
+pub fn sld(
+    rules: &Vec<Clause<IRTerm>>,
+    goal: &Goal,
+    maxdepth: TreeLevel,
+) -> Result<Option<Tree>, Diagnostic<()>> {
     /// select leftmost literal with compatible groundness
     fn select(
         goal: &GoalWithHistory,
         grounded: &HashMap<Signature, Vec<bool>>,
-    ) -> Option<(LiteralGoalId, LiteralWithHistory)> {
-        goal.iter()
-            .enumerate()
-            .find(|(_id, lit)| {
-                let literal = &lit.literal;
-                let select_builtin_res = builtin::select_builtin(literal);
-                if select_builtin_res.0.is_match() {
-                    return true;
-                }
+    ) -> Result<Option<(LiteralGoalId, LiteralWithHistory)>, Diagnostic<()>> {
+        for (id, lit) in goal.iter().enumerate() {
+            let literal = &lit.literal;
+            let select_builtin_res = builtin::select_builtin(literal);
+            if select_builtin_res.0.is_match() {
+                return Ok(Some((id, lit.clone())));
+            }
 
-                // For any user-defined atom, we can get its groundness requirement
-                // (computed outside), and if a particular argument can not be
-                // ungrounded (grounded[arg_index] == false), variables will not be
-                // allowed there.
-                let lit_grounded = grounded.get(&literal.signature());
-                if let Some(lit_grounded) = lit_grounded {
-                    debug_assert_eq!(lit_grounded.len(), literal.args.len());
-                    return literal
-                        .args
-                        .iter()
-                        .zip(lit_grounded.iter())
-                        .all(|pair| matches!(pair, (_, true) | (IRTerm::Constant(_), false)));
-                } else if select_builtin_res.0 == SelectBuiltinResult::GroundnessMismatch {
-                    return false;
+            // For any user-defined atom, we can get its groundness requirement
+            // (computed outside), and if a particular argument can not be
+            // ungrounded (grounded[arg_index] == false), variables will not be
+            // allowed there.
+            let lit_grounded = grounded.get(&literal.signature());
+            if let Some(lit_grounded) = lit_grounded {
+                debug_assert_eq!(lit_grounded.len(), literal.args.len());
+                if literal
+                    .args
+                    .iter()
+                    .zip(lit_grounded.iter())
+                    .all(|pair| matches!(pair, (_, true) | (IRTerm::Constant(_), false)))
+                {
+                    return Ok(Some((id, lit.clone())));
+                } else {
+                    continue;
                 }
+            } else if select_builtin_res.0 == SelectBuiltinResult::GroundnessMismatch {
+                continue;
+            }
 
-                // No builtin nor user-define predicate with this name
-                panic!(
-                    "Unknown predicate {}/{}",
-                    &literal.predicate.0,
-                    literal.args.len()
-                );
-            })
-            .map(|(a, b)| (a, b.clone()))
+            // No builtin nor user-define predicate with this name
+            return Err(Diagnostic::error()
+                .with_message("unknown predicate")
+                .with_labels(vec![Label::primary(
+                    (),
+                    literal
+                        .clone()
+                        .position
+                        .map(|span_pos| span_pos.offset..(span_pos.offset + span_pos.length))
+                        .unwrap(),
+                )]));
+        }
+
+        Ok(None)
     }
 
     fn resolve(
@@ -186,7 +200,7 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> Opt
         maxdepth: TreeLevel,
         level: TreeLevel,
         grounded: &HashMap<Signature, Vec<bool>>,
-    ) -> Option<Tree> {
+    ) -> Result<Option<Tree>, Diagnostic<()>> {
         #[cfg(debug_assertions)]
         {
             // FIXME: move this ad-hoc debug code elsewhere
@@ -216,17 +230,17 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> Opt
             );
         }
         if goal.is_empty() {
-            Some(Tree {
+            Ok(Some(Tree {
                 goal: goal.clone(),
                 level,
                 resolvents: HashMap::new(),
-            })
+            }))
         } else if level >= maxdepth {
-            None
+            Ok(None)
         } else {
-            let selected = select(goal, grounded);
+            let selected = select(goal, grounded)?;
             if selected.is_none() {
-                return None;
+                return Ok(None);
             }
             let (lid, l) = selected.unwrap();
 
@@ -272,22 +286,24 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> Opt
                     })
                 });
 
-            let resolvents: HashMap<(LiteralGoalId, ClauseId), (Substitution, Substitution, Tree)> =
-                builtin_resolves
-                    .chain(user_rules_resolves)
-                    .filter_map(|(rid, mgu, renaming, resolvent)| {
-                        inner(rules, &resolvent, maxdepth, level + 1, grounded)
-                            .and_then(|tree| Some(((lid, rid), (mgu, renaming, tree))))
-                    })
-                    .collect();
+            let mut resolvents: HashMap<
+                (LiteralGoalId, ClauseId),
+                (Substitution, Substitution, Tree),
+            > = HashMap::new();
+            for (rid, mgu, renaming, resolvent) in builtin_resolves.chain(user_rules_resolves) {
+                let maybe_tree = inner(rules, &resolvent, maxdepth, level + 1, grounded)?;
+                if let Some(tree) = maybe_tree {
+                    resolvents.insert((lid, rid), (mgu, renaming, tree));
+                }
+            }
             if resolvents.is_empty() {
-                None
+                Ok(None)
             } else {
-                Some(Tree {
+                Ok(Some(Tree {
                     goal: goal.clone(),
                     level,
                     resolvents,
-                })
+                }))
             }
         }
     }
@@ -500,7 +516,7 @@ mod tests {
                 body: vec![],
             },
         ];
-        let result = sld(&clauses, &goal, 10);
+        let result = sld(&clauses, &goal, 10).unwrap();
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 2);
@@ -522,7 +538,7 @@ mod tests {
             head: "a(X)".parse().unwrap(),
             body: vec![],
         }];
-        let result = sld(&clauses, &goal, 10);
+        let result = sld(&clauses, &goal, 10).unwrap();
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 1);
@@ -539,7 +555,7 @@ mod tests {
             head: "a(X)".parse().unwrap(),
             body: vec![],
         }];
-        let result = sld(&clauses, &goal, 10);
+        let result = sld(&clauses, &goal, 10).unwrap();
         assert!(result.is_none());
     }
 
@@ -564,7 +580,7 @@ mod tests {
                 body: vec![],
             },
         ];
-        let result = sld(&clauses, &goal, 10);
+        let result = sld(&clauses, &goal, 10).unwrap();
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 1);
@@ -596,7 +612,7 @@ mod tests {
                 body: vec![],
             },
         ];
-        let result = sld(&clauses, &goal, 10);
+        let result = sld(&clauses, &goal, 10).unwrap();
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 2);
@@ -645,7 +661,7 @@ mod tests {
                 body: vec![],
             },
         ];
-        let result = sld(&clauses, &goal, 15);
+        let result = sld(&clauses, &goal, 15).unwrap();
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 4);
@@ -672,7 +688,7 @@ mod tests {
         let goal: Goal<logic::IRTerm> =
             vec!["string_concat(\"hello\", \"world\", X)".parse().unwrap()];
         let clauses: Vec<logic::Clause> = vec![];
-        let result = sld(&clauses, &goal, 10);
+        let result = sld(&clauses, &goal, 10).unwrap();
         assert!(result.is_some());
         let solutions = solutions(&result.unwrap());
         assert_eq!(solutions.len(), 1);
@@ -704,7 +720,7 @@ mod tests {
                     .parse()
                     .unwrap(),
             ];
-            let result = sld(&clauses, &goal, 50);
+            let result = sld(&clauses, &goal, 50).unwrap();
             if is_good {
                 assert!(result.is_some());
                 let solutions = solutions(&result.unwrap());
