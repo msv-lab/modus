@@ -1,0 +1,35 @@
+build_env :- from("rust").
+run_env :- (from("debian"))::set_workdir("/usr/src/app").
+
+cargo_build("debug") :- run(f"cargo build").
+cargo_build("release") :- run(f"cargo build --release").
+
+build_deps(profile) :-
+  copy("Cargo.toml", "."),
+  copy("Cargo.lock", "."),
+  run("mkdir src && echo 'fn main () {}' > src/main.rs && echo 'fn main () {}' > src/buildkit_frontend.rs"),
+  cargo_build(profile).
+
+build(profile) :-
+  build_env,
+  build_deps(profile),
+  copy(".", "."),
+  cargo_build(profile).
+
+frontend_img(profile) :-
+  run_env,
+  profile_to_target_folder(profile, target_folder),
+  (build(profile))::copy(f"${target_folder}/buildkit-frontend", "./buildkit-frontend").
+
+modus(profile) :-
+  run_env,
+  profile_to_target_folder(profile, target_folder),
+  (build(profile))::copy(f"${target_folder}/modus", "./modus").
+
+profile_to_target_folder("debug", "target/debug").
+profile_to_target_folder("release", "target/release").
+
+all("modus", profile) :- modus(profile).
+all("frontend", profile) :- frontend_img(profile).
+
+all(X) :- all(X, "debug").

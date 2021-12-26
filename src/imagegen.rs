@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::logic::{Clause, IRTerm, Literal, Predicate};
 use crate::modusfile::Modusfile;
@@ -277,6 +277,9 @@ pub fn build_dag_from_proofs(
                     }
                     let parent = last_node.unwrap();
                     let src_path = intrinsic.args[0].as_constant().unwrap().to_owned();
+                    if src_path.starts_with("/") {
+                        panic!("The source of a local copy can not be an absolute path.");
+                    }
                     let dst_path = intrinsic.args[1].as_constant().unwrap();
                     let dst_path = join_path(&curr_state.cwd, dst_path);
                     last_node.replace(res.new_node(

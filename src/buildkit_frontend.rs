@@ -24,6 +24,7 @@ use buildkit_frontend::{
     run_frontend, Bridge, Frontend, FrontendOutput,
 };
 use buildkit_llb::prelude::*;
+use buildkit_llb::prelude::{fs::CopyOperation, source::LocalSource};
 
 use async_trait::async_trait;
 
@@ -44,6 +45,7 @@ struct TheFrontend;
 struct FrontendOptions {
     filename: String,
     target: Option<String>,
+    has_dockerignore: bool,
     #[serde(flatten)]
     others: HashMap<String, serde_json::Value>,
 }
@@ -56,12 +58,17 @@ impl Frontend<FrontendOptions> for TheFrontend {
         options: FrontendOptions,
     ) -> Result<FrontendOutput, failure::Error> {
         let build_plan = fetch_input(&bridge, &options).await;
-        let mut outputs = handle_build_plan(&bridge, &build_plan).await;
+        let mut outputs = handle_build_plan(&bridge, &options, &build_plan).await;
         let final_output;
         if outputs.len() == 1 {
             final_output = outputs.into_iter().next().unwrap();
         } else if options.target.is_some() && !options.target.as_ref().unwrap().is_empty() {
-            let target_idx: usize = options.target.as_ref().unwrap().parse().expect("Expected target to be an usize");
+            let target_idx: usize = options
+                .target
+                .as_ref()
+                .unwrap()
+                .parse()
+                .expect("Expected target to be an usize");
             final_output = outputs.swap_remove(target_idx);
         } else {
             let alpine = Source::image("alpine")
@@ -127,6 +134,7 @@ async fn fetch_input(bridge: &Bridge, options: &FrontendOptions) -> BuildPlan {
 
 async fn handle_build_plan(
     bridge: &Bridge,
+    options: &FrontendOptions,
     build_plan: &BuildPlan,
 ) -> Vec<(OwnedOutput, Arc<ImageSpecification>)> {
     let mut translated_nodes: Vec<Option<(OwnedOutput, Arc<ImageSpecification>)>> =
@@ -136,8 +144,8 @@ async fn handle_build_plan(
         translated_nodes.push(None);
     }
 
-    fn get_parent_dir(parent_config: &ImageSpecification) -> PathBuf {
-        parent_config
+    fn get_cwd_from_image_spec(image_spec: &ImageSpecification) -> PathBuf {
+        image_spec
             .config
             .as_ref()
             .and_then(|x| x.working_dir.clone())
@@ -164,6 +172,24 @@ async fn handle_build_plan(
         }
     }
 
+    async fn get_local_source_for_copy(
+        bridge: &Bridge,
+        should_read_ignore_file: bool,
+    ) -> OperationOutput<'static> {
+        let mut source = Source::local("context").custom_name("Sending local context for copy");
+        if should_read_ignore_file {
+            let dockerignore_bytes = read_local_file(bridge, ".dockerignore").await;
+            let dockerignore = std::str::from_utf8(&dockerignore_bytes)
+                .expect("Expected .dockerignore to contain valid utf-8 content.");
+            for line in dockerignore.lines() {
+                source = source.add_exclude_pattern(line);
+            }
+        }
+        source.ref_counted().output()
+    }
+
+    let local_context = get_local_source_for_copy(bridge, options.has_dockerignore).await;
+
     for node_id in build_plan.topological_order().into_iter() {
         let node = &build_plan.nodes[node_id];
         use BuildNode::*;
@@ -186,28 +212,67 @@ async fn handle_build_plan(
                     .as_ref()
                     .expect("Expected dependencies to already be built");
                 let parent_config = parent.1.clone();
-                let o = OwnedOutput::from_command(
-                    Command::run("sh") // TDDO: use image shell config
-                        .args(&["-c", &command[..]])
-                        .custom_name(format!("run({:?})", command))
-                        .cwd(get_parent_dir(&parent_config).join(cwd))
-                        .mount(Mount::Layer(OutputIdx(0), parent.0.output(), "/"))
-                        .ref_counted(),
-                    0,
-                );
+                let user = parent_config
+                    .config
+                    .as_ref()
+                    .and_then(|x| x.user.as_ref().map(|x| &x[..]))
+                    .unwrap_or("0");
+                let mut cmd = Command::run("sh") // TDDO: use image shell config
+                    .args(&["-c", &command[..]])
+                    .custom_name(format!("run({:?})", command))
+                    .cwd(get_cwd_from_image_spec(&parent_config).join(cwd))
+                    .user(user)
+                    .mount(Mount::Layer(OutputIdx(0), parent.0.output(), "/"));
+                let envs = parent_config.config.as_ref().and_then(|x| x.env.as_ref());
+                if let Some(env_map) = envs {
+                    for (key, value) in env_map.iter() {
+                        cmd = cmd.env(key, value);
+                    }
+                }
+                let o = OwnedOutput::from_command(cmd.ref_counted(), 0);
                 (o, parent_config)
             }
             CopyFromImage {
                 parent,
                 src_image,
-                src_path,
-                dst_path,
-            } => todo!(),
+                src_path: raw_src_path,
+                dst_path: raw_dst_path,
+            } => {
+                let parent = translated_nodes[*parent].as_ref().unwrap();
+                let src_image = translated_nodes[*src_image].as_ref().unwrap();
+                let src_cwd = get_cwd_from_image_spec(&src_image.1);
+                let src_path = src_cwd.join(raw_src_path);
+                let dst_path = get_cwd_from_image_spec(&parent.1).join(raw_dst_path);
+                let o = FileSystem::copy()
+                    .from(LayerPath::Other(src_image.0.output(), src_path))
+                    .to(OutputIdx(0), LayerPath::Other(parent.0.output(), dst_path))
+                    .create_path(true)
+                    .recursive(true)
+                    .into_operation()
+                    .custom_name(format!(
+                        "...::copy({:?}, {:?})",
+                        &raw_src_path, &raw_dst_path
+                    ))
+                    .ref_counted();
+                (o.into(), parent.1.clone())
+            }
             CopyFromLocal {
                 parent,
                 src_path,
-                dst_path,
-            } => todo!(),
+                dst_path: raw_dst_path,
+            } => {
+                let parent = translated_nodes[*parent].as_ref().unwrap();
+                let dst_path = get_cwd_from_image_spec(&parent.1).join(raw_dst_path);
+                let o = FileSystem::copy()
+                    .from(LayerPath::Other(local_context.clone(), src_path))
+                    .to(OutputIdx(0), LayerPath::Other(parent.0.output(), dst_path))
+                    .create_path(true)
+                    .recursive(true)
+                    .into_operation()
+                    .custom_name(format!("copy({:?}, {:?})", &src_path, &raw_dst_path))
+                    .ref_counted();
+                (o.into(), parent.1.clone())
+            }
             SetWorkdir {
                 parent,
                 new_workdir,
@@ -216,7 +281,7 @@ async fn handle_build_plan(
                     .as_ref()
                     .expect("Expected dependencies to already be built");
                 let parent_config = &*parent.1;
-                let parent_dir = get_parent_dir(parent_config);
+                let parent_dir = get_cwd_from_image_spec(parent_config);
                 let mut new_config = parent_config.clone();
                 if new_config.config.is_none() {
                     new_config.config = Some(empty_image_config());

@@ -63,6 +63,10 @@ pub enum BuildError {
     UnableToRunDockerBuild(#[source] std::io::Error),
     #[error("docker build exited with code {0}.")]
     DockerBuildFailed(i32),
+    #[error("{0} contains invalid utf-8.")]
+    FileHasInvalidUtf8(String),
+    #[error("{0}")]
+    IOError(#[from] #[source] std::io::Error),
 }
 
 use BuildError::*;
@@ -71,6 +75,7 @@ fn invoke_buildkit(
     dockerfile: &TmpDockerfile,
     tag: Option<String>,
     target: Option<String>,
+    has_dockerignore: bool,
 ) -> Result<(), BuildError> {
     let mut args = Vec::new();
     args.push("build".to_string());
@@ -85,6 +90,12 @@ fn invoke_buildkit(
         args.push("--target".to_string());
         args.push(target);
         args.push("--quiet".to_string());
+    }
+    args.push("--build-arg".to_string());
+    if has_dockerignore {
+        args.push("has_dockerignore=true".to_string());
+    } else {
+        args.push("has_dockerignore=false".to_string());
     }
     // args.push("--progress=plain".to_string());
     let mut cmd = Command::new("docker")
@@ -141,6 +152,7 @@ fn write_tmp_dockerfile(content: &str) -> Result<TmpDockerfile, std::io::Error> 
 
 pub fn build_modusfile(mf: Modusfile, query: Literal) -> Result<(), BuildError> {
     let build_plan = imagegen::plan_from_modusfile(mf, query);
+    let has_dockerignore = check_dockerignore()?;
     let mut content = String::new();
     content.push_str("#syntax=europe-docker.pkg.dev/maowtm/modus-test/modus-bk-frontend"); // TODO
     content.push('\n');
@@ -150,11 +162,11 @@ pub fn build_modusfile(mf: Modusfile, query: Literal) -> Result<(), BuildError> 
         0 => unreachable!(), // not possible because if there is no solution to the initial query, there will be an SLD failure.
         1 => {
             println!("{}", "Running docker build...".blue());
-            invoke_buildkit(&tmp_file, None, None)
+            invoke_buildkit(&tmp_file, None, None, has_dockerignore)
         }
         nb_outputs => {
             println!("{}", "Running docker build...".blue());
-            invoke_buildkit(&tmp_file, None, None)?;
+            invoke_buildkit(&tmp_file, None, None, has_dockerignore)?;
             for i in 0..nb_outputs {
                 let target_str = format!("{}", i);
                 println!(
@@ -171,9 +183,28 @@ pub fn build_modusfile(mf: Modusfile, query: Literal) -> Result<(), BuildError> 
                     )
                     .blue()
                 );
-                invoke_buildkit(&tmp_file, None, Some(target_str))?;
+                invoke_buildkit(&tmp_file, None, Some(target_str), has_dockerignore)?;
             }
             Ok(())
+        }
+    }
+}
+
+pub fn check_dockerignore() -> Result<bool, BuildError> {
+    match std::fs::read(".dockerignore") {
+        Ok(content) => {
+            if std::str::from_utf8(&content).is_err() {
+                Err(FileHasInvalidUtf8(".dockerignore".to_string()))
+            } else {
+                Ok(true)
+            }
+        },
+        Err(e) => {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                Err(e.into())
+            } else {
+                Ok(false)
+            }
         }
     }
 }

@@ -6,8 +6,9 @@ use std::sync::Arc;
 
 use buildkit_llb::{
     prelude::{
+        fs::SequenceOperation,
         source::{ImageSource, LocalSource},
-        Command, MultiOwnedOutput, SingleOwnedOutput,
+        Command, MultiOwnedLastOutput, MultiOwnedOutput, SingleOwnedOutput,
     },
     utils::OperationOutput,
 };
@@ -17,6 +18,7 @@ pub enum OwnedOutput {
     ImageSource(Arc<ImageSource>),
     LocalSource(Arc<LocalSource>),
     Command(Arc<Command<'static>>, u32),
+    Sequence(Arc<SequenceOperation<'static>>),
 }
 
 impl OwnedOutput {
@@ -25,6 +27,7 @@ impl OwnedOutput {
             OwnedOutput::ImageSource(s) => s.output(),
             OwnedOutput::LocalSource(s) => s.output(),
             OwnedOutput::Command(s, i) => s.output(*i),
+            OwnedOutput::Sequence(s) => s.last_output().unwrap(),
         }
     }
 }
@@ -37,6 +40,11 @@ impl From<Arc<ImageSource>> for OwnedOutput {
 impl From<Arc<LocalSource>> for OwnedOutput {
     fn from(s: Arc<LocalSource>) -> Self {
         OwnedOutput::LocalSource(s)
+    }
+}
+impl From<Arc<SequenceOperation<'static>>> for OwnedOutput {
+    fn from(s: Arc<SequenceOperation<'static>>) -> Self {
+        OwnedOutput::Sequence(s)
     }
 }
 impl OwnedOutput {
