@@ -112,6 +112,26 @@ fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
                     }),
                     Instruction::Copy(Copy(format!("{:?} {:?}", src_path, dst_path))),
                 ],
+                BuildNode::SetWorkdir {
+                    parent,
+                    new_workdir,
+                } => vec![
+                    Instruction::From(From {
+                        parent: ResolvedParent::Stage(format!("n_{}", parent)),
+                        alias: Some(str_id),
+                    }),
+                    Instruction::Workdir(Workdir(new_workdir.to_string())),
+                ],
+                BuildNode::SetEntrypoint {
+                    parent,
+                    new_entrypoint,
+                } => vec![
+                    Instruction::From(From {
+                        parent: ResolvedParent::Stage(format!("n_{}", parent)),
+                        alias: Some(str_id),
+                    }),
+                    Instruction::Entrypoint(format!("{:?}", new_entrypoint)),
+                ],
             }
         })
         .flatten()

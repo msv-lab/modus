@@ -67,7 +67,7 @@ pub enum Instruction<P> {
     Env(Env),
     // Add(String),
     Copy(Copy),
-    // Entrypoint(String),
+    Entrypoint(String),
     // Volume(String),
     // User(String),
     Workdir(Workdir),
@@ -204,6 +204,7 @@ where
                 Instruction::Run(s) => writeln!(f, "RUN {}", s),
                 Instruction::Env(s) => writeln!(f, "ENV {}", s),
                 Instruction::Workdir(s) => writeln!(f, "WORKDIR {}", s),
+                Instruction::Entrypoint(s) => writeln!(f, "ENTRYPOINT {}", s),
             }?;
         }
         Ok(())

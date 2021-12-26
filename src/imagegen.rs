@@ -74,9 +74,9 @@ pub type NodeId = usize;
 /// ## Paths
 ///
 /// All the paths in this structure can either be absolute or relative path. In
-/// the case of relative paths, they are relative to the working
-/// directory of the parent image (as stored in the image config). Translators from
-/// this to e.g. buildkit LLB should resolve the paths as necessary.
+/// the case of relative paths, they are ALWAYS relative to the working
+/// directory of the parent image (as stored in the image config). Translators
+/// from this to e.g. buildkit LLB should resolve the paths as necessary.
 ///
 /// In the case of copy, src_path and dst_path should be resolved relative to
 /// the source image's workdir and the destination (parent) image's workdir,
@@ -104,6 +104,14 @@ pub enum BuildNode {
         src_path: String,
         dst_path: String,
     },
+    SetWorkdir {
+        parent: NodeId,
+        new_workdir: String,
+    },
+    SetEntrypoint {
+        parent: NodeId,
+        new_entrypoint: Vec<String>,
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -269,10 +277,7 @@ pub fn build_dag_from_proofs(
                     let parent = last_node.unwrap();
                     let src_path = intrinsic.args[0].as_constant().unwrap().to_owned();
                     let dst_path = intrinsic.args[1].as_constant().unwrap();
-                    let dst_path = Path::new(&curr_state.cwd)
-                        .join(dst_path)
-                        .to_string_lossy()
-                        .into_owned();
+                    let dst_path = join_path(&curr_state.cwd, dst_path);
                     last_node.replace(res.new_node(
                         BuildNode::CopyFromLocal {
                             parent,
@@ -333,21 +338,21 @@ pub fn build_dag_from_proofs(
                                         parent,
                                         src_image: img,
                                         src_path: lit.args[1].as_constant().unwrap().to_owned(),
-                                        dst_path: Path::new(&curr_state.cwd)
-                                            .join(lit.args[2].as_constant().unwrap())
-                                            .to_string_lossy()
-                                            .into_owned(),
+                                        dst_path: join_path(
+                                            &curr_state.cwd,
+                                            lit.args[2].as_constant().unwrap(),
+                                        ),
                                     },
                                     vec![parent, img],
                                 );
                                 last_node.replace(node);
                             }
-                            "workdir" => {
+                            "in_workdir" => {
                                 let mut new_state = curr_state.clone();
-                                new_state.cwd = Path::new(&curr_state.cwd)
-                                    .join(lit.args[1].as_constant().unwrap())
-                                    .to_string_lossy()
-                                    .into_owned();
+                                let new_p = lit.args[1].as_constant().unwrap();
+                                new_state.cwd = join_path(&curr_state.cwd, new_p);
+                                // TODO: emit a warning if the tree inside attempts
+                                // to build a fresh image - this is probably an incorrect usage.
                                 process_children(
                                     subtree_in_op,
                                     last_node,
@@ -356,6 +361,21 @@ pub fn build_dag_from_proofs(
                                     image_literals,
                                     &mut new_state,
                                 );
+                            }
+                            "set_workdir" => {
+                                let img = process_image(subtree_in_op, rules, res, image_literals)
+                                    .expect("set_workdir should be applied to an image.");
+                                if last_node.is_some() {
+                                    panic!("set_workdir generates a new image, so it should be the first instruction.");
+                                }
+                                let new_p = lit.args[1].as_constant().unwrap();
+                                last_node.replace(res.new_node(
+                                    BuildNode::SetWorkdir {
+                                        parent: img,
+                                        new_workdir: join_path(&curr_state.cwd, new_p),
+                                    },
+                                    vec![img],
+                                ));
                             }
                             _ => {}
                         }
@@ -402,6 +422,13 @@ pub fn build_dag_from_proofs(
     }
 
     res
+}
+
+fn join_path(base: &str, path: &str) -> String {
+    match Path::new(base).join(path).to_str() {
+        Some(s) => s.to_owned(),
+        None => panic!("Path containing invalid utf-8 are not allowed."),
+    }
 }
 
 pub fn plan_from_modusfile(mf: Modusfile, query: Literal) -> BuildPlan {

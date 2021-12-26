@@ -14,7 +14,10 @@ mod transpiler;
 mod unification;
 mod wellformed;
 
-use std::{collections::HashMap, path::PathBuf};
+mod buildkit_llb_types;
+use buildkit_llb_types::OwnedOutput;
+
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use buildkit_frontend::{
     oci::{Architecture, ImageConfig, ImageSpecification, OperatingSystem},
@@ -60,7 +63,10 @@ impl Frontend<FrontendOptions> for TheFrontend {
             let alpine = Source::image("alpine")
                 .custom_name("Getting an alpine image as a stub for the final image")
                 .ref_counted();
-            let mut command = Command::run("true").mount(Mount::Layer(
+            let (_, alpine_config) = bridge
+                .resolve_image_config(&alpine, Some("alpine (stub) :: resolve"))
+                .await?;
+            let mut command = Command::run("true").cwd("/").mount(Mount::Layer(
                 OutputIdx(0),
                 SingleOwnedOutput::output(&alpine),
                 "/",
@@ -69,19 +75,25 @@ impl Frontend<FrontendOptions> for TheFrontend {
             for o in &outputs {
                 command = command.mount(Mount::Layer(
                     OutputIdx(idx as u32),
-                    o.output(),
+                    o.0.output(),
                     format!("/_{}", idx),
                 ));
                 idx += 1;
             }
             command = command.custom_name("Finishing multiple output images");
-            final_output = Box::new(MultiOwnedOutputWithIndex(command.ref_counted(), 0));
+            final_output = (
+                OwnedOutput::from_command(command.ref_counted(), 0),
+                Arc::new(alpine_config),
+            );
         }
         let solved = bridge
-            .solve(Terminal::with(final_output.output()))
+            .solve(Terminal::with(final_output.0.output()))
             .await
             .expect("Unable to solve");
-        Ok(FrontendOutput::with_ref(solved))
+        Ok(FrontendOutput::with_spec_and_ref(
+            (*final_output.1).clone(),
+            solved,
+        ))
     }
 }
 
@@ -109,62 +121,78 @@ async fn fetch_input(bridge: &Bridge, options: &FrontendOptions) -> BuildPlan {
     serde_json::from_slice(&input_file_bytes[start..]).expect("Invalid input")
 }
 
-type BoxedOutput = Box<dyn OwnedOutput + Send + Sync + 'static>;
-
-pub trait OwnedOutput {
-    fn output(&self) -> OperationOutput<'static>;
-}
-
-impl<T: SingleOwnedOutput<'static>> OwnedOutput for T {
-    fn output(&self) -> OperationOutput<'static> {
-        self.output()
-    }
-}
-
-#[derive(Debug)]
-struct MultiOwnedOutputWithIndex<T: MultiOwnedOutput<'static>>(T, u32);
-
-impl<T: MultiOwnedOutput<'static>> OwnedOutput for MultiOwnedOutputWithIndex<T> {
-    fn output(&self) -> OperationOutput<'static> {
-        self.0.output(self.1)
-    }
-}
-
-async fn handle_build_plan(bridge: &Bridge, build_plan: &BuildPlan) -> Vec<BoxedOutput> {
-    let mut translated_nodes: Vec<Option<BoxedOutput>> = Vec::with_capacity(build_plan.nodes.len());
+async fn handle_build_plan(
+    bridge: &Bridge,
+    build_plan: &BuildPlan,
+) -> Vec<(OwnedOutput, Arc<ImageSpecification>)> {
+    let mut translated_nodes: Vec<Option<(OwnedOutput, Arc<ImageSpecification>)>> =
+        Vec::with_capacity(build_plan.nodes.len());
     for _ in 0..build_plan.nodes.len() {
         // Need to push in a loop since type is not cloneable.
         translated_nodes.push(None);
     }
+
+    fn get_parent_dir(parent_config: &ImageSpecification) -> PathBuf {
+        parent_config
+            .config
+            .as_ref()
+            .and_then(|x| x.working_dir.clone())
+            .map(|x| {
+                if !x.has_root() {
+                    PathBuf::from("/").join(x)
+                } else {
+                    x
+                }
+            })
+            .unwrap_or_else(|| PathBuf::from("/"))
+    }
+    fn empty_image_config() -> ImageConfig {
+        ImageConfig {
+            user: None,
+            exposed_ports: None,
+            env: None,
+            entrypoint: None,
+            cmd: None,
+            volumes: None,
+            working_dir: None,
+            labels: None,
+            stop_signal: None,
+        }
+    }
+
     for node_id in build_plan.topological_order().into_iter() {
         let node = &build_plan.nodes[node_id];
         use BuildNode::*;
-        let new_node: BoxedOutput = match node {
-            From { image_ref } => Box::new(
-                Source::image(image_ref)
-                    .custom_name(format!("from({:?})", image_ref))
-                    .ref_counted(),
-            ),
+        let new_node: (OwnedOutput, Arc<ImageSpecification>) = match node {
+            From { image_ref } => {
+                let img_s = Source::image(image_ref).custom_name(format!("from({:?})", image_ref));
+                let log_name = format!("from({:?}) :: resolve image config", image_ref);
+                let (_, resolved_config) = bridge
+                    .resolve_image_config(&img_s, Some(&log_name))
+                    .await
+                    .expect("Resolution failed.");
+                (img_s.ref_counted().into(), Arc::new(resolved_config))
+            }
             Run {
                 parent,
                 command,
                 cwd,
-            } => Box::new(MultiOwnedOutputWithIndex(
-                Command::run("sh") // TDDO: use image shell config
-                    .args(&["-c", &command[..]])
-                    .custom_name(format!("run({:?})", command))
-                    .cwd(PathBuf::from("/").join(cwd)) // TODO: properly join with cwd in image config
-                    .mount(Mount::Layer(
-                        OutputIdx(0),
-                        translated_nodes[*parent]
-                            .as_ref()
-                            .expect("Expected dependencies to already be built")
-                            .output(),
-                        "/",
-                    ))
-                    .ref_counted(),
-                0,
-            )),
+            } => {
+                let parent = translated_nodes[*parent]
+                    .as_ref()
+                    .expect("Expected dependencies to already be built");
+                let parent_config = parent.1.clone();
+                let o = OwnedOutput::from_command(
+                    Command::run("sh") // TDDO: use image shell config
+                        .args(&["-c", &command[..]])
+                        .custom_name(format!("run({:?})", command))
+                        .cwd(get_parent_dir(&parent_config).join(cwd))
+                        .mount(Mount::Layer(OutputIdx(0), parent.0.output(), "/"))
+                        .ref_counted(),
+                    0,
+                );
+                (o, parent_config)
+            }
             CopyFromImage {
                 parent,
                 src_image,
@@ -176,14 +204,36 @@ async fn handle_build_plan(bridge: &Bridge, build_plan: &BuildPlan) -> Vec<Boxed
                 src_path,
                 dst_path,
             } => todo!(),
+            SetWorkdir {
+                parent,
+                new_workdir,
+            } => {
+                let parent = translated_nodes[*parent]
+                    .as_ref()
+                    .expect("Expected dependencies to already be built");
+                let parent_config = &*parent.1;
+                let parent_dir = get_parent_dir(parent_config);
+                let mut new_config = parent_config.clone();
+                if new_config.config.is_none() {
+                    new_config.config = Some(empty_image_config());
+                }
+                new_config.config.as_mut().unwrap().working_dir =
+                    Some(parent_dir.join(new_workdir));
+                let new_config = Arc::new(new_config);
+                (parent.0.clone(), new_config)
+            }
+            SetEntrypoint {
+                parent,
+                new_entrypoint,
+            } => todo!(),
         };
         translated_nodes[node_id] = Some(new_node);
     }
-    let mut outputs: Vec<BoxedOutput> = Vec::new();
+    let mut outputs: Vec<(OwnedOutput, Arc<ImageSpecification>)> = Vec::new();
     for o in &build_plan.outputs {
         outputs.push(
             translated_nodes[o.node]
-                .take()
+                .clone()
                 .expect("Expected output to be built"),
         );
     }
