@@ -239,7 +239,3 @@ async fn handle_build_plan(
     }
     outputs
 }
-
-async fn resolve_image_spec(build_plan: BuildPlan, node_id: NodeId) -> ImageSpecification {
-    unimplemented!()
-}
