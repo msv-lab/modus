@@ -43,6 +43,7 @@ struct TheFrontend;
 #[derive(Deserialize)]
 struct FrontendOptions {
     filename: String,
+    target: Option<String>,
     #[serde(flatten)]
     others: HashMap<String, serde_json::Value>,
 }
@@ -55,10 +56,13 @@ impl Frontend<FrontendOptions> for TheFrontend {
         options: FrontendOptions,
     ) -> Result<FrontendOutput, failure::Error> {
         let build_plan = fetch_input(&bridge, &options).await;
-        let outputs = handle_build_plan(&bridge, &build_plan).await;
+        let mut outputs = handle_build_plan(&bridge, &build_plan).await;
         let final_output;
         if outputs.len() == 1 {
             final_output = outputs.into_iter().next().unwrap();
+        } else if options.target.is_some() && !options.target.as_ref().unwrap().is_empty() {
+            let target_idx: usize = options.target.as_ref().unwrap().parse().expect("Expected target to be an usize");
+            final_output = outputs.swap_remove(target_idx);
         } else {
             let alpine = Source::image("alpine")
                 .custom_name("Getting an alpine image as a stub for the final image")

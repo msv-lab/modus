@@ -67,22 +67,26 @@ pub enum BuildError {
 
 use BuildError::*;
 
-pub fn invoke_buildkit(build_plan: &BuildPlan, tag: Option<String>) -> Result<(), BuildError> {
-    println!("{}", "Running docker build...".blue());
+fn invoke_buildkit(
+    dockerfile: &TmpDockerfile,
+    tag: Option<String>,
+    target: Option<String>,
+) -> Result<(), BuildError> {
     let mut args = Vec::new();
-    let mut content = String::new();
-    content.push_str("#syntax=europe-docker.pkg.dev/maowtm/modus-test/modus-bk-frontend"); // TODO
-    content.push('\n');
-    content.push_str(&serde_json::to_string(&build_plan).expect("Unable to serialize build plan"));
-    let tmp_file = write_tmp_dockerfile(&content).map_err(|e| UnableToCreateTempFile(e))?;
     args.push("build".to_string());
     args.push(".".to_string());
     args.push("-f".to_string());
-    args.push(tmp_file.name().to_string());
+    args.push(dockerfile.name().to_string());
     if let Some(tag) = tag {
         args.push("-t".to_string());
         args.push(tag);
     }
+    if let Some(target) = target {
+        args.push("--target".to_string());
+        args.push(target);
+        args.push("--quiet".to_string());
+    }
+    // args.push("--progress=plain".to_string());
     let mut cmd = Command::new("docker")
         .args(args)
         .stdin(Stdio::null())
@@ -135,11 +139,41 @@ fn write_tmp_dockerfile(content: &str) -> Result<TmpDockerfile, std::io::Error> 
     Ok(TmpDockerfile(name))
 }
 
-pub fn build_modusfile(mf: Modusfile, query: Literal) {
+pub fn build_modusfile(mf: Modusfile, query: Literal) -> Result<(), BuildError> {
     let build_plan = imagegen::plan_from_modusfile(mf, query);
-    if let Err(e) = invoke_buildkit(&build_plan, None) {
-        eprintln!("{}", e);
-        std::process::exit(1);
+    let mut content = String::new();
+    content.push_str("#syntax=europe-docker.pkg.dev/maowtm/modus-test/modus-bk-frontend"); // TODO
+    content.push('\n');
+    content.push_str(&serde_json::to_string(&build_plan).expect("Unable to serialize build plan"));
+    let tmp_file = write_tmp_dockerfile(&content).map_err(|e| UnableToCreateTempFile(e))?;
+    match build_plan.outputs.len() {
+        0 => unreachable!(), // not possible because if there is no solution to the initial query, there will be an SLD failure.
+        1 => {
+            println!("{}", "Running docker build...".blue());
+            invoke_buildkit(&tmp_file, None, None)
+        }
+        nb_outputs => {
+            println!("{}", "Running docker build...".blue());
+            invoke_buildkit(&tmp_file, None, None)?;
+            for i in 0..nb_outputs {
+                let target_str = format!("{}", i);
+                println!(
+                    "{}",
+                    format!(
+                        "Exporting {}/{}: {}",
+                        i + 1,
+                        nb_outputs,
+                        build_plan.outputs[i]
+                            .source_literal
+                            .as_ref()
+                            .expect("Expected source_literal to present in build plan")
+                            .to_string()
+                    )
+                    .blue()
+                );
+                invoke_buildkit(&tmp_file, None, Some(target_str))?;
+            }
+            Ok(())
+        }
     }
-    // TODO: extract individual outputs
 }

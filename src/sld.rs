@@ -38,6 +38,7 @@ pub trait Auxiliary: Rename<Self> + Sized {
 }
 
 type RuleId = usize;
+type GoalId = usize;
 type TreeLevel = usize;
 pub(crate) type Goal<T = IRTerm> = Vec<Literal<T>>;
 

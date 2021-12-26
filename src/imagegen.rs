@@ -111,13 +111,14 @@ pub enum BuildNode {
     SetEntrypoint {
         parent: NodeId,
         new_entrypoint: Vec<String>,
-    }
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Output {
     pub node: NodeId,
-    pub query_index: usize,
+    #[serde(skip)]
+    pub source_literal: Option<Literal>,
 }
 
 /// Given a list of pairs of ground (solved) queries and their proof tree, output
@@ -400,13 +401,13 @@ pub fn build_dag_from_proofs(
         last_node
     }
 
-    for (i, (query, proof)) in query_and_proofs.into_iter().enumerate() {
+    for (query, proof) in query_and_proofs.into_iter() {
         debug_assert!(query.args.iter().all(|x| x.as_constant().is_some()));
         if let Some(&existing_node_id) = image_literals.get(&query) {
             // TODO: unreachable?
             res.outputs.push(Output {
                 node: existing_node_id,
-                query_index: i,
+                source_literal: Some(query.clone()),
             });
             continue;
         }
@@ -414,7 +415,7 @@ pub fn build_dag_from_proofs(
             image_literals.insert(query.clone(), node_id);
             res.outputs.push(Output {
                 node: node_id,
-                query_index: i,
+                source_literal: Some(query.clone()),
             });
         } else {
             panic!("{} does not resolve to any docker instructions.", query);
@@ -432,7 +433,7 @@ fn join_path(base: &str, path: &str) -> String {
 }
 
 pub fn plan_from_modusfile(mf: Modusfile, query: Literal) -> BuildPlan {
-    let goal = vec![query];
+    let goal = vec![query.clone()];
     let max_depth = 50;
     let clauses: Vec<Clause> =
         mf.0.iter()
@@ -447,16 +448,7 @@ pub fn plan_from_modusfile(mf: Modusfile, query: Literal) -> BuildPlan {
     let proofs = sld::proofs(&res_tree, &clauses, &goal);
     let query_and_proofs = proofs
         .into_iter()
-        .enumerate()
-        .map(|(i, p)| {
-            (
-                Literal {
-                    predicate: Predicate("_output".to_owned()),
-                    args: vec![IRTerm::Constant(i.to_string())],
-                },
-                p,
-            )
-        })
+        .map(|p| (query.substitute(&p.valuation), p))
         .collect::<Vec<_>>();
     build_dag_from_proofs(&query_and_proofs[..], &clauses)
 }
