@@ -39,9 +39,14 @@
 use std::{
     fs::{File, OpenOptions},
     process::{Command, Stdio},
+    sync::{atomic::AtomicBool, Arc},
 };
 
 use buildkit_llb::prelude::*;
+use signal_hook::{
+    consts::{SIGCHLD, SIGINT, SIGTERM},
+    iterator::{exfiltrator::SignalOnly, SignalsInfo},
+};
 
 use crate::{
     imagegen::{self, BuildPlan},
@@ -71,6 +76,8 @@ pub enum BuildError {
         #[source]
         std::io::Error,
     ),
+    #[error("Interrupted by user.")]
+    Interrupted,
 }
 
 use BuildError::*;
@@ -80,6 +87,7 @@ fn invoke_buildkit(
     tag: Option<String>,
     target: Option<String>,
     has_dockerignore: bool,
+    signals: &mut SignalsInfo<SignalOnly>,
 ) -> Result<(), BuildError> {
     let mut args = Vec::new();
     args.push("build".to_string());
@@ -110,7 +118,27 @@ fn invoke_buildkit(
         .env("DOCKER_BUILDKIT", "1")
         .spawn()
         .map_err(|e| UnableToRunDockerBuild(e))?;
-    let exit_status = cmd.wait().expect("wait() failed");
+    let exit_status = loop {
+        let mut has_sigchild = false;
+        let mut has_term = false;
+        for sig in signals.wait() {
+            if sig == SIGCHLD {
+                has_sigchild = true;
+            } else if sig == SIGINT || sig == SIGTERM {
+                has_term = true;
+            }
+        }
+        if has_term {
+            std::thread::sleep(std::time::Duration::from_millis(200)); // Wait for child to terminate first. This gives better terminal output.
+            return Err(Interrupted);
+        }
+        if has_sigchild {
+            let wait_res = cmd.try_wait().map_err(|e| IOError(e))?;
+            if let Some(wait_res) = wait_res {
+                break wait_res;
+            }
+        }
+    };
     if !exit_status.success() {
         return Err(DockerBuildFailed(exit_status.code().unwrap_or(-1)));
     }
@@ -155,22 +183,37 @@ fn write_tmp_dockerfile(content: &str) -> Result<TmpDockerfile, std::io::Error> 
 }
 
 pub fn build_modusfile(mf: Modusfile, query: Literal) -> Result<(), BuildError> {
+    let mut signals = SignalsInfo::with_exfiltrator(&[SIGINT, SIGTERM, SIGCHLD], SignalOnly)
+        .expect("Failed to create signal handler.");
+
+    fn check_terminate(signals: &mut SignalsInfo<SignalOnly>) -> bool {
+        signals.pending().any(|s| s == SIGINT || s == SIGTERM)
+    }
+    if check_terminate(&mut signals) {
+        return Err(Interrupted);
+    }
     let build_plan = imagegen::plan_from_modusfile(mf, query);
     let has_dockerignore = check_dockerignore()?;
     let mut content = String::new();
     content.push_str("#syntax=europe-docker.pkg.dev/maowtm/modus-test/modus-bk-frontend"); // TODO
     content.push('\n');
     content.push_str(&serde_json::to_string(&build_plan).expect("Unable to serialize build plan"));
+    if check_terminate(&mut signals) {
+        return Err(Interrupted);
+    }
     let tmp_file = write_tmp_dockerfile(&content).map_err(|e| UnableToCreateTempFile(e))?;
     match build_plan.outputs.len() {
         0 => unreachable!(), // not possible because if there is no solution to the initial query, there will be an SLD failure.
         1 => {
             println!("{}", "Running docker build...".blue());
-            invoke_buildkit(&tmp_file, None, None, has_dockerignore)
+            invoke_buildkit(&tmp_file, None, None, has_dockerignore, &mut signals)
         }
         nb_outputs => {
             println!("{}", "Running docker build...".blue());
-            invoke_buildkit(&tmp_file, None, None, has_dockerignore)?;
+            if check_terminate(&mut signals) {
+                return Err(Interrupted);
+            }
+            invoke_buildkit(&tmp_file, None, None, has_dockerignore, &mut signals)?;
             for i in 0..nb_outputs {
                 let target_str = format!("{}", i);
                 println!(
@@ -187,7 +230,7 @@ pub fn build_modusfile(mf: Modusfile, query: Literal) -> Result<(), BuildError> 
                     )
                     .blue()
                 );
-                invoke_buildkit(&tmp_file, None, Some(target_str), has_dockerignore)?;
+                invoke_buildkit(&tmp_file, None, Some(target_str), has_dockerignore, &mut signals)?;
             }
             Ok(())
         }
