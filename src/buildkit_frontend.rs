@@ -175,6 +175,7 @@ async fn handle_build_plan(
     async fn get_local_source_for_copy(
         bridge: &Bridge,
         should_read_ignore_file: bool,
+        dockerfile_name: &str
     ) -> OperationOutput<'static> {
         let mut source = Source::local("context").custom_name("Sending local context for copy");
         if should_read_ignore_file {
@@ -185,10 +186,11 @@ async fn handle_build_plan(
                 source = source.add_exclude_pattern(line);
             }
         }
+        source = source.add_exclude_pattern(dockerfile_name);
         source.ref_counted().output()
     }
 
-    let local_context = get_local_source_for_copy(bridge, options.has_dockerignore).await;
+    let local_context = get_local_source_for_copy(bridge, options.has_dockerignore, &options.filename).await;
 
     for node_id in build_plan.topological_order().into_iter() {
         let node = &build_plan.nodes[node_id];
@@ -294,7 +296,15 @@ async fn handle_build_plan(
             SetEntrypoint {
                 parent,
                 new_entrypoint,
-            } => todo!(),
+            } => {
+                let (p_out, p_conf) = translated_nodes[*parent].clone().unwrap();
+                let mut p_conf = (*p_conf).clone();
+                if p_conf.config.is_none() {
+                    p_conf.config = Some(empty_image_config());
+                }
+                p_conf.config.as_mut().unwrap().entrypoint = Some(new_entrypoint.to_owned());
+                (p_out, Arc::new(p_conf))
+            }
         };
         translated_nodes[node_id] = Some(new_node);
     }

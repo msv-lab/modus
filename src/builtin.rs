@@ -177,6 +177,8 @@ intrinsic_predicate!(_operator_in_workdir_begin, false, false);
 intrinsic_predicate!(_operator_in_workdir_end, false, false);
 intrinsic_predicate!(_operator_set_workdir_begin, false, false);
 intrinsic_predicate!(_operator_set_workdir_end, false, false);
+intrinsic_predicate!(_operator_set_entrypoint_begin, false, false);
+intrinsic_predicate!(_operator_set_entrypoint_end, false, false);
 intrinsic_predicate!(copy, false, false);
 
 /// Convenience macro that returns Some(b) for the first b that can be selected.
@@ -216,6 +218,8 @@ pub fn select_builtin<'a>(
         _operator_in_workdir_end,
         _operator_set_workdir_begin,
         _operator_set_workdir_end,
+        _operator_set_entrypoint_begin,
+        _operator_set_entrypoint_end,
         copy
     )
 }

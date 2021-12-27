@@ -381,6 +381,21 @@ pub fn build_dag_from_proofs(
                                     vec![img],
                                 ));
                             }
+                            "set_entrypoint" => {
+                                let img = process_image(subtree_in_op, rules, res, image_literals)
+                                    .expect("set_entrypoint should be applied to an image.");
+                                if last_node.is_some() {
+                                    panic!("set_entrypoint generates a new image, so it should be the first instruction.");
+                                }
+                                let entrypoint = lit.args.iter().skip(1).map(|x| x.as_constant().unwrap().to_owned()).collect::<Vec<_>>();
+                                last_node.replace(res.new_node(
+                                    BuildNode::SetEntrypoint {
+                                        parent: img,
+                                        new_entrypoint: entrypoint,
+                                    },
+                                    vec![img],
+                                ));
+                            }
                             _ => {}
                         }
                         i = j + 1;

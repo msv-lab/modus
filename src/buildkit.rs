@@ -66,7 +66,11 @@ pub enum BuildError {
     #[error("{0} contains invalid utf-8.")]
     FileHasInvalidUtf8(String),
     #[error("{0}")]
-    IOError(#[from] #[source] std::io::Error),
+    IOError(
+        #[from]
+        #[source]
+        std::io::Error,
+    ),
 }
 
 use BuildError::*;
@@ -198,7 +202,7 @@ pub fn check_dockerignore() -> Result<bool, BuildError> {
             } else {
                 Ok(true)
             }
-        },
+        }
         Err(e) => {
             if e.kind() != std::io::ErrorKind::NotFound {
                 Err(e.into())

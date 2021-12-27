@@ -123,7 +123,13 @@ fn main() {
 
             let file_content = fs::read_to_string(input_file).unwrap();
             let mf: Modusfile = file_content.parse().unwrap();
-            buildkit::build_modusfile(mf, query);
+            match buildkit::build_modusfile(mf, query) {
+                Err(e) => {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
+                }
+                Ok(_) => {}
+            }
         }
         ("proof", Some(sub)) => {
             let input_file = sub.value_of("FILE").unwrap();

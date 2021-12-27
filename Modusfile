@@ -14,17 +14,23 @@ build(profile) :-
   build_env,
   build_deps(profile),
   copy(".", "."),
+  # Since cargo use the timestamp of build artifact to determine if it needs to
+  # rebuild, and the source file copied in will be older than the previous build
+  # done by build_deps, we touch all the source files to force a re-build.
+  run("touch src/*"),
   cargo_build(profile).
 
 frontend_img(profile) :-
-  run_env,
-  profile_to_target_folder(profile, target_folder),
-  (build(profile))::copy(f"${target_folder}/buildkit-frontend", "./buildkit-frontend").
+  (run_env,
+    profile_to_target_folder(profile, target_folder),
+    (build(profile))::copy(f"${target_folder}/buildkit-frontend", "./buildkit-frontend")
+  )::set_entrypoint("./buildkit-frontend").
 
 modus(profile) :-
-  run_env,
-  profile_to_target_folder(profile, target_folder),
-  (build(profile))::copy(f"${target_folder}/modus", "./modus").
+  (run_env,
+    profile_to_target_folder(profile, target_folder),
+    (build(profile))::copy(f"${target_folder}/modus", "./modus")
+  )::set_entrypoint("./modus").
 
 profile_to_target_folder("debug", "target/debug").
 profile_to_target_folder("release", "target/release").
