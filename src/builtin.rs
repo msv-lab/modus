@@ -279,7 +279,7 @@ pub fn select_builtin<'a>(
         _operator_set_workdir_end,
         _operator_set_entrypoint_begin,
         _operator_set_entrypoint_end,
-        copy
+        copy,
         equality::StringEq1,
         equality::StringEq2
     )
