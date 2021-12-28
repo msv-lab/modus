@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
+mod buildkit;
 mod builtin;
 mod dockerfile;
 mod imagegen;
@@ -35,8 +36,9 @@ use clap::{crate_version, App, Arg};
 use codespan_reporting::{
     diagnostic,
     files::SimpleFile,
-    term::{self, termcolor::StandardStream},
+    term::{self, termcolor::{StandardStream, WriteColor, ColorSpec, Color}},
 };
+use std::io::Write;
 use colored::Colorize;
 use std::{fs, path::Path};
 
@@ -90,6 +92,21 @@ fn main() {
                 ),
         )
         .subcommand(
+            App::new("build")
+                .arg(
+                    Arg::with_name("FILE")
+                        .required(true)
+                        .help("Sets the input Modusfile")
+                        .index(1),
+                )
+                .arg(
+                    Arg::with_name("QUERY")
+                        .required(true)
+                        .help("Specifies the build target(s)")
+                        .index(2),
+                ),
+        )
+        .subcommand(
             App::new("proof")
                 .arg(
                     Arg::with_name("FILE")
@@ -122,6 +139,41 @@ fn main() {
                 Ok(df) => println!("{}", df),
                 Err(e) => term::emit(&mut writer.lock(), &config, &file, &e)
                     .expect("Error when printing to stderr."),
+            }
+        }
+        ("build", Some(sub)) => {
+            let input_file = sub.value_of("FILE").unwrap();
+            let file = get_file(Path::new(input_file));
+            let query: logic::Literal = sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
+
+            let mf: Modusfile = match file.source().parse() {
+                Ok(mf) => mf,
+                Err(e) => {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
+                }
+            };
+            let build_plan = match imagegen::plan_from_modusfile(mf, query) {
+                Ok(plan) => plan,
+                Err(e) => {
+                    term::emit(&mut writer.lock(), &config, &file, &e)
+                        .expect("Error when printing to stderr.");
+                    std::process::exit(1);
+                }
+            };
+            match buildkit::build(&build_plan) {
+                Err(e) => {
+                    let mut w = writer.lock();
+                    let _ = w.set_color(ColorSpec::new().set_fg(Some(Color::Red)).set_bold(true));
+                    let _ = write!(w, "build error");
+                    let _ = w.set_color(&ColorSpec::new());
+                    let _ = write!(w, ": ");
+                    let _ = w.set_color(ColorSpec::new().set_bold(true));
+                    let _ = write!(w, "{}\n", e);
+                    let _ = w.flush();
+                    std::process::exit(1);
+                }
+                Ok(_) => {}
             }
         }
         ("proof", Some(sub)) => {

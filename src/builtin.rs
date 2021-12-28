@@ -232,8 +232,12 @@ intrinsic_predicate!(run, false);
 intrinsic_predicate!(from, false);
 intrinsic_predicate!(_operator_copy_begin, false, false, false);
 intrinsic_predicate!(_operator_copy_end, false, false, false);
-intrinsic_predicate!(_operator_workdir_begin, false, false);
-intrinsic_predicate!(_operator_workdir_end, false, false);
+intrinsic_predicate!(_operator_in_workdir_begin, false, false);
+intrinsic_predicate!(_operator_in_workdir_end, false, false);
+intrinsic_predicate!(_operator_set_workdir_begin, false, false);
+intrinsic_predicate!(_operator_set_workdir_end, false, false);
+intrinsic_predicate!(_operator_set_entrypoint_begin, false, false);
+intrinsic_predicate!(_operator_set_entrypoint_end, false, false);
 intrinsic_predicate!(copy, false, false);
 
 /// Convenience macro that returns Some(b) for the first b that can be selected.
@@ -269,8 +273,12 @@ pub fn select_builtin<'a>(
         from,
         _operator_copy_begin,
         _operator_copy_end,
-        _operator_workdir_begin,
-        _operator_workdir_end,
+        _operator_in_workdir_begin,
+        _operator_in_workdir_end,
+        _operator_set_workdir_begin,
+        _operator_set_workdir_end,
+        _operator_set_entrypoint_begin,
+        _operator_set_entrypoint_end,
         copy,
         equality::StringEq1,
         equality::StringEq2

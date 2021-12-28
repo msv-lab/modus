@@ -1,13 +1,18 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::logic::{Clause, IRTerm, Literal, Predicate};
-use crate::sld::{ClauseId, Proof};
+use crate::modusfile::Modusfile;
+use crate::sld::{self, ClauseId, Proof};
 use crate::unification::Substitute;
 
-#[derive(Debug, Clone)]
+use codespan_reporting::diagnostic::Diagnostic;
+use serde::{Deserialize, Serialize};
+
+/// A build plan, designed to be easy to translate to buildkit and Dockerfile.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildPlan {
-    pub node: Vec<BuildNode>,
+    pub nodes: Vec<BuildNode>,
     pub dependencies: Vec<Vec<NodeId>>,
     pub outputs: Vec<Output>,
 }
@@ -15,18 +20,44 @@ pub struct BuildPlan {
 impl BuildPlan {
     pub fn new() -> BuildPlan {
         BuildPlan {
-            node: Vec::new(),
+            nodes: Vec::new(),
             dependencies: Vec::new(),
             outputs: Vec::new(),
         }
     }
 
     pub fn new_node(&mut self, node: BuildNode, deps: Vec<NodeId>) -> NodeId {
-        let id = self.node.len();
-        self.node.push(node);
+        let id = self.nodes.len();
+        self.nodes.push(node);
         self.dependencies.push(deps);
-        debug_assert_eq!(self.node.len(), self.dependencies.len());
+        debug_assert_eq!(self.nodes.len(), self.dependencies.len());
         id
+    }
+
+    /// Return an ordering of nodes in which dependencies of a node comes before
+    /// the node itself.
+    pub fn topological_order(&self) -> Vec<NodeId> {
+        let mut topological_order = Vec::with_capacity(self.nodes.len());
+        let mut seen = vec![false; self.nodes.len()];
+        fn dfs(
+            plan: &BuildPlan,
+            node: NodeId,
+            topological_order: &mut Vec<NodeId>,
+            seen: &mut Vec<bool>,
+        ) {
+            if seen[node] {
+                return;
+            }
+            for &deps in plan.dependencies[node].iter() {
+                dfs(plan, deps, topological_order, seen);
+            }
+            topological_order.push(node);
+            seen[node] = true;
+        }
+        for output in self.outputs.iter() {
+            dfs(&self, output.node, &mut topological_order, &mut seen);
+        }
+        topological_order
     }
 }
 
@@ -41,8 +72,19 @@ pub type NodeId = usize;
 ///
 /// Think of it as one line of a Dockerfile, or one node in the buildkit graph.
 ///
+/// ## Paths
+///
+/// All the paths in this structure can either be absolute or relative path. In
+/// the case of relative paths, they are ALWAYS relative to the working
+/// directory of the parent image (as stored in the image config). Translators
+/// from this to e.g. buildkit LLB should resolve the paths as necessary.
+///
+/// In the case of copy, src_path and dst_path should be resolved relative to
+/// the source image's workdir and the destination (parent) image's workdir,
+/// respectively.
+///
 /// TODO: add caching control
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BuildNode {
     From {
         image_ref: String,
@@ -63,12 +105,21 @@ pub enum BuildNode {
         src_path: String,
         dst_path: String,
     },
+    SetWorkdir {
+        parent: NodeId,
+        new_workdir: String,
+    },
+    SetEntrypoint {
+        parent: NodeId,
+        new_entrypoint: Vec<String>,
+    },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Output {
     pub node: NodeId,
-    pub query: Literal,
+    #[serde(skip)]
+    pub source_literal: Option<Literal>,
 }
 
 /// Given a list of pairs of ground (solved) queries and their proof tree, output
@@ -97,7 +148,7 @@ pub fn build_dag_from_proofs(
     ) -> Option<NodeId> {
         let mut last_node = None;
         let mut curr_state = State {
-            cwd: "/".to_string(),
+            cwd: "".to_string(),
         };
 
         /* We go through the proof tree in depth-first order, since this is
@@ -227,11 +278,11 @@ pub fn build_dag_from_proofs(
                     }
                     let parent = last_node.unwrap();
                     let src_path = intrinsic.args[0].as_constant().unwrap().to_owned();
+                    if src_path.starts_with("/") {
+                        panic!("The source of a local copy can not be an absolute path.");
+                    }
                     let dst_path = intrinsic.args[1].as_constant().unwrap();
-                    let dst_path = Path::new(&curr_state.cwd)
-                        .join(dst_path)
-                        .to_string_lossy()
-                        .into_owned();
+                    let dst_path = join_path(&curr_state.cwd, dst_path);
                     last_node.replace(res.new_node(
                         BuildNode::CopyFromLocal {
                             parent,
@@ -292,21 +343,21 @@ pub fn build_dag_from_proofs(
                                         parent,
                                         src_image: img,
                                         src_path: lit.args[1].as_constant().unwrap().to_owned(),
-                                        dst_path: Path::new(&curr_state.cwd)
-                                            .join(lit.args[2].as_constant().unwrap())
-                                            .to_string_lossy()
-                                            .into_owned(),
+                                        dst_path: join_path(
+                                            &curr_state.cwd,
+                                            lit.args[2].as_constant().unwrap(),
+                                        ),
                                     },
                                     vec![parent, img],
                                 );
                                 last_node.replace(node);
                             }
-                            "workdir" => {
+                            "in_workdir" => {
                                 let mut new_state = curr_state.clone();
-                                new_state.cwd = Path::new(&curr_state.cwd)
-                                    .join(lit.args[1].as_constant().unwrap())
-                                    .to_string_lossy()
-                                    .into_owned();
+                                let new_p = lit.args[1].as_constant().unwrap();
+                                new_state.cwd = join_path(&curr_state.cwd, new_p);
+                                // TODO: emit a warning if the tree inside attempts
+                                // to build a fresh image - this is probably an incorrect usage.
                                 process_children(
                                     subtree_in_op,
                                     last_node,
@@ -315,6 +366,36 @@ pub fn build_dag_from_proofs(
                                     image_literals,
                                     &mut new_state,
                                 );
+                            }
+                            "set_workdir" => {
+                                let img = process_image(subtree_in_op, rules, res, image_literals)
+                                    .expect("set_workdir should be applied to an image.");
+                                if last_node.is_some() {
+                                    panic!("set_workdir generates a new image, so it should be the first instruction.");
+                                }
+                                let new_p = lit.args[1].as_constant().unwrap();
+                                last_node.replace(res.new_node(
+                                    BuildNode::SetWorkdir {
+                                        parent: img,
+                                        new_workdir: join_path(&curr_state.cwd, new_p),
+                                    },
+                                    vec![img],
+                                ));
+                            }
+                            "set_entrypoint" => {
+                                let img = process_image(subtree_in_op, rules, res, image_literals)
+                                    .expect("set_entrypoint should be applied to an image.");
+                                if last_node.is_some() {
+                                    panic!("set_entrypoint generates a new image, so it should be the first instruction.");
+                                }
+                                let entrypoint = lit.args.iter().skip(1).map(|x| x.as_constant().unwrap().to_owned()).collect::<Vec<_>>();
+                                last_node.replace(res.new_node(
+                                    BuildNode::SetEntrypoint {
+                                        parent: img,
+                                        new_entrypoint: entrypoint,
+                                    },
+                                    vec![img],
+                                ));
                             }
                             _ => {}
                         }
@@ -339,13 +420,13 @@ pub fn build_dag_from_proofs(
         last_node
     }
 
-    for (query, proof) in query_and_proofs {
+    for (query, proof) in query_and_proofs.into_iter() {
         debug_assert!(query.args.iter().all(|x| x.as_constant().is_some()));
         if let Some(&existing_node_id) = image_literals.get(&query) {
             // TODO: unreachable?
             res.outputs.push(Output {
                 node: existing_node_id,
-                query: query.clone(),
+                source_literal: Some(query.clone()),
             });
             continue;
         }
@@ -353,7 +434,7 @@ pub fn build_dag_from_proofs(
             image_literals.insert(query.clone(), node_id);
             res.outputs.push(Output {
                 node: node_id,
-                query: query.clone(),
+                source_literal: Some(query.clone()),
             });
         } else {
             panic!("{} does not resolve to any docker instructions.", query);
@@ -361,4 +442,32 @@ pub fn build_dag_from_proofs(
     }
 
     res
+}
+
+fn join_path(base: &str, path: &str) -> String {
+    match Path::new(base).join(path).to_str() {
+        Some(s) => s.to_owned(),
+        None => panic!("Path containing invalid utf-8 are not allowed."),
+    }
+}
+
+pub fn plan_from_modusfile(mf: Modusfile, query: Literal) -> Result<BuildPlan, Diagnostic<()>> {
+    let goal = vec![query.clone()];
+    let max_depth = 50;
+    let clauses: Vec<Clause> =
+        mf.0.iter()
+            .flat_map(|mc| {
+                let clauses: Vec<Clause> = mc.into();
+                clauses
+            })
+            .collect();
+
+    let res_tree = sld::sld(&clauses, &goal, max_depth)?.expect("Failed in SLD tree construction.");
+    // TODO: sld::proofs should return the ground query corresponding to each proof.
+    let proofs = sld::proofs(&res_tree, &clauses, &goal);
+    let query_and_proofs = proofs
+        .into_iter()
+        .map(|p| (query.substitute(&p.valuation), p))
+        .collect::<Vec<_>>();
+    Ok(build_dag_from_proofs(&query_and_proofs[..], &clauses))
 }
