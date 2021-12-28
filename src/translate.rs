@@ -19,14 +19,7 @@ use std::sync::atomic::AtomicUsize;
 
 use nom::{bytes::streaming::tag, sequence::delimited};
 
-use crate::{
-    logic::{self, parser::Span, IRTerm, Predicate, SpannedPosition},
-    modusfile::{
-        parser::{modus_var, outside_format_expansion},
-        Expression, ModusClause, ModusTerm,
-    },
-    sld::Auxiliary,
-};
+use crate::{logic::{self, parser::Span, IRTerm, Predicate, SpannedPosition}, modusfile::{Expression, ModusClause, ModusTerm, parser::{modus_var, outside_format_expansion, process_raw_string}}, sld::Auxiliary};
 
 /// Takes the content of a format string.
 /// Returns an IRTerm to be used instead of the format string term, and a list of literals
@@ -54,9 +47,6 @@ fn convert_format_string(
         ],
     }];
 
-    // FIXME: Need to take the original string, no escape character processing
-    // since we need the original to interpolate the spanned position.
-
     let mut curr_string_offset = 2; // skip the `f"` at the start of the f-string.
 
     // Approach is to parse sections of the string and create new literals, e.g.
@@ -65,7 +55,7 @@ fn convert_format_string(
     while !curr_string.is_empty() {
         let (i, constant_str) = outside_format_expansion(Span::new(curr_string))
             .expect("can parse outside format expansion");
-        let constant_string = constant_str.fragment().replace("\\$", "$");
+        let constant_string = process_raw_string(constant_str.fragment()).replace("\\$", "$");
         let new_var: IRTerm = Auxiliary::aux();
         let span_length = constant_str.len();
         let new_literal = logic::Literal {
@@ -126,7 +116,7 @@ pub(crate) fn reset_operator_pair_id() {
 /// alongside whatever predicate is using this term.
 fn translate_term(t: &ModusTerm) -> (IRTerm, Vec<logic::Literal>) {
     match t {
-        ModusTerm::Constant(c) => (IRTerm::Constant(c.to_owned()), Vec::new()),
+        ModusTerm::Constant(c) => (IRTerm::Constant(process_raw_string(c)), Vec::new()),
         ModusTerm::FormatString {
             position,
             format_string_literal,
@@ -256,6 +246,15 @@ mod tests {
     /// Note that the code (currently) doesn't rely on the variable indexes, just the tests, for convenience.
     fn setup() {
         logic::AVAILABLE_VARIABLE_INDEX.store(0, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[test]
+    fn translate_constant_term() {
+        let inp1 = r#"Hello\nWorld"#;
+        let modus_term1 = ModusTerm::Constant(inp1.to_owned());
+        let ir_term = IRTerm::Constant("Hello\nWorld".to_owned());
+
+        assert_eq!(ir_term, translate_term(&modus_term1).0)
     }
 
     #[test]

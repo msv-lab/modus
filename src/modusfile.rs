@@ -84,6 +84,8 @@ pub enum ModusTerm {
     FormatString {
         /// The position of this term, beginning from the 'f' in the source
         position: SpannedPosition,
+        /// The input string literal, as in the source code, i.e. the escape characters
+        /// have not been converted.
         format_string_literal: String,
     },
     UserVariable(String),
@@ -385,9 +387,9 @@ pub mod parser {
     /// Processes the given string, converting escape substrings into the proper characters.
     ///
     /// This also supports string continuation, This allows users to write strings like: "Hello, \
-    ///                                                                                 World!"
+    ///                                                                                   World!"
     /// which is actually just "Hello, World!".
-    fn process_raw_string(s: &str) -> String {
+    pub fn process_raw_string(s: &str) -> String {
         let mut processed = String::new();
 
         let mut chars = s.chars().peekable();
@@ -423,11 +425,13 @@ pub mod parser {
         processed
     }
 
+    /// Parses a string that possibly contains escaped characters, but doesn't actually
+    /// convert the escape characters.
     fn string_content(i: Span) -> IResult<Span, String> {
         let escape_parser = escaped(none_of("\\\""), '\\', one_of("\"\\nrt0\n"));
         let (i, o) = opt(escape_parser)(i)?;
         let parsed_str: &str = o.map(|span| *span.fragment()).unwrap_or("");
-        Ok((i, process_raw_string(parsed_str)))
+        Ok((i, parsed_str.to_owned()))
     }
 
     pub fn modus_const(i: Span) -> IResult<Span, String> {
@@ -716,9 +720,10 @@ mod tests {
         let (_, s2) = parser::modus_const(Span::new(inp2.into())).unwrap();
         let (_, s3) = parser::modus_const(Span::new(inp3.into())).unwrap();
 
-        assert_eq!(s1, "Hello\nWorld");
-        assert_eq!(s2, "Tabs\tare\tbetter\tthan\tspaces");
-        assert_eq!(s3, "Testing multiline.");
+        assert_eq!(s1, r#"Hello\nWorld"#);
+        assert_eq!(s2, r#"Tabs\tare\tbetter\tthan\tspaces"#);
+        assert_eq!(s3, r#"Testing \
+                       multiline."#);
     }
 
     #[test]
