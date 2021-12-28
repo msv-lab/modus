@@ -32,13 +32,29 @@ extern crate lazy_static;
 extern crate fp_core;
 
 use clap::{crate_version, App, Arg};
+use codespan_reporting::{
+    diagnostic,
+    files::SimpleFile,
+    term::{self, termcolor::StandardStream},
+};
 use colored::Colorize;
-use std::fs;
+use std::{fs, path::Path};
 
 use dockerfile::ResolvedDockerfile;
 use modusfile::Modusfile;
 
 use crate::transpiler::prove_goal;
+
+fn get_file(path: &Path) -> SimpleFile<&str, String> {
+    let file_name: &str = path
+        .file_name()
+        .map(|os_str| os_str.to_str())
+        .unwrap()
+        .unwrap();
+    let file_content: String = fs::read_to_string(path).unwrap();
+
+    SimpleFile::new(file_name, file_content)
+}
 
 fn main() {
     let matches = App::new("modus")
@@ -89,24 +105,31 @@ fn main() {
         )
         .get_matches();
 
+    let writer = StandardStream::stderr(codespan_reporting::term::termcolor::ColorChoice::Auto);
+    let config = codespan_reporting::term::Config::default();
+
     match matches.subcommand() {
         ("transpile", Some(sub)) => {
             let input_file = sub.value_of("FILE").unwrap();
+            let file = get_file(Path::new(input_file));
             let query: logic::Literal = sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
 
-            let file_content = fs::read_to_string(input_file).unwrap();
-            let mf: Modusfile = file_content.parse().unwrap();
+            let mf: Modusfile = file.source().parse().unwrap();
 
-            let df: ResolvedDockerfile = transpiler::transpile(mf, query);
+            let df_res = transpiler::transpile(mf, query);
 
-            println!("{}", df);
+            match df_res {
+                Ok(df) => println!("{}", df),
+                Err(e) => term::emit(&mut writer.lock(), &config, &file, &e)
+                    .expect("Error when printing to stderr."),
+            }
         }
         ("proof", Some(sub)) => {
             let input_file = sub.value_of("FILE").unwrap();
+            let file = get_file(Path::new(input_file));
             let query: Option<logic::Literal> = sub.value_of("QUERY").map(|l| l.parse().unwrap());
 
-            let file_content = fs::read_to_string(input_file).unwrap();
-            match (file_content.parse::<Modusfile>(), query) {
+            match (file.source().parse::<Modusfile>(), query) {
                 (Ok(modus_f), None) => println!(
                     "Parsed {} successfully. Found {} clauses.",
                     input_file,
@@ -121,7 +144,8 @@ fn main() {
                         );
                         // TODO: pretty print proof, we could use the 'colored' library for terminal colors
                     }
-                    Err(e) => println!("{}", e),
+                    Err(e) => term::emit(&mut writer.lock(), &config, &file, &e)
+                        .expect("Error when printing to stderr."),
                 },
                 (Err(error), _) => {
                     println!(

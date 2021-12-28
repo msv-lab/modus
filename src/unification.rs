@@ -76,6 +76,7 @@ impl Substitute<IRTerm> for Literal<IRTerm> {
     type Output = Literal;
     fn substitute(&self, s: &Substitution<IRTerm>) -> Self::Output {
         Literal {
+            position: self.position.clone(),
             predicate: self.predicate.clone(),
             args: self.args.iter().map(|t| t.substitute(s)).collect(),
         }
@@ -233,7 +234,7 @@ mod tests {
         let result = l.unify(&m);
         assert!(result.is_some());
         let mgu = result.unwrap();
-        assert_eq!(l.substitute(&mgu), m.substitute(&mgu));
+        assert!(l.substitute(&mgu).eq_ignoring_position(&m.substitute(&mgu)));
         assert_eq!(
             mgu.get(&logic::IRTerm::UserVariable("Y".into())),
             Some(&logic::IRTerm::UserVariable("Z".into()))
