@@ -6,6 +6,7 @@ use crate::modusfile::Modusfile;
 use crate::sld::{self, ClauseId, Proof};
 use crate::unification::Substitute;
 
+use codespan_reporting::diagnostic::Diagnostic;
 use serde::{Deserialize, Serialize};
 
 /// A build plan, designed to be easy to translate to buildkit and Dockerfile.
@@ -450,7 +451,7 @@ fn join_path(base: &str, path: &str) -> String {
     }
 }
 
-pub fn plan_from_modusfile(mf: Modusfile, query: Literal) -> BuildPlan {
+pub fn plan_from_modusfile(mf: Modusfile, query: Literal) -> Result<BuildPlan, Diagnostic<()>> {
     let goal = vec![query.clone()];
     let max_depth = 50;
     let clauses: Vec<Clause> =
@@ -461,12 +462,12 @@ pub fn plan_from_modusfile(mf: Modusfile, query: Literal) -> BuildPlan {
             })
             .collect();
 
-    let res_tree = sld::sld(&clauses, &goal, max_depth).expect("Failed in SLD tree construction.");
+    let res_tree = sld::sld(&clauses, &goal, max_depth)?.expect("Failed in SLD tree construction.");
     // TODO: sld::proofs should return the ground query corresponding to each proof.
     let proofs = sld::proofs(&res_tree, &clauses, &goal);
     let query_and_proofs = proofs
         .into_iter()
         .map(|p| (query.substitute(&p.valuation), p))
         .collect::<Vec<_>>();
-    build_dag_from_proofs(&query_and_proofs[..], &clauses)
+    Ok(build_dag_from_proofs(&query_and_proofs[..], &clauses))
 }

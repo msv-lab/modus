@@ -182,7 +182,7 @@ fn write_tmp_dockerfile(content: &str) -> Result<TmpDockerfile, std::io::Error> 
     Ok(TmpDockerfile(name))
 }
 
-pub fn build_modusfile(mf: Modusfile, query: Literal) -> Result<(), BuildError> {
+pub fn build(build_plan: &BuildPlan) -> Result<(), BuildError> {
     let mut signals = SignalsInfo::with_exfiltrator(&[SIGINT, SIGTERM, SIGCHLD], SignalOnly)
         .expect("Failed to create signal handler.");
 
@@ -192,12 +192,11 @@ pub fn build_modusfile(mf: Modusfile, query: Literal) -> Result<(), BuildError> 
     if check_terminate(&mut signals) {
         return Err(Interrupted);
     }
-    let build_plan = imagegen::plan_from_modusfile(mf, query);
     let has_dockerignore = check_dockerignore()?;
     let mut content = String::new();
     content.push_str("#syntax=europe-docker.pkg.dev/maowtm/modus-test/modus-bk-frontend"); // TODO
     content.push('\n');
-    content.push_str(&serde_json::to_string(&build_plan).expect("Unable to serialize build plan"));
+    content.push_str(&serde_json::to_string(build_plan).expect("Unable to serialize build plan"));
     if check_terminate(&mut signals) {
         return Err(Interrupted);
     }

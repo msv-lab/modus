@@ -43,6 +43,7 @@ pub trait BuiltinPredicate {
         let Literal {
             ref predicate,
             ref args,
+            ..
         } = lit;
         if &predicate.0 != self.name() {
             return SelectBuiltinResult::NoMatch;
@@ -76,10 +77,16 @@ pub trait BuiltinPredicate {
 
 mod string_concat {
     use super::BuiltinPredicate;
-    use crate::logic::{IRTerm, Literal, Predicate};
+    use crate::logic::{IRTerm, Literal, Predicate, SpannedPosition};
 
-    fn string_concat_result(a: &str, b: &str, c: &str) -> Option<Literal> {
+    fn string_concat_result(
+        a: &str,
+        b: &str,
+        c: &str,
+        pos: &Option<SpannedPosition>,
+    ) -> Option<Literal> {
         Some(Literal {
+            position: pos.clone(),
             predicate: Predicate("string_concat".to_owned()),
             args: vec![
                 IRTerm::Constant(a.to_owned()),
@@ -103,7 +110,7 @@ mod string_concat {
             let a = lit.args[0].as_constant()?;
             let b = lit.args[1].as_constant()?;
             let c = a.to_owned() + b;
-            string_concat_result(a, b, &c)
+            string_concat_result(a, b, &c, &lit.position)
         }
     }
 
@@ -120,7 +127,7 @@ mod string_concat {
             let b = lit.args[1].as_constant()?;
             let c = lit.args[2].as_constant()?;
             if let Some(a) = c.strip_suffix(&b) {
-                string_concat_result(a, b, c)
+                string_concat_result(a, b, c, &lit.position)
             } else {
                 None
             }
@@ -141,7 +148,7 @@ mod string_concat {
             let a = lit.args[0].as_constant()?;
             let c = lit.args[2].as_constant()?;
             if let Some(b) = c.strip_prefix(&a) {
-                string_concat_result(a, b, c)
+                string_concat_result(a, b, c, &lit.position)
             } else {
                 None
             }
@@ -233,6 +240,7 @@ mod test {
         use crate::logic::{Literal, Predicate};
 
         let lit = Literal {
+            position: None,
             predicate: Predicate("run".to_owned()),
             args: vec![IRTerm::Constant("hello".to_owned())],
         };
@@ -243,6 +251,7 @@ mod test {
         assert_eq!(b.apply(&lit), Some(lit));
 
         let lit = Literal {
+            position: None,
             predicate: Predicate("string_concat".to_owned()),
             args: vec![
                 IRTerm::Constant("hello".to_owned()),
@@ -257,6 +266,7 @@ mod test {
         assert_eq!(
             b.apply(&lit),
             Some(Literal {
+                position: None,
                 predicate: Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::Constant("hello".to_owned()),
@@ -267,6 +277,7 @@ mod test {
         );
 
         let lit = Literal {
+            position: None,
             predicate: Predicate("xxx".to_owned()),
             args: vec![IRTerm::Constant("hello".to_owned())],
         };
@@ -280,25 +291,29 @@ mod test {
 
         let rules = vec![Clause {
             head: Literal {
+                position: None,
                 predicate: Predicate("a".to_owned()),
                 args: vec![],
             },
             body: vec![
                 Literal {
+                    position: None,
                     predicate: Predicate("from".to_owned()),
                     args: vec![IRTerm::Constant("ubuntu".to_owned())],
                 },
                 Literal {
+                    position: None,
                     predicate: Predicate("run".to_owned()),
                     args: vec![IRTerm::Constant("rm -rf /".to_owned())],
                 },
             ],
         }];
         let goals = vec![Literal {
+            position: None,
             predicate: Predicate("a".to_owned()),
             args: vec![],
         }];
-        let tree = crate::sld::sld(&rules, &goals, 100).unwrap();
+        let tree = crate::sld::sld(&rules, &goals, 100).unwrap().unwrap();
         let solutions = crate::sld::solutions(&tree);
         assert_eq!(solutions.len(), 1);
         assert!(solutions.contains(&goals));

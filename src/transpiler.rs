@@ -21,6 +21,8 @@ use std::{
     sync::atomic::{AtomicU32, Ordering},
 };
 
+use codespan_reporting::diagnostic::Diagnostic;
+
 use crate::{
     dockerfile::{Dockerfile, Image, Instruction, ResolvedDockerfile, ResolvedParent, Run},
     imagegen::{self, BuildPlan, NodeId},
@@ -35,7 +37,7 @@ use crate::imagegen::BuildNode;
 pub fn prove_goal(
     mf: &Modusfile,
     goal: &Vec<logic::Literal>,
-) -> Result<Vec<sld::Proof>, &'static str> {
+) -> Result<Vec<sld::Proof>, Diagnostic<()>> {
     let max_depth = 20;
     let clauses: Vec<Clause> =
         mf.0.iter()
@@ -45,16 +47,16 @@ pub fn prove_goal(
             })
             .collect();
 
-    let res = sld::sld(&clauses, goal, max_depth);
+    let res = sld::sld(&clauses, goal, max_depth)?;
     match res {
         Some(t) => Ok(sld::proofs(&t, &clauses, &goal)),
-        None => Err("Failed in SLD tree construction."),
+        None => Err(Diagnostic::warning().with_message("Failed in SLD tree construction.")),
     }
 }
 
-pub fn transpile(mf: Modusfile, query: logic::Literal) -> Dockerfile<ResolvedParent> {
-    let build_plan = imagegen::plan_from_modusfile(mf, query);
-    plan_to_docker(&build_plan)
+pub fn transpile(mf: Modusfile, query: logic::Literal) -> Result<Dockerfile<ResolvedParent>, Diagnostic<()>> {
+    let build_plan = imagegen::plan_from_modusfile(mf, query)?;
+    Ok(plan_to_docker(&build_plan))
 }
 
 fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
