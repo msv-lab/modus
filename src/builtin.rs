@@ -156,6 +156,58 @@ mod string_concat {
     }
 }
 
+mod equality {
+    use crate::logic::{IRTerm, Literal, Predicate};
+
+    use super::BuiltinPredicate;
+
+    pub struct StringEq1;
+    impl BuiltinPredicate for StringEq1 {
+        fn name(&self) -> &'static str {
+            "string_eq"
+        }
+
+        fn arg_groundness(&self) -> &'static [bool] {
+            &[false, true]
+        }
+
+        fn apply(&self, lit: &crate::logic::Literal) -> Option<crate::logic::Literal> {
+            let a = lit.args[0].as_constant()?;
+            Some(Literal {
+                position: lit.position.clone(),
+                predicate: Predicate("string_eq".to_owned()),
+                args: vec![
+                    IRTerm::Constant(a.to_owned()),
+                    IRTerm::Constant(a.to_owned()),
+                ],
+            })
+        }
+    }
+
+    pub struct StringEq2;
+    impl BuiltinPredicate for StringEq2 {
+        fn name(&self) -> &'static str {
+            "string_eq"
+        }
+
+        fn arg_groundness(&self) -> &'static [bool] {
+            &[true, false]
+        }
+
+        fn apply(&self, lit: &crate::logic::Literal) -> Option<crate::logic::Literal> {
+            let b = lit.args[1].as_constant()?;
+            Some(Literal {
+                position: lit.position.clone(),
+                predicate: Predicate("string_eq".to_owned()),
+                args: vec![
+                    IRTerm::Constant(b.to_owned()),
+                    IRTerm::Constant(b.to_owned()),
+                ],
+            })
+        }
+    }
+}
+
 macro_rules! intrinsic_predicate {
     ($name:ident, $($arg_groundness:expr),*) => {
         #[allow(non_camel_case_types)]
@@ -219,7 +271,9 @@ pub fn select_builtin<'a>(
         _operator_copy_end,
         _operator_workdir_begin,
         _operator_workdir_end,
-        copy
+        copy,
+        equality::StringEq1,
+        equality::StringEq2
     )
 }
 
