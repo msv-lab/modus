@@ -260,7 +260,7 @@ pub mod parser {
 
     use nom::bytes::complete::escaped;
     use nom::character::complete::{multispace0, none_of, one_of};
-    use nom::combinator::{cut, opt};
+    use nom::combinator::{cut, opt, recognize};
     use nom::error::context;
     use nom::multi::separated_list1;
     use nom::{
@@ -444,7 +444,7 @@ pub mod parser {
     /// Parses a substring outside of the expansion part of a format string's content.
     pub fn outside_format_expansion(i: Span) -> IResult<Span, Span> {
         // We want to parse until we see '$', except if it was preceded with escape char.
-        escaped(none_of("\\$"), '\\', one_of("$"))(i)
+        recognize(opt(escaped(none_of("\\$"), '\\', one_of("$"))))(i)
     }
 
     fn modus_format_string(i: Span) -> IResult<Span, (SpannedPosition, String)> {
