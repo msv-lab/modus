@@ -491,6 +491,12 @@ pub fn proofs(tree: &Tree, rules: &Vec<Clause>, goal: &Goal) -> Vec<Proof> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
+
+    // These tests all need to be marked as serial even though they don't
+    // interfere with each other, because they can potentially modify
+    // logic::AVAILABLE_VARIABLE_INDEX, but tests in the translate module depend
+    // on the variable not being changed by something else during execution.
 
     fn contains_ignoring_position(it: &HashSet<Vec<Literal>>, lits: &Vec<Literal>) -> bool {
         it.iter().any(|curr_lits| {
@@ -503,6 +509,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn simple_solving() {
         let goal: Goal<logic::IRTerm> = vec!["a(X)".parse().unwrap()];
         let clauses: Vec<logic::Clause> = vec![
@@ -532,6 +539,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn simple_nongrounded() {
         let goal: Goal<logic::IRTerm> = vec!["a(\"b\")".parse().unwrap()];
         let clauses: Vec<logic::Clause> = vec![logic::Clause {
@@ -549,6 +557,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn simple_nongrounded_invalid() {
         let goal: Goal<logic::IRTerm> = vec!["a(X)".parse().unwrap()];
         let clauses: Vec<logic::Clause> = vec![logic::Clause {
@@ -560,6 +569,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn complex_goal() {
         let goal: Goal<logic::IRTerm> = vec!["a(X)".parse().unwrap(), "b(X)".parse().unwrap()];
         let clauses: Vec<logic::Clause> = vec![
@@ -591,6 +601,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn solving_with_binary_relations() {
         let goal: Goal<logic::IRTerm> = vec!["a(X)".parse().unwrap()];
         let clauses: Vec<logic::Clause> = vec![
@@ -627,6 +638,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn simple_recursion() {
         let goal: Goal<logic::IRTerm> = vec!["reach(\"a\", X)".parse().unwrap()];
         let clauses: Vec<logic::Clause> = vec![
@@ -684,6 +696,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn string_concat() {
         let goal: Goal<logic::IRTerm> =
             vec!["string_concat(\"hello\", \"world\", X)".parse().unwrap()];
@@ -701,6 +714,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn string_concat_complex() {
         // TODO: figure out how to test empty string
         let good = ["aaabbb", "aabb"];
