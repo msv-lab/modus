@@ -260,7 +260,7 @@ pub mod parser {
 
     use nom::bytes::complete::escaped;
     use nom::character::complete::{multispace0, none_of, one_of};
-    use nom::combinator::{cut, opt};
+    use nom::combinator::{cut, opt, recognize};
     use nom::error::context;
     use nom::multi::separated_list1;
     use nom::{
@@ -288,7 +288,7 @@ pub mod parser {
         context(stringify!(head), literal(modus_term))(i)
     }
 
-    /// Parses `<term> = <term>` into a builtin call, `string_concat("", term1, term2)`.
+    /// Parses `<term1> = <term2>` into a builtin call, `string_eq(term1, term2)`.
     fn unification_sugar(i: Span) -> IResult<Span, Literal> {
         let (i, (spanned_pos, (t1, t2))) = recognized_span(separated_pair(
             modus_term,
@@ -300,8 +300,8 @@ pub mod parser {
             i,
             Literal {
                 position: Some(spanned_pos),
-                predicate: Predicate("string_concat".to_owned()),
-                args: vec![ModusTerm::Constant("".to_owned()), t1, t2],
+                predicate: Predicate("string_eq".to_owned()),
+                args: vec![t1, t2],
             },
         ))
     }
@@ -444,7 +444,7 @@ pub mod parser {
     /// Parses a substring outside of the expansion part of a format string's content.
     pub fn outside_format_expansion(i: Span) -> IResult<Span, Span> {
         // We want to parse until we see '$', except if it was preceded with escape char.
-        escaped(none_of("\\$"), '\\', one_of("$"))(i)
+        recognize(opt(escaped(none_of("\\$"), '\\', one_of("$"))))(i)
     }
 
     fn modus_format_string(i: Span) -> IResult<Span, (SpannedPosition, String)> {
@@ -749,7 +749,7 @@ mod tests {
     fn modus_unification() {
         let inp = "foo(X, Y) :- X = Y.";
 
-        let expected_lit: Literal = "string_concat(\"\", X, Y)".parse().unwrap();
+        let expected_lit: Literal = "string_eq(X, Y)".parse().unwrap();
         let actual: Expression = inp.parse().map(|r: ModusClause| r.body).unwrap().unwrap();
         assert!(Expression::Literal(expected_lit).eq_ignoring_position(&actual));
     }

@@ -55,24 +55,26 @@ fn convert_format_string(
     while !curr_string.is_empty() {
         let (i, constant_str) = outside_format_expansion(Span::new(curr_string))
             .expect("can parse outside format expansion");
-        let constant_string = process_raw_string(constant_str.fragment()).replace("\\$", "$");
-        let new_var: IRTerm = Auxiliary::aux();
         let span_length = constant_str.len();
-        let new_literal = logic::Literal {
-            position: Some(SpannedPosition {
-                offset: spanned_position.offset + curr_string_offset,
-                length: span_length,
-            }),
-            predicate: logic::Predicate(concat_predicate.to_string()),
-            args: vec![
-                prev_variable,
-                IRTerm::Constant(constant_string.to_owned()),
-                new_var.clone(),
-            ],
-        };
-        curr_string_offset += span_length;
-        new_literals.push(new_literal);
-        prev_variable = new_var;
+        if span_length > 0 {
+            let constant_string = process_raw_string(constant_str.fragment()).replace("\\$", "$");
+            let new_var: IRTerm = Auxiliary::aux();
+            let new_literal = logic::Literal {
+                position: Some(SpannedPosition {
+                    offset: spanned_position.offset + curr_string_offset,
+                    length: span_length,
+                }),
+                predicate: logic::Predicate(concat_predicate.to_string()),
+                args: vec![
+                    prev_variable,
+                    IRTerm::Constant(constant_string.to_owned()),
+                    new_var.clone(),
+                ],
+            };
+            curr_string_offset += span_length;
+            new_literals.push(new_literal);
+            prev_variable = new_var;
+        }
 
         // this might fail, e.g. if we are at the end of the string
         let variable_res = delimited(tag("${"), modus_var, tag("}"))(i);
@@ -259,10 +261,38 @@ mod tests {
 
     #[test]
     #[serial]
+    fn format_string_empty() {
+        setup();
+
+        let case = "";
+
+        let lits = vec![
+            logic::Literal {
+                position: Some(SpannedPosition {
+                    offset: 0,
+                    length: 1,
+                }),
+                predicate: logic::Predicate("string_concat".to_owned()),
+                args: vec![
+                    IRTerm::Constant("".to_owned()),
+                    IRTerm::Constant("".to_owned()),
+                    IRTerm::AuxiliaryVariable(0),
+                ],
+            },
+        ];
+
+        assert_eq!(
+            (lits, IRTerm::AuxiliaryVariable(0)),
+            convert_format_string(&SpannedPosition { offset: 0, length: case.len() + 3 }, case)
+        );
+    }
+
+    #[test]
+    #[serial]
     fn format_string_translation() {
         setup();
 
-        let case = "ubuntu:${distr_version}";
+        let case = "${target_folder}/buildkit-frontend";
 
         let lits = vec![
             logic::Literal {
@@ -280,24 +310,24 @@ mod tests {
             logic::Literal {
                 position: Some(SpannedPosition {
                     offset: 2,
-                    length: 7,
+                    length: 16,
                 }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(0),
-                    IRTerm::Constant("ubuntu:".to_owned()),
+                    IRTerm::UserVariable("target_folder".to_owned()),
                     IRTerm::AuxiliaryVariable(1),
                 ],
             },
             logic::Literal {
                 position: Some(SpannedPosition {
-                    offset: 9,
-                    length: 16,
+                    offset: 18,
+                    length: 18,
                 }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(1),
-                    IRTerm::UserVariable("distr_version".to_owned()),
+                    IRTerm::Constant("/buildkit-frontend".to_owned()),
                     IRTerm::AuxiliaryVariable(2),
                 ],
             },
