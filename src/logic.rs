@@ -180,6 +180,13 @@ impl Literal {
             })
             .unwrap_or_default()
     }
+
+    pub fn with_position(self, position: Option<SpannedPosition>) -> Literal {
+        Literal {
+            position,
+            ..self
+        }
+    }
 }
 
 impl Clause {

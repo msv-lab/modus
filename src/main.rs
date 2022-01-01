@@ -36,10 +36,13 @@ use clap::{crate_version, App, Arg};
 use codespan_reporting::{
     diagnostic,
     files::SimpleFile,
-    term::{self, termcolor::{StandardStream, WriteColor, ColorSpec, Color}},
+    term::{
+        self,
+        termcolor::{Color, ColorSpec, StandardStream, WriteColor},
+    },
 };
-use std::io::Write;
 use colored::Colorize;
+use std::io::Write;
 use std::{fs, path::Path};
 
 use dockerfile::ResolvedDockerfile;
@@ -130,6 +133,7 @@ fn main() {
             let input_file = sub.value_of("FILE").unwrap();
             let file = get_file(Path::new(input_file));
             let query: logic::Literal = sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
+            let query = query.with_position(None);
 
             let mf: Modusfile = file.source().parse().unwrap();
 
@@ -145,6 +149,7 @@ fn main() {
             let input_file = sub.value_of("FILE").unwrap();
             let file = get_file(Path::new(input_file));
             let query: logic::Literal = sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
+            let query = query.with_position(None);
 
             let mf: Modusfile = match file.source().parse() {
                 Ok(mf) => mf,

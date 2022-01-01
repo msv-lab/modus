@@ -150,16 +150,19 @@ pub fn sld(
             }
 
             // No builtin nor user-define predicate with this name
-            return Err(Diagnostic::error()
-                .with_message("unknown predicate")
-                .with_labels(vec![Label::primary(
+            let mut diag_error = Diagnostic::error()
+                .with_message(format!("unknown predicate - {}", literal.predicate.0));
+            if literal.position.is_some() {
+                diag_error = diag_error.with_labels(vec![Label::primary(
                     (),
                     literal
                         .clone()
                         .position
                         .map(|span_pos| span_pos.offset..(span_pos.offset + span_pos.length))
                         .unwrap(),
-                )]));
+                )]);
+            }
+            return Err(diag_error);
         }
 
         Ok(None)
