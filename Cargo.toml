@@ -25,6 +25,7 @@ lazy_static = "1.4.0"
 fp-core = "0.1.9"
 colored = "2"
 thiserror = "1.0"
+shiplift = { version = "0.7.0", default-features = false, features = ["unix-socket"] }
 
 # For buildkit
 buildkit-frontend = "0.3.0"

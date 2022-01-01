@@ -22,6 +22,7 @@ mod imagegen;
 mod logic;
 mod modusfile;
 mod reporting;
+mod registry;
 mod sld;
 mod translate;
 mod transpiler;
