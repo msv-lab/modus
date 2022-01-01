@@ -8,6 +8,7 @@ mod dockerfile;
 mod imagegen;
 mod logic;
 mod modusfile;
+mod reporting;
 mod sld;
 mod translate;
 mod transpiler;
@@ -193,8 +194,7 @@ async fn handle_build_plan(
         source.ref_counted().output()
     }
 
-    let local_context =
-        get_local_source_for_copy(bridge, options.has_dockerignore).await;
+    let local_context = get_local_source_for_copy(bridge, options.has_dockerignore).await;
 
     for node_id in build_plan.topological_order().into_iter() {
         let node = &build_plan.nodes[node_id];

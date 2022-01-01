@@ -21,6 +21,7 @@ mod dockerfile;
 mod imagegen;
 mod logic;
 mod modusfile;
+mod reporting;
 mod sld;
 mod translate;
 mod transpiler;
@@ -34,7 +35,6 @@ extern crate fp_core;
 
 use clap::{crate_version, App, Arg};
 use codespan_reporting::{
-    diagnostic,
     files::SimpleFile,
     term::{
         self,
@@ -42,7 +42,7 @@ use codespan_reporting::{
     },
 };
 use colored::Colorize;
-use std::io::Write;
+use std::{io::Write, path::PathBuf};
 use std::{fs, path::Path};
 
 use modusfile::Modusfile;
@@ -97,15 +97,31 @@ fn main() {
             App::new("build")
                 .arg(
                     Arg::with_name("FILE")
-                        .required(true)
-                        .help("Sets the input Modusfile")
-                        .index(1),
+                        .required(false)
+                        .long_help("Specifies the input Modusfile\n\
+                                    The default is to look for a Modusfile in the context directory.")
+                        .help("Specify the input Modusfile")
+                        .value_name("FILE")
+                        .short("f"),
+                )
+                .arg(
+                    Arg::with_name("CONTEXT")
+                        .help("Specify the build context directory")
+                        .index(1)
+                        .required(true),
                 )
                 .arg(
                     Arg::with_name("QUERY")
                         .required(true)
-                        .help("Specifies the build target(s)")
+                        .help("Specify the target query to build")
                         .index(2),
+                )
+                .arg(
+                    Arg::with_name("JSON_OUTPUT")
+                        .value_name("FILE")
+                        .required(false)
+                        .long("json-out")
+                        .help("Write a JSON file"),
                 ),
         )
         .subcommand(
@@ -144,8 +160,12 @@ fn main() {
             }
         }
         ("build", Some(sub)) => {
-            let input_file = sub.value_of("FILE").unwrap();
-            let file = get_file(Path::new(input_file));
+            let context_dir = sub.value_of_os("CONTEXT").unwrap();
+            let input_file = sub
+                .value_of_os("FILE")
+                .map(|x| PathBuf::from(x))
+                .unwrap_or_else(|| Path::new(context_dir).join("Modusfile"));
+            let file = get_file(input_file.as_path());
             let query: logic::Literal = sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
 
             let mf: Modusfile = match file.source().parse() {
@@ -163,23 +183,34 @@ fn main() {
                     std::process::exit(1);
                 }
             };
-            match buildkit::build(&build_plan) {
+            fn print_build_error_and_exit(e_str: &str, w: &StandardStream) -> ! {
+                let mut w = w.lock();
+                (move || -> std::io::Result<()> {
+                    w.set_color(ColorSpec::new().set_fg(Some(Color::Red)).set_bold(true))?;
+                    write!(w, "build error")?;
+                    w.set_color(&ColorSpec::new())?;
+                    write!(w, ": ")?;
+                    w.set_color(ColorSpec::new().set_bold(true))?;
+                    write!(w, "{}\n", e_str)?;
+                    w.flush()?;
+                    Ok(())
+                })()
+                .expect("Unable to write to stderr.");
+                std::process::exit(1)
+            }
+            match buildkit::build(&build_plan, context_dir) {
                 Err(e) => {
-                    let mut w = writer.lock();
-                    (move || -> std::io::Result<()> {
-                        w.set_color(ColorSpec::new().set_fg(Some(Color::Red)).set_bold(true))?;
-                        write!(w, "build error")?;
-                        w.set_color(&ColorSpec::new())?;
-                        write!(w, ": ")?;
-                        w.set_color(ColorSpec::new().set_bold(true))?;
-                        write!(w, "{}\n", e)?;
-                        w.flush()?;
-                        Ok(())
-                    })()
-                    .expect("Unable to write to stderr.");
-                    std::process::exit(1);
+                    print_build_error_and_exit(&e.to_string(), &writer);
                 }
-                Ok(_) => {}
+                Ok(image_ids) => {
+                    if let Some(json_out) = sub.value_of_os("JSON_OUTPUT") {
+                        if let Err(e) =
+                            reporting::write_build_result(json_out, &build_plan, &image_ids[..])
+                        {
+                            print_build_error_and_exit(&e, &writer);
+                        }
+                    }
+                }
             }
         }
         ("proof", Some(sub)) => {

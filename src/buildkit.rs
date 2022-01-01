@@ -38,6 +38,7 @@
 
 use std::{
     fs::{File, OpenOptions},
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{atomic::AtomicBool, Arc},
 };
@@ -62,6 +63,10 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum BuildError {
+    #[error("Could not get current working directory")]
+    CwdError(#[source] std::io::Error),
+    #[error("Could not enter context directory: {0}")]
+    EnterContextDir(#[source] std::io::Error),
     #[error("Could not open a temporary file under the current directory: {0}. This is required to invoke docker build correctly.")]
     UnableToCreateTempFile(#[source] std::io::Error),
     #[error("Unable to run docker build.")]
@@ -206,8 +211,24 @@ fn write_tmp_dockerfile(content: &str) -> Result<TmpFilename, std::io::Error> {
     Ok(tmp_file)
 }
 
+struct RestoreCwd(PathBuf);
+impl Drop for RestoreCwd {
+    fn drop(&mut self) {
+        if let Err(e) = std::env::set_current_dir(&self.0) {
+            eprintln!(
+                "Warning: unable to restore current directory to {}: {}",
+                self.0.display(),
+                e
+            );
+        }
+    }
+}
+
 /// Returns the image IDs on success, following the order in build_plan.outputs.
-pub fn build(build_plan: &BuildPlan) -> Result<Vec<String>, BuildError> {
+pub fn build<P: AsRef<Path>>(
+    build_plan: &BuildPlan,
+    context: P,
+) -> Result<Vec<String>, BuildError> {
     let mut signals = SignalsInfo::with_exfiltrator(&[SIGINT, SIGTERM, SIGCHLD], SignalOnly)
         .expect("Failed to create signal handler.");
 
@@ -217,6 +238,9 @@ pub fn build(build_plan: &BuildPlan) -> Result<Vec<String>, BuildError> {
     if check_terminate(&mut signals) {
         return Err(Interrupted);
     }
+    let previous_cwd = PathBuf::from(".").canonicalize().map_err(CwdError)?;
+    std::env::set_current_dir(context).map_err(EnterContextDir)?;
+    let _restore_cwd = RestoreCwd(previous_cwd);
     let has_dockerignore = check_dockerignore()?;
     let mut content = String::new();
     content.push_str("#syntax=europe-docker.pkg.dev/maowtm/modus-test/modus-bk-frontend"); // TODO
@@ -225,7 +249,7 @@ pub fn build(build_plan: &BuildPlan) -> Result<Vec<String>, BuildError> {
     if check_terminate(&mut signals) {
         return Err(Interrupted);
     }
-    let dockerfile = write_tmp_dockerfile(&content).map_err(|e| UnableToCreateTempFile(e))?;
+    let dockerfile = write_tmp_dockerfile(&content).map_err(UnableToCreateTempFile)?;
     match build_plan.outputs.len() {
         0 => unreachable!(), // not possible because if there is no solution to the initial query, there will be an SLD failure.
         1 => {
@@ -262,7 +286,10 @@ pub fn build(build_plan: &BuildPlan) -> Result<Vec<String>, BuildError> {
             let stderr = std::io::stderr();
             // TODO: check isatty
             let mut stderr = stderr.lock();
-            write!(stderr, "\x1b[1A\x1b[2K\r=== Build success, exporting individual images ===\n")?;
+            write!(
+                stderr,
+                "\x1b[1A\x1b[2K\r=== Build success, exporting individual images ===\n"
+            )?;
             for i in 0..nb_outputs {
                 let target_str = format!("{}", i);
                 write!(
