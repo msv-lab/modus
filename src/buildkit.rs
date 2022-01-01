@@ -93,6 +93,7 @@ fn invoke_buildkit(
     target: Option<String>,
     has_dockerignore: bool,
     iidfile: Option<&str>,
+    verbose: bool,
     signals: &mut SignalsInfo<SignalOnly>,
 ) -> Result<(), BuildError> {
     let mut args = Vec::new();
@@ -122,7 +123,9 @@ fn invoke_buildkit(
         args.push("--iidfile".to_string());
         args.push(iidfile.to_string());
     }
-    // args.push("--progress=plain".to_string());
+    if verbose {
+        args.push("--progress=plain".to_string());
+    }
     let mut cmd = Command::new("docker")
         .args(args)
         .stdin(Stdio::null())
@@ -228,6 +231,7 @@ impl Drop for RestoreCwd {
 pub fn build<P: AsRef<Path>>(
     build_plan: &BuildPlan,
     context: P,
+    verbose: bool
 ) -> Result<Vec<String>, BuildError> {
     let mut signals = SignalsInfo::with_exfiltrator(&[SIGINT, SIGTERM, SIGCHLD], SignalOnly)
         .expect("Failed to create signal handler.");
@@ -261,6 +265,7 @@ pub fn build<P: AsRef<Path>>(
                 None,
                 has_dockerignore,
                 Some(iidfile.name()),
+                verbose,
                 &mut signals,
             )?;
             if check_terminate(&mut signals) {
@@ -280,6 +285,7 @@ pub fn build<P: AsRef<Path>>(
                 None,
                 has_dockerignore,
                 None,
+                verbose,
                 &mut signals,
             )?;
             let mut res = Vec::with_capacity(nb_outputs);
@@ -315,6 +321,7 @@ pub fn build<P: AsRef<Path>>(
                     Some(target_str),
                     has_dockerignore,
                     Some(iidfile.name()),
+                    verbose,
                     &mut signals,
                 )?;
                 let iid = std::fs::read_to_string(iidfile.name())?;

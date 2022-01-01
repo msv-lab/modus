@@ -42,8 +42,8 @@ use codespan_reporting::{
     },
 };
 use colored::Colorize;
-use std::{io::Write, path::PathBuf};
 use std::{fs, path::Path};
+use std::{io::Write, path::PathBuf};
 
 use modusfile::Modusfile;
 
@@ -102,7 +102,8 @@ fn main() {
                                     The default is to look for a Modusfile in the context directory.")
                         .help("Specify the input Modusfile")
                         .value_name("FILE")
-                        .short("f"),
+                        .short("f")
+                        .long("modusfile")
                 )
                 .arg(
                     Arg::with_name("CONTEXT")
@@ -122,7 +123,13 @@ fn main() {
                         .required(false)
                         .long("json-out")
                         .help("Write a JSON file"),
-                ),
+                )
+                .arg(
+                    Arg::with_name("VERBOSE")
+                        .short("v")
+                        .long("verbose")
+                        .help("Tell docker to print all the output"),
+                )
         )
         .subcommand(
             App::new("proof")
@@ -198,7 +205,8 @@ fn main() {
                 .expect("Unable to write to stderr.");
                 std::process::exit(1)
             }
-            match buildkit::build(&build_plan, context_dir) {
+            let verbose = sub.is_present("VERBOSE");
+            match buildkit::build(&build_plan, context_dir, verbose) {
                 Err(e) => {
                     print_build_error_and_exit(&e.to_string(), &writer);
                 }
