@@ -62,7 +62,7 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum BuildError {
-    #[error("Could not create a temporary file under the current directory.")]
+    #[error("Could not open a temporary file under the current directory: {0}. This is required to invoke docker build correctly.")]
     UnableToCreateTempFile(#[source] std::io::Error),
     #[error("Unable to run docker build.")]
     UnableToRunDockerBuild(#[source] std::io::Error),
@@ -83,10 +83,11 @@ pub enum BuildError {
 use BuildError::*;
 
 fn invoke_buildkit(
-    dockerfile: &TmpDockerfile,
+    dockerfile: &TmpFilename,
     tag: Option<String>,
     target: Option<String>,
     has_dockerignore: bool,
+    iidfile: Option<&str>,
     signals: &mut SignalsInfo<SignalOnly>,
 ) -> Result<(), BuildError> {
     let mut args = Vec::new();
@@ -98,9 +99,12 @@ fn invoke_buildkit(
         args.push("-t".to_string());
         args.push(tag);
     }
+    let quiet = target.is_some();
     if let Some(target) = target {
         args.push("--target".to_string());
         args.push(target);
+    }
+    if quiet {
         args.push("--quiet".to_string());
     }
     args.push("--build-arg".to_string());
@@ -109,11 +113,19 @@ fn invoke_buildkit(
     } else {
         args.push("has_dockerignore=false".to_string());
     }
+    if let Some(iidfile) = iidfile {
+        args.push("--iidfile".to_string());
+        args.push(iidfile.to_string());
+    }
     // args.push("--progress=plain".to_string());
     let mut cmd = Command::new("docker")
         .args(args)
         .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
+        .stdout(if quiet {
+            Stdio::null()
+        } else {
+            Stdio::inherit()
+        })
         .stderr(Stdio::inherit())
         .env("DOCKER_BUILDKIT", "1")
         .spawn()
@@ -145,44 +157,57 @@ fn invoke_buildkit(
     Ok(())
 }
 
-struct TmpDockerfile(String);
+/// A holder for a file name that deletes the file when dropped.
+struct TmpFilename(String);
+pub const TMP_PREFIX: &str = "buildkit_temp_";
+pub const TMP_PREFIX_IGNORE_PATTERN: &str = "buildkit_temp_*";
 
-impl TmpDockerfile {
+impl TmpFilename {
+    /// Generate a name, but does not create the file.
+    fn gen(suffix: &str) -> Self {
+        const RANDOM_LEN: usize = 15;
+        let mut rng = rand::thread_rng();
+        let letters = Uniform::new_inclusive('a', 'z');
+        let mut name = String::with_capacity(TMP_PREFIX.len() + RANDOM_LEN + suffix.len());
+        name.push_str(TMP_PREFIX);
+        for _ in 0..RANDOM_LEN {
+            name.push(letters.sample(&mut rng));
+        }
+        name.push_str(".Dockerfile");
+        Self(name)
+    }
+
     fn name(&self) -> &str {
         &self.0
     }
 }
 
-impl Drop for TmpDockerfile {
+impl Drop for TmpFilename {
     fn drop(&mut self) {
         if let Err(e) = std::fs::remove_file(self.name()) {
-            eprintln!(
-                "Warning: unable to remove temporary file {}: {}",
-                self.name(),
-                e
-            );
+            if e.kind() != std::io::ErrorKind::NotFound {
+                eprintln!(
+                    "Warning: unable to remove temporary file {}: {}",
+                    self.name(),
+                    e
+                );
+            }
         }
     }
 }
 
-fn write_tmp_dockerfile(content: &str) -> Result<TmpDockerfile, std::io::Error> {
-    let mut rng = rand::thread_rng();
-    let letters = Uniform::new_inclusive('a', 'z');
-    let mut name = String::with_capacity(40);
-    name.push_str("buildkit_temp_");
-    for _ in 0..10 {
-        name.push(letters.sample(&mut rng));
-    }
-    name.push_str(".Dockerfile");
+fn write_tmp_dockerfile(content: &str) -> Result<TmpFilename, std::io::Error> {
+    let tmp_file = TmpFilename::gen(".Dockerfile");
     let mut f = OpenOptions::new()
         .create_new(true)
         .write(true)
-        .open(&name)?;
+        .open(tmp_file.name())?;
     f.write_all(content.as_bytes())?;
-    Ok(TmpDockerfile(name))
+    Ok(tmp_file)
 }
 
-pub fn build(build_plan: &BuildPlan) -> Result<(), BuildError> {
+/// Returns the image IDs on success, following the order in build_plan.outputs.
+pub fn build(build_plan: &BuildPlan) -> Result<Vec<String>, BuildError> {
     let mut signals = SignalsInfo::with_exfiltrator(&[SIGINT, SIGTERM, SIGCHLD], SignalOnly)
         .expect("Failed to create signal handler.");
 
@@ -200,22 +225,48 @@ pub fn build(build_plan: &BuildPlan) -> Result<(), BuildError> {
     if check_terminate(&mut signals) {
         return Err(Interrupted);
     }
-    let tmp_file = write_tmp_dockerfile(&content).map_err(|e| UnableToCreateTempFile(e))?;
+    let dockerfile = write_tmp_dockerfile(&content).map_err(|e| UnableToCreateTempFile(e))?;
     match build_plan.outputs.len() {
         0 => unreachable!(), // not possible because if there is no solution to the initial query, there will be an SLD failure.
         1 => {
             println!("{}", "Running docker build...".blue());
-            invoke_buildkit(&tmp_file, None, None, has_dockerignore, &mut signals)
+            let iidfile = TmpFilename::gen(".iid");
+            invoke_buildkit(
+                &dockerfile,
+                None,
+                None,
+                has_dockerignore,
+                Some(iidfile.name()),
+                &mut signals,
+            )?;
+            if check_terminate(&mut signals) {
+                return Err(Interrupted);
+            }
+            let iid = std::fs::read_to_string(iidfile.name())?;
+            Ok(vec![iid])
         }
         nb_outputs => {
             println!("{}", "Running docker build...".blue());
             if check_terminate(&mut signals) {
                 return Err(Interrupted);
             }
-            invoke_buildkit(&tmp_file, None, None, has_dockerignore, &mut signals)?;
+            invoke_buildkit(
+                &dockerfile,
+                None,
+                None,
+                has_dockerignore,
+                None,
+                &mut signals,
+            )?;
+            let mut res = Vec::with_capacity(nb_outputs);
+            let stderr = std::io::stderr();
+            // TODO: check isatty
+            let mut stderr = stderr.lock();
+            write!(stderr, "\x1b[1A\x1b[2K\r=== Build success, exporting individual images ===\n")?;
             for i in 0..nb_outputs {
                 let target_str = format!("{}", i);
-                println!(
+                write!(
+                    stderr,
                     "{}",
                     format!(
                         "Exporting {}/{}: {}",
@@ -228,10 +279,23 @@ pub fn build(build_plan: &BuildPlan) -> Result<(), BuildError> {
                             .to_string()
                     )
                     .blue()
-                );
-                invoke_buildkit(&tmp_file, None, Some(target_str), has_dockerignore, &mut signals)?;
+                )?;
+                stderr.flush()?;
+                let iidfile = TmpFilename::gen(".iid");
+                invoke_buildkit(
+                    &dockerfile,
+                    None,
+                    Some(target_str),
+                    has_dockerignore,
+                    Some(iidfile.name()),
+                    &mut signals,
+                )?;
+                let iid = std::fs::read_to_string(iidfile.name())?;
+                write!(stderr, "{}", format!(" -> {}\n", &iid).blue())?;
+                stderr.flush()?;
+                res.push(iid);
             }
-            Ok(())
+            Ok(res)
         }
     }
 }

@@ -186,7 +186,7 @@ async fn handle_build_plan(
                 source = source.add_exclude_pattern(line);
             }
         }
-        source = source.add_exclude_pattern(dockerfile_name);
+        source = source.add_exclude_pattern(buildkit::TMP_PREFIX_IGNORE_PATTERN);
         source.ref_counted().output()
     }
 

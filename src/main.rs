@@ -36,10 +36,13 @@ use clap::{crate_version, App, Arg};
 use codespan_reporting::{
     diagnostic,
     files::SimpleFile,
-    term::{self, termcolor::{StandardStream, WriteColor, ColorSpec, Color}},
+    term::{
+        self,
+        termcolor::{Color, ColorSpec, StandardStream, WriteColor},
+    },
 };
-use std::io::Write;
 use colored::Colorize;
+use std::io::Write;
 use std::{fs, path::Path};
 
 use dockerfile::ResolvedDockerfile;
@@ -164,13 +167,17 @@ fn main() {
             match buildkit::build(&build_plan) {
                 Err(e) => {
                     let mut w = writer.lock();
-                    let _ = w.set_color(ColorSpec::new().set_fg(Some(Color::Red)).set_bold(true));
-                    let _ = write!(w, "build error");
-                    let _ = w.set_color(&ColorSpec::new());
-                    let _ = write!(w, ": ");
-                    let _ = w.set_color(ColorSpec::new().set_bold(true));
-                    let _ = write!(w, "{}\n", e);
-                    let _ = w.flush();
+                    (move || -> std::io::Result<()> {
+                        w.set_color(ColorSpec::new().set_fg(Some(Color::Red)).set_bold(true))?;
+                        write!(w, "build error")?;
+                        w.set_color(&ColorSpec::new())?;
+                        write!(w, ": ")?;
+                        w.set_color(ColorSpec::new().set_bold(true))?;
+                        write!(w, "{}\n", e)?;
+                        w.flush()?;
+                        Ok(())
+                    })()
+                    .expect("Unable to write to stderr.");
                     std::process::exit(1);
                 }
                 Ok(_) => {}
