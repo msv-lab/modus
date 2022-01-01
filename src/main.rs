@@ -45,7 +45,6 @@ use colored::Colorize;
 use std::io::Write;
 use std::{fs, path::Path};
 
-use dockerfile::ResolvedDockerfile;
 use modusfile::Modusfile;
 
 use crate::transpiler::prove_goal;

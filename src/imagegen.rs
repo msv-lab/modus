@@ -9,6 +9,8 @@ use crate::unification::Substitute;
 use codespan_reporting::diagnostic::Diagnostic;
 use serde::{Deserialize, Serialize};
 
+const MODUS_LABEL: &str = "com.modus-continens.literal";
+
 /// A build plan, designed to be easy to translate to buildkit and Dockerfile.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildPlan {
@@ -113,6 +115,11 @@ pub enum BuildNode {
         parent: NodeId,
         new_entrypoint: Vec<String>,
     },
+    SetLabel {
+        parent: NodeId,
+        label: String,
+        value: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,6 +152,7 @@ pub fn build_dag_from_proofs(
         rules: &Vec<Clause<IRTerm>>,
         res: &mut BuildPlan,
         image_literals: &mut HashMap<Literal, NodeId>,
+        tag_with_literal: Option<String>,
     ) -> Option<NodeId> {
         let mut last_node = None;
         let mut curr_state = State {
@@ -202,6 +210,7 @@ pub fn build_dag_from_proofs(
                                 rules,
                                 res,
                                 image_literals,
+                                Some(substituted_lit.to_string()),
                             ) {
                                 last_node.replace(node_id);
                                 image_literals.insert(substituted_lit, node_id);
@@ -335,8 +344,9 @@ pub fn build_dag_from_proofs(
                         match op_name {
                             "copy" => {
                                 let parent = last_node.expect("No base layer yet.");
-                                let img = process_image(subtree_in_op, rules, res, image_literals)
-                                    .expect("Stuff inside this copy does not build an image.");
+                                let img =
+                                    process_image(subtree_in_op, rules, res, image_literals, None)
+                                        .expect("Stuff inside this copy does not build an image.");
                                 let node = res.new_node(
                                     // TODO: resolve path relative to state.cwd.
                                     BuildNode::CopyFromImage {
@@ -368,8 +378,9 @@ pub fn build_dag_from_proofs(
                                 );
                             }
                             "set_workdir" => {
-                                let img = process_image(subtree_in_op, rules, res, image_literals)
-                                    .expect("set_workdir should be applied to an image.");
+                                let img =
+                                    process_image(subtree_in_op, rules, res, image_literals, None)
+                                        .expect("set_workdir should be applied to an image.");
                                 if last_node.is_some() {
                                     panic!("set_workdir generates a new image, so it should be the first instruction.");
                                 }
@@ -383,12 +394,18 @@ pub fn build_dag_from_proofs(
                                 ));
                             }
                             "set_entrypoint" => {
-                                let img = process_image(subtree_in_op, rules, res, image_literals)
-                                    .expect("set_entrypoint should be applied to an image.");
+                                let img =
+                                    process_image(subtree_in_op, rules, res, image_literals, None)
+                                        .expect("set_entrypoint should be applied to an image.");
                                 if last_node.is_some() {
                                     panic!("set_entrypoint generates a new image, so it should be the first instruction.");
                                 }
-                                let entrypoint = lit.args.iter().skip(1).map(|x| x.as_constant().unwrap().to_owned()).collect::<Vec<_>>();
+                                let entrypoint = lit
+                                    .args
+                                    .iter()
+                                    .skip(1)
+                                    .map(|x| x.as_constant().unwrap().to_owned())
+                                    .collect::<Vec<_>>();
                                 last_node.replace(res.new_node(
                                     BuildNode::SetEntrypoint {
                                         parent: img,
@@ -417,6 +434,18 @@ pub fn build_dag_from_proofs(
             &mut curr_state,
         );
 
+        if last_node.is_some() && tag_with_literal.is_some() {
+            let node = last_node.unwrap();
+            let tagged_node = res.new_node(
+                BuildNode::SetLabel {
+                    parent: node,
+                    label: MODUS_LABEL.to_owned(),
+                    value: tag_with_literal.unwrap().to_owned(),
+                },
+                vec![node],
+            );
+            last_node.replace(tagged_node);
+        }
         last_node
     }
 
@@ -430,7 +459,13 @@ pub fn build_dag_from_proofs(
             });
             continue;
         }
-        if let Some(node_id) = process_image(&[proof], rules, &mut res, &mut image_literals) {
+        if let Some(node_id) = process_image(
+            &[proof],
+            rules,
+            &mut res,
+            &mut image_literals,
+            Some(query.to_string()),
+        ) {
             image_literals.insert(query.clone(), node_id);
             res.outputs.push(Output {
                 node: node_id,

@@ -17,7 +17,11 @@ mod wellformed;
 mod buildkit_llb_types;
 use buildkit_llb_types::OwnedOutput;
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::PathBuf,
+    sync::Arc,
+};
 
 use buildkit_frontend::{
     oci::{Architecture, ImageConfig, ImageSpecification, OperatingSystem},
@@ -175,7 +179,6 @@ async fn handle_build_plan(
     async fn get_local_source_for_copy(
         bridge: &Bridge,
         should_read_ignore_file: bool,
-        dockerfile_name: &str
     ) -> OperationOutput<'static> {
         let mut source = Source::local("context").custom_name("Sending local context for copy");
         if should_read_ignore_file {
@@ -190,7 +193,8 @@ async fn handle_build_plan(
         source.ref_counted().output()
     }
 
-    let local_context = get_local_source_for_copy(bridge, options.has_dockerignore, &options.filename).await;
+    let local_context =
+        get_local_source_for_copy(bridge, options.has_dockerignore).await;
 
     for node_id in build_plan.topological_order().into_iter() {
         let node = &build_plan.nodes[node_id];
@@ -285,11 +289,10 @@ async fn handle_build_plan(
                 let parent_config = &*parent.1;
                 let parent_dir = get_cwd_from_image_spec(parent_config);
                 let mut new_config = parent_config.clone();
-                if new_config.config.is_none() {
-                    new_config.config = Some(empty_image_config());
-                }
-                new_config.config.as_mut().unwrap().working_dir =
-                    Some(parent_dir.join(new_workdir));
+                new_config
+                    .config
+                    .get_or_insert_with(empty_image_config)
+                    .working_dir = Some(parent_dir.join(new_workdir));
                 let new_config = Arc::new(new_config);
                 (parent.0.clone(), new_config)
             }
@@ -299,10 +302,25 @@ async fn handle_build_plan(
             } => {
                 let (p_out, p_conf) = translated_nodes[*parent].clone().unwrap();
                 let mut p_conf = (*p_conf).clone();
-                if p_conf.config.is_none() {
-                    p_conf.config = Some(empty_image_config());
-                }
-                p_conf.config.as_mut().unwrap().entrypoint = Some(new_entrypoint.to_owned());
+                p_conf
+                    .config
+                    .get_or_insert_with(empty_image_config)
+                    .entrypoint = Some(new_entrypoint.to_owned());
+                (p_out, Arc::new(p_conf))
+            }
+            SetLabel {
+                parent,
+                label,
+                value,
+            } => {
+                let (p_out, p_conf) = translated_nodes[*parent].clone().unwrap();
+                let mut p_conf = (*p_conf).clone();
+                p_conf
+                    .config
+                    .get_or_insert_with(empty_image_config)
+                    .labels
+                    .get_or_insert_with(BTreeMap::new)
+                    .insert(label.to_owned(), value.to_owned());
                 (p_out, Arc::new(p_conf))
             }
         };

@@ -61,7 +61,7 @@ pub enum Instruction<P> {
     From(From<P>),
     Run(Run),
     //Cmd(String),
-    // Label(String),
+    Label(String, String),
     // Maintainer(String),
     // Expose(String),
     Env(Env),
@@ -205,6 +205,7 @@ where
                 Instruction::Env(s) => writeln!(f, "ENV {}", s),
                 Instruction::Workdir(s) => writeln!(f, "WORKDIR {}", s),
                 Instruction::Entrypoint(s) => writeln!(f, "ENTRYPOINT {}", s),
+                Instruction::Label(k, v) => writeln!(f, "LABEL {:?}={:?}", k, v),
             }?;
         }
         Ok(())
