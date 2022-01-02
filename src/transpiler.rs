@@ -134,6 +134,16 @@ fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
                     }),
                     Instruction::Entrypoint(format!("{:?}", new_entrypoint)),
                 ],
+                BuildNode::SetLabel {
+                    parent,
+                    label, value
+                } => vec![
+                    Instruction::From(From {
+                        parent: ResolvedParent::Stage(format!("n_{}", parent)),
+                        alias: Some(str_id),
+                    }),
+                    Instruction::Label(label.to_owned(), value.to_owned()),
+                ],
             }
         })
         .flatten()
