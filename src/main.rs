@@ -42,6 +42,7 @@ use codespan_reporting::{
     },
 };
 use colored::Colorize;
+use std::io::Write;
 use std::{fs, path::Path};
 use std::{io::Write, path::PathBuf};
 
@@ -155,6 +156,7 @@ fn main() {
             let input_file = sub.value_of("FILE").unwrap();
             let file = get_file(Path::new(input_file));
             let query: logic::Literal = sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
+            let query = query.with_position(None);
 
             let mf: Modusfile = file.source().parse().unwrap();
 
@@ -174,6 +176,7 @@ fn main() {
                 .unwrap_or_else(|| Path::new(context_dir).join("Modusfile"));
             let file = get_file(input_file.as_path());
             let query: logic::Literal = sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
+            let query = query.with_position(None);
 
             let mf: Modusfile = match file.source().parse() {
                 Ok(mf) => mf,
