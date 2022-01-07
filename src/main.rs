@@ -42,7 +42,6 @@ use codespan_reporting::{
     },
 };
 use colored::Colorize;
-use std::io::Write;
 use std::{fs, path::Path};
 use std::{io::Write, path::PathBuf};
 
