@@ -33,6 +33,7 @@ impl ConstantLiteral {
 
 #[derive(Serialize, Debug, Clone)]
 pub struct Image {
+    #[serde(flatten)]
     pub source_literal: ConstantLiteral,
     pub digest: String,
 }
