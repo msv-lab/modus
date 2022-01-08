@@ -162,8 +162,13 @@ fn main() {
 
             match df_res {
                 Ok(df) => println!("{}", df),
-                Err(e) => term::emit(&mut writer.lock(), &config, &file, &e)
-                    .expect("Error when printing to stderr."),
+                Err(e) => {
+                    for diag_error in e {
+                        term::emit(&mut writer.lock(), &config, &file, &diag_error)
+                            .expect("Error when printing to stderr.")
+                    }
+                    std::process::exit(1)
+                }
             }
         }
         ("build", Some(sub)) => {
@@ -185,9 +190,11 @@ fn main() {
             let build_plan = match imagegen::plan_from_modusfile(mf, query) {
                 Ok(plan) => plan,
                 Err(e) => {
-                    term::emit(&mut writer.lock(), &config, &file, &e)
-                        .expect("Error when printing to stderr.");
-                    std::process::exit(1);
+                    for diag_error in e {
+                        term::emit(&mut writer.lock(), &config, &file, &diag_error)
+                            .expect("Error when printing to stderr.")
+                    }
+                    std::process::exit(1)
                 }
             };
             fn print_build_error_and_exit(e_str: &str, w: &StandardStream) -> ! {
@@ -241,8 +248,12 @@ fn main() {
                         );
                         // TODO: pretty print proof, we could use the 'colored' library for terminal colors
                     }
-                    Err(e) => term::emit(&mut writer.lock(), &config, &file, &e)
-                        .expect("Error when printing to stderr."),
+                    Err(e) => {
+                        for diag_error in e {
+                            term::emit(&mut writer.lock(), &config, &file, &diag_error)
+                                .expect("Error when printing to stderr.")
+                        }
+                    }
                 },
                 (Err(error), _) => {
                     println!(

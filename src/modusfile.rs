@@ -722,8 +722,11 @@ mod tests {
 
         assert_eq!(s1, r#"Hello\nWorld"#);
         assert_eq!(s2, r#"Tabs\tare\tbetter\tthan\tspaces"#);
-        assert_eq!(s3, r#"Testing \
-                       multiline."#);
+        assert_eq!(
+            s3,
+            r#"Testing \
+                       multiline."#
+        );
     }
 
     #[test]

@@ -15,11 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{
-    collections::{HashMap, HashSet},
-    str::FromStr,
-    sync::atomic::{AtomicU32, Ordering},
-};
+use std::str::FromStr;
 
 use codespan_reporting::diagnostic::Diagnostic;
 
@@ -28,7 +24,7 @@ use crate::{
     imagegen::{self, BuildPlan, NodeId},
     logic::{self, Clause, IRTerm, Literal, Predicate},
     modusfile::Modusfile,
-    sld::{self, ClauseId},
+    sld::{self, ClauseId, ResolutionError},
 };
 
 use crate::imagegen::BuildNode;
@@ -37,7 +33,7 @@ use crate::imagegen::BuildNode;
 pub fn prove_goal(
     mf: &Modusfile,
     goal: &Vec<logic::Literal>,
-) -> Result<Vec<sld::Proof>, Diagnostic<()>> {
+) -> Result<Vec<sld::Proof>, Vec<Diagnostic<()>>> {
     let max_depth = 20;
     let clauses: Vec<Clause> =
         mf.0.iter()
@@ -47,14 +43,18 @@ pub fn prove_goal(
             })
             .collect();
 
-    let res = sld::sld(&clauses, goal, max_depth)?;
-    match res {
-        Some(t) => Ok(sld::proofs(&t, &clauses, &goal)),
-        None => Err(Diagnostic::warning().with_message("Failed in SLD tree construction.")),
-    }
+    let t = sld::sld(&clauses, goal, max_depth).map_err(|errs| {
+        errs.iter()
+            .map(ResolutionError::get_diagnostic)
+            .collect::<Vec<_>>()
+    })?;
+    Ok(sld::proofs(&t, &clauses, &goal))
 }
 
-pub fn transpile(mf: Modusfile, query: logic::Literal) -> Result<Dockerfile<ResolvedParent>, Diagnostic<()>> {
+pub fn transpile(
+    mf: Modusfile,
+    query: logic::Literal,
+) -> Result<Dockerfile<ResolvedParent>, Vec<Diagnostic<()>>> {
     let build_plan = imagegen::plan_from_modusfile(mf, query)?;
     Ok(plan_to_docker(&build_plan))
 }
@@ -136,7 +136,8 @@ fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
                 ],
                 BuildNode::SetLabel {
                     parent,
-                    label, value
+                    label,
+                    value,
                 } => vec![
                     Instruction::From(From {
                         parent: ResolvedParent::Stage(format!("n_{}", parent)),

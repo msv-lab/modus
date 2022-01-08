@@ -70,6 +70,13 @@ impl sld::Auxiliary for IRTerm {
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Predicate(pub String);
 
+impl Predicate {
+    /// True if this predicate symbol represents an operator.
+    pub fn is_operator(&self) -> bool {
+        self.0.starts_with("_operator_")
+    }
+}
+
 impl From<String> for Predicate {
     fn from(s: String) -> Self {
         Predicate(s)

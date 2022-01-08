@@ -231,7 +231,7 @@ impl Drop for RestoreCwd {
 pub fn build<P: AsRef<Path>>(
     build_plan: &BuildPlan,
     context: P,
-    verbose: bool
+    verbose: bool,
 ) -> Result<Vec<String>, BuildError> {
     let mut signals = SignalsInfo::with_exfiltrator(&[SIGINT, SIGTERM, SIGCHLD], SignalOnly)
         .expect("Failed to create signal handler.");
