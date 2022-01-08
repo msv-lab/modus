@@ -42,7 +42,7 @@ use codespan_reporting::{
     },
 };
 use colored::Colorize;
-use std::{fs, path::Path};
+use std::{ffi::OsStr, fs, path::Path};
 use std::{io::Write, path::PathBuf};
 
 use modusfile::Modusfile;
@@ -121,8 +121,13 @@ fn main() {
                     Arg::with_name("JSON_OUTPUT")
                         .value_name("FILE")
                         .required(false)
-                        .long("json-out")
-                        .help("Write a JSON file"),
+                        .min_values(0)
+                        .max_values(1)
+                        .require_equals(true)
+                        .long("json")
+                        .help("Output build result as JSON")
+                        .long_help("Output build result as JSON\n\
+                                    If this flag is specified without providing a file name, output is written to stdout.")
                 )
                 .arg(
                     Arg::with_name("VERBOSE")
@@ -155,6 +160,7 @@ fn main() {
             let input_file = sub.value_of("FILE").unwrap();
             let file = get_file(Path::new(input_file));
             let query: logic::Literal = sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
+            let query = query.with_position(None);
 
             let mf: Modusfile = file.source().parse().unwrap();
 
@@ -179,6 +185,7 @@ fn main() {
                 .unwrap_or_else(|| Path::new(context_dir).join("Modusfile"));
             let file = get_file(input_file.as_path());
             let query: logic::Literal = sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
+            let query = query.with_position(None);
 
             let mf: Modusfile = match file.source().parse() {
                 Ok(mf) => mf,
@@ -218,10 +225,40 @@ fn main() {
                     print_build_error_and_exit(&e.to_string(), &writer);
                 }
                 Ok(image_ids) => {
-                    if let Some(json_out) = sub.value_of_os("JSON_OUTPUT") {
-                        if let Err(e) =
-                            reporting::write_build_result(json_out, &build_plan, &image_ids[..])
-                        {
+                    if sub.is_present("JSON_OUTPUT") {
+                        let json_out_name;
+                        let mut json_out_f;
+                        let mut json_out_stdout;
+                        let json_out: &mut dyn Write;
+                        if let Some(o_path) = sub.value_of_os("JSON_OUTPUT") {
+                            json_out = match std::fs::File::create(o_path) {
+                                Ok(f) => {
+                                    json_out_f = f;
+                                    &mut json_out_f
+                                }
+                                Err(e) => {
+                                    print_build_error_and_exit(
+                                        &format!(
+                                            "Unable to open {} for writing: {}.",
+                                            o_path.to_string_lossy(),
+                                            &e
+                                        ),
+                                        &writer,
+                                    );
+                                }
+                            };
+                            json_out_name = o_path;
+                        } else {
+                            json_out_stdout = std::io::stdout();
+                            json_out = &mut json_out_stdout;
+                            json_out_name = OsStr::new("stdout");
+                        }
+                        if let Err(e) = reporting::write_build_result(
+                            json_out,
+                            &json_out_name.to_string_lossy(),
+                            &build_plan,
+                            &image_ids[..],
+                        ) {
                             print_build_error_and_exit(&e, &writer);
                         }
                     }
