@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{fmt::Display, io::Write};
 
 use serde::Serialize;
 
@@ -38,8 +38,9 @@ pub struct Image {
     pub digest: String,
 }
 
-pub fn write_build_result<P: AsRef<Path>>(
-    json_out: P,
+pub fn write_build_result<F: Write, P: Display>(
+    mut json_out: F,
+    json_out_name: P,
     build_plan: &BuildPlan,
     image_ids: &[String],
 ) -> Result<(), String> {
@@ -61,11 +62,11 @@ pub fn write_build_result<P: AsRef<Path>>(
         })
         .collect::<Vec<_>>();
 
-    std::fs::write(
-        json_out.as_ref(),
-        serde_json::to_vec_pretty(&res).map_err(|e| format!("Serialization error: {}", e))?,
-    )
-    .map_err(|e| format!("Error writing to {}: {}", json_out.as_ref().display(), e))?;
+    json_out
+        .write_all(
+            &serde_json::to_vec_pretty(&res).map_err(|e| format!("Serialization error: {}", e))?,
+        )
+        .map_err(|e| format!("Error writing to {}: {}", json_out_name, e))?;
 
     Ok(())
 }
