@@ -33,7 +33,7 @@ extern crate lazy_static;
 #[macro_use]
 extern crate fp_core;
 
-use clap::{crate_version, App, Arg, AppSettings};
+use clap::{crate_version, App, AppSettings, Arg};
 use codespan_reporting::{
     files::SimpleFile,
     term::{
@@ -109,7 +109,7 @@ fn main() {
                 )
                 .arg(
                     Arg::new("CONTEXT")
-                        .help("Specify the build context directory")
+                        .help("Specifies the build context directory")
                         .allow_invalid_utf8(true)
                         .index(1)
                         .required(true),
@@ -117,7 +117,7 @@ fn main() {
                 .arg(
                     Arg::new("QUERY")
                         .required(true)
-                        .help("Specify the target query to build")
+                        .help("Specifies the target query to build")
                         .index(2),
                 )
                 .arg(
@@ -129,7 +129,7 @@ fn main() {
                         .max_values(1)
                         .require_equals(true)
                         .long("json")
-                        .help("Output build result as JSON")
+                        .help("Outputs build result as JSON, optionally to a file")
                         .long_help("Output build result as JSON\n\
                                     If this flag is specified without providing a file name, output is written to stdout.")
                 )
@@ -137,7 +137,9 @@ fn main() {
                     Arg::new("VERBOSE")
                         .short('v')
                         .long("verbose")
-                        .help("Tell docker to print all the output"),
+                        .help("Print the entire output for each stages of the build.")
+                        .long_help("Print the entire output for each stages of the build.\n\
+                                    Under the hood, this will specify \"progress=plain\" as a docker build option.")
                 )
         )
         .subcommand(
