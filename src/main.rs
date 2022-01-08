@@ -33,7 +33,7 @@ extern crate lazy_static;
 #[macro_use]
 extern crate fp_core;
 
-use clap::{crate_version, App, Arg};
+use clap::{crate_version, App, Arg, AppSettings};
 use codespan_reporting::{
     files::SimpleFile,
     term::{
@@ -63,30 +63,31 @@ fn get_file(path: &Path) -> SimpleFile<&str, String> {
 fn main() {
     let matches = App::new("modus")
         .version(crate_version!())
+        .setting(AppSettings::SubcommandRequiredElseHelp)
         .about("Datalog-based container build system")
         .subcommand(
             App::new("transpile")
                 .arg(
-                    Arg::with_name("FILE")
+                    Arg::new("FILE")
                         .required(true)
                         .help("Sets the input Modusfile")
                         .index(1),
                 )
                 .arg(
-                    Arg::with_name("QUERY")
+                    Arg::new("QUERY")
                         .required(true)
                         .help("Specifies the build target(s)")
                         .index(2),
                 )
                 .arg(
-                    Arg::with_name("proof")
-                        .short("p")
+                    Arg::new("proof")
+                        .short('p')
                         .long("proof")
                         .help("Prints the proof tree of the target image"),
                 )
                 .arg(
-                    Arg::with_name("output")
-                        .short("o")
+                    Arg::new("output")
+                        .short('o')
                         .value_name("FILE")
                         .long("output")
                         .help("Sets the output Dockerfile")
@@ -96,30 +97,33 @@ fn main() {
         .subcommand(
             App::new("build")
                 .arg(
-                    Arg::with_name("FILE")
+                    Arg::new("FILE")
                         .required(false)
+                        .allow_invalid_utf8(true)
                         .long_help("Specifies the input Modusfile\n\
                                     The default is to look for a Modusfile in the context directory.")
                         .help("Specify the input Modusfile")
                         .value_name("FILE")
-                        .short("f")
+                        .short('f')
                         .long("modusfile")
                 )
                 .arg(
-                    Arg::with_name("CONTEXT")
+                    Arg::new("CONTEXT")
                         .help("Specify the build context directory")
+                        .allow_invalid_utf8(true)
                         .index(1)
                         .required(true),
                 )
                 .arg(
-                    Arg::with_name("QUERY")
+                    Arg::new("QUERY")
                         .required(true)
                         .help("Specify the target query to build")
                         .index(2),
                 )
                 .arg(
-                    Arg::with_name("JSON_OUTPUT")
-                        .value_name("FILE")
+                    Arg::new("JSON_OUTPUT")
+                        .value_name("[FILE]")
+                        .allow_invalid_utf8(true)
                         .required(false)
                         .min_values(0)
                         .max_values(1)
@@ -130,8 +134,8 @@ fn main() {
                                     If this flag is specified without providing a file name, output is written to stdout.")
                 )
                 .arg(
-                    Arg::with_name("VERBOSE")
-                        .short("v")
+                    Arg::new("VERBOSE")
+                        .short('v')
                         .long("verbose")
                         .help("Tell docker to print all the output"),
                 )
@@ -139,13 +143,13 @@ fn main() {
         .subcommand(
             App::new("proof")
                 .arg(
-                    Arg::with_name("FILE")
+                    Arg::new("FILE")
                         .required(true)
                         .help("Sets the input Modusfile")
                         .index(1),
                 )
                 .arg(
-                    Arg::with_name("QUERY")
+                    Arg::new("QUERY")
                         .help("Specifies the target to prove")
                         .index(2),
                 ),
@@ -155,8 +159,8 @@ fn main() {
     let writer = StandardStream::stderr(codespan_reporting::term::termcolor::ColorChoice::Auto);
     let config = codespan_reporting::term::Config::default();
 
-    match matches.subcommand() {
-        ("transpile", Some(sub)) => {
+    match matches.subcommand().unwrap() {
+        ("transpile", sub) => {
             let input_file = sub.value_of("FILE").unwrap();
             let file = get_file(Path::new(input_file));
             let query: logic::Literal = sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
@@ -172,7 +176,7 @@ fn main() {
                     .expect("Error when printing to stderr."),
             }
         }
-        ("build", Some(sub)) => {
+        ("build", sub) => {
             let context_dir = sub.value_of_os("CONTEXT").unwrap();
             let input_file = sub
                 .value_of_os("FILE")
@@ -258,7 +262,7 @@ fn main() {
                 }
             }
         }
-        ("proof", Some(sub)) => {
+        ("proof", sub) => {
             let input_file = sub.value_of("FILE").unwrap();
             let file = get_file(Path::new(input_file));
             let query: Option<logic::Literal> = sub.value_of("QUERY").map(|l| l.parse().unwrap());

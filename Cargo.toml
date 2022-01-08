@@ -20,7 +20,7 @@ nom = { version = "7" }
 nom_locate = "4.0.0"
 owned_chars = "0.3.2" # useful for impl traits for custom Source input type
 codespan-reporting = "0.11.1"
-clap = "2.33.3"
+clap = { version = "3", features = ["cargo"] }
 lazy_static = "1.4.0"
 fp-core = "0.1.9"
 colored = "2"
