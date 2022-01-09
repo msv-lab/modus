@@ -21,7 +21,7 @@ use buildkit_llb_types::OwnedOutput;
 use std::{
     collections::{BTreeMap, HashMap},
     path::PathBuf,
-    sync::Arc,
+    sync::Arc, ffi::{OsStr, OsString},
 };
 
 use buildkit_frontend::{
@@ -34,6 +34,8 @@ use buildkit_llb::prelude::{fs::CopyOperation, source::LocalSource};
 use async_trait::async_trait;
 
 use imagegen::{BuildNode, BuildPlan, NodeId};
+
+use crate::imagegen::{MergeNode, MergeOperation};
 
 #[macro_use]
 extern crate serde;
@@ -199,6 +201,31 @@ async fn handle_build_plan(
     for node_id in build_plan.topological_order().into_iter() {
         let node = &build_plan.nodes[node_id];
         use BuildNode::*;
+
+        fn new_cmd(
+            imgspec: &ImageSpecification,
+            this_cwd: &str,
+            parent: &OwnedOutput,
+        ) -> Command<'static> {
+            let mut cmd = Command::run("sh"); // TDDO: use image shell config
+            let user = imgspec
+                .config
+                .as_ref()
+                .and_then(|x| x.user.as_ref().map(|x| &x[..]))
+                .unwrap_or("0");
+            cmd = cmd
+                .cwd(get_cwd_from_image_spec(&imgspec).join(this_cwd))
+                .user(user);
+            let envs = imgspec.config.as_ref().and_then(|x| x.env.as_ref());
+            if let Some(env_map) = envs {
+                for (key, value) in env_map.iter() {
+                    cmd = cmd.env(key, value);
+                }
+            }
+            cmd = cmd.mount(Mount::Layer(OutputIdx(0), parent.output(), "/"));
+            cmd
+        }
+
         let new_node: (OwnedOutput, Arc<ImageSpecification>) = match node {
             From { image_ref } => {
                 let img_s = Source::image(image_ref).custom_name(format!("from({:?})", image_ref));
@@ -218,23 +245,9 @@ async fn handle_build_plan(
                     .as_ref()
                     .expect("Expected dependencies to already be built");
                 let parent_config = parent.1.clone();
-                let user = parent_config
-                    .config
-                    .as_ref()
-                    .and_then(|x| x.user.as_ref().map(|x| &x[..]))
-                    .unwrap_or("0");
-                let mut cmd = Command::run("sh") // TDDO: use image shell config
+                let mut cmd = new_cmd(&*parent_config, &cwd[..], &parent.0)
                     .args(&["-c", &command[..]])
-                    .custom_name(format!("run({:?})", command))
-                    .cwd(get_cwd_from_image_spec(&parent_config).join(cwd))
-                    .user(user)
-                    .mount(Mount::Layer(OutputIdx(0), parent.0.output(), "/"));
-                let envs = parent_config.config.as_ref().and_then(|x| x.env.as_ref());
-                if let Some(env_map) = envs {
-                    for (key, value) in env_map.iter() {
-                        cmd = cmd.env(key, value);
-                    }
-                }
+                    .custom_name(format!("run({:?})", command));
                 let o = OwnedOutput::from_command(cmd.ref_counted(), 0);
                 (o, parent_config)
             }
@@ -322,6 +335,68 @@ async fn handle_build_plan(
                     .get_or_insert_with(BTreeMap::new)
                     .insert(label.to_owned(), value.to_owned());
                 (p_out, Arc::new(p_conf))
+            }
+            Merge(MergeNode { parent, operations }) => {
+                let (p_out, p_conf) = translated_nodes[*parent].clone().unwrap();
+                let mut cmd = new_cmd(&*p_conf, "", &p_out);
+                let mut name = Vec::new();
+                let mut script = Vec::new();
+                let image_cwd = get_cwd_from_image_spec(&*p_conf);
+                debug_assert!(image_cwd.is_absolute());
+                use shell_escape::escape;
+                for op in operations {
+                    match op {
+                        MergeOperation::Run { command, cwd } => {
+                            let resolved_cwd = image_cwd.join(cwd);
+                            let resolved_cwd = resolved_cwd.to_str().unwrap(); // TODO: report error if image cwd is not valid utf8.
+                            script.push(format!(
+                                "(mkdir -p {cd} && cd {cd})",
+                                cd = escape(resolved_cwd.into())
+                            ));
+                            script.push(format!(
+                                "echo {cmd} && sh -c {cmd}",
+                                cmd = escape(command.into())
+                            ));
+                            name.push(format!("run({:?})::in_workdir({:?})", command, cwd));
+                        }
+                        MergeOperation::CopyFromImage {
+                            src_image,
+                            src_path,
+                            dst_path,
+                        } => {
+                            let (src_opt, src_conf) = translated_nodes[*src_image].clone().unwrap();
+                            let src_cwd = get_cwd_from_image_spec(&src_conf);
+                            let src_path = src_cwd.join(src_path);
+                            let dst_path = image_cwd.join(dst_path);
+
+                            let mut mount_dir = OsString::from("/");
+                            mount_dir.push(&buildkit::gen_tmp_filename());
+                            mount_dir.push(".merge-mount");
+                            debug_assert!(src_path.is_absolute());
+                            mount_dir.push(&src_path);
+                            let mount_dir = PathBuf::from(mount_dir);
+                            cmd = cmd.mount(Mount::ReadOnlySelector(
+                                src_opt.output(),
+                                mount_dir.clone(),
+                                src_path.clone(),
+                            ));
+
+                            script.push(format!(
+                                "echo COPY -> {dst} && cp -r {src} {dst}",
+                                dst = escape(dst_path.to_str().unwrap().into()),
+                                src = escape(mount_dir.to_str().unwrap().into())
+                            ));
+                            name.push(format!("...::copy({:?}, {:?})", src_path, dst_path));
+                        }
+                        MergeOperation::CopyFromLocal { src_path, dst_path } => {
+                            todo!()
+                        }
+                    }
+                }
+                cmd = cmd.args(&["-c", &script.join(" && ")]);
+                cmd = cmd.custom_name(format!("merge: {}", name.join(" + ")));
+
+                (OwnedOutput::from_command(cmd.ref_counted(), 0), p_conf)
             }
         };
         translated_nodes[node_id] = Some(new_node);
