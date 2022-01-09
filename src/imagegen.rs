@@ -501,7 +501,7 @@ pub fn plan_from_modusfile(
             .collect();
 
     let res_tree = sld::sld(&clauses, &goal, max_depth).map_err(|errs| {
-        errs.iter()
+        errs.into_iter()
             .map(ResolutionError::get_diagnostic)
             .collect::<Vec<_>>()
     })?;

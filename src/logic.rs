@@ -189,10 +189,7 @@ impl Literal {
     }
 
     pub fn with_position(self, position: Option<SpannedPosition>) -> Literal {
-        Literal {
-            position,
-            ..self
-        }
+        Literal { position, ..self }
     }
 }
 

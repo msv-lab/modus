@@ -44,7 +44,7 @@ pub fn prove_goal(
             .collect();
 
     let t = sld::sld(&clauses, goal, max_depth).map_err(|errs| {
-        errs.iter()
+        errs.into_iter()
             .map(ResolutionError::get_diagnostic)
             .collect::<Vec<_>>()
     })?;

@@ -118,7 +118,7 @@ pub enum ResolutionError {
     /// Contains the relevant goals.
     InsufficientGroundness(Vec<Literal>),
     /// Contains the goals when the max depth was exceeded.
-    MaximumDepthExceeded(Vec<Literal>),
+    MaximumDepthExceeded(Vec<Literal>, usize),
     /// Contains the relevant literal (builtin call), and the name of the selected builtin.
     BuiltinFailure(Literal, &'static str),
     /// Contains the literal that didn't match with any rule head.
@@ -128,7 +128,15 @@ pub enum ResolutionError {
 }
 
 impl ResolutionError {
-    pub fn get_diagnostic(&self) -> Diagnostic<()> {
+    pub fn get_diagnostic(self) -> Diagnostic<()> {
+        fn get_position_labels(literals: &[Literal]) -> Vec<Label<()>> {
+            literals
+                .iter()
+                .filter_map(|lit| lit.position.as_ref())
+                .map(|pos| Label::primary((), pos.offset..(pos.offset + pos.length)))
+                .collect()
+        }
+
         let (message, labels, severity) = match self {
             ResolutionError::UnknownPredicate(literal) => (
                 if literal.predicate.is_operator() {
@@ -136,18 +144,35 @@ impl ResolutionError {
                 } else {
                     format!("unknown predicate - {}", literal.predicate)
                 },
-                if let Some(span) = &literal.position {
-                    vec![Label::primary((), span.offset..(span.offset + span.length))]
-                } else {
-                    Vec::new()
-                },
+                get_position_labels(&[literal]),
                 Severity::Error,
             ),
-            ResolutionError::InsufficientGroundness(_) => todo!(),
-            ResolutionError::MaximumDepthExceeded(_) => todo!(),
-            ResolutionError::BuiltinFailure(_, _) => todo!(),
-            ResolutionError::InsufficientRules(_) => todo!(),
-            ResolutionError::InconsistentGroundnessSignature(_) => todo!(),
+            ResolutionError::InsufficientGroundness(literals) => (
+                format!("insufficient groundess for {} goals", literals.len()),
+                get_position_labels(&literals),
+                Severity::Warning,
+            ),
+            ResolutionError::MaximumDepthExceeded(literals, max_depth) => (
+                format!("exceeded maximum depth of {}", max_depth),
+                get_position_labels(&literals),
+                Severity::Warning,
+            ),
+            ResolutionError::BuiltinFailure(literal, builtin_name) => (
+                format!("builtin {} failed to apply or unify", builtin_name),
+                get_position_labels(&[literal]),
+                Severity::Warning,
+            ),
+            ResolutionError::InsufficientRules(literal) => (
+                format!("could not find a rule to resolve with literal {}", literal),
+                get_position_labels(&[literal]),
+                Severity::Warning,
+            ),
+            ResolutionError::InconsistentGroundnessSignature(signatures) => (
+                // TODO: capture the inconsistent clauses
+                format!("{} clauses have inconsistent signatures", signatures.len()),
+                Vec::new(),
+                Severity::Error,
+            ),
         };
 
         Diagnostic::new(severity)
@@ -278,9 +303,10 @@ pub fn sld(
                 goal.iter()
                     .map(|lit_hist| lit_hist.literal.clone())
                     .collect(),
+                maxdepth
             )])
         } else {
-            let (lid, l) = select(&goal, grounded).map_err(|e| vec![e])?;
+            let (lid, l) = select(goal, grounded).map_err(|e| vec![e])?;
 
             let mut errs: Vec<ResolutionError> = Vec::new();
 
@@ -299,7 +325,7 @@ pub fn sld(
                         resolve(
                             lid,
                             ClauseId::Builtin(unify_cand.clone()),
-                            &goal,
+                            goal,
                             &mgu,
                             &Clause {
                                 head: unify_cand,
@@ -331,7 +357,7 @@ pub fn sld(
                             rid.clone(),
                             mgu.clone(),
                             renaming,
-                            resolve(lid, rid, &goal, &mgu, &c, level + 1),
+                            resolve(lid, rid, goal, &mgu, &c, level + 1),
                         )
                     })
                 })
@@ -351,7 +377,6 @@ pub fn sld(
                 match tree_result {
                     Ok(tree) => {
                         resolvents.insert((lid, rid), (mgu, renaming, tree));
-                        ()
                     }
                     Err(mut e) => errs.append(&mut e),
                 }
@@ -632,7 +657,10 @@ mod tests {
             body: vec![],
         }];
         let result = sld(&clauses, &goal, 10);
-        assert_eq!(Err(vec![ResolutionError::InsufficientGroundness(goal)]), result)
+        assert_eq!(
+            Err(vec![ResolutionError::InsufficientGroundness(goal)]),
+            result
+        )
     }
 
     #[test]
