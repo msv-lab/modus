@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
 
 use crate::logic::{Clause, IRTerm, Literal, Predicate};
@@ -31,7 +32,11 @@ impl BuildPlan {
     pub fn new_node(&mut self, node: BuildNode, deps: Vec<NodeId>) -> NodeId {
         let id = self.nodes.len();
         self.nodes.push(node);
-        self.dependencies.push(deps);
+        self.dependencies.push(
+            HashSet::<_>::from_iter(deps.into_iter())
+                .into_iter()
+                .collect(),
+        );
         debug_assert_eq!(self.nodes.len(), self.dependencies.len());
         id
     }
@@ -63,9 +68,35 @@ impl BuildPlan {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct State {
+    current_node: Option<NodeId>,
     cwd: String,
+    current_merge: Option<MergeNode>,
+}
+
+impl State {
+    fn with_new_cwd<F: FnOnce(&mut Self)>(&mut self, new_cwd: String, f: F) {
+        let old_cwd = std::mem::replace(&mut self.cwd, new_cwd);
+        f(self);
+        self.cwd = old_cwd;
+    }
+
+    fn with_new_merge<F: FnOnce(&mut Self)>(&mut self, new_merge: MergeNode, f: F) -> MergeNode {
+        debug_assert!(self.current_merge.is_none());
+        self.current_merge = Some(new_merge);
+        f(self);
+        self.current_merge.take().unwrap()
+    }
+
+    fn has_base(&self) -> bool {
+        self.current_merge.is_some() || self.current_node.is_some()
+    }
+
+    fn set_node(&mut self, node: NodeId) {
+        debug_assert!(self.current_merge.is_none());
+        self.current_node = Some(node);
+    }
 }
 
 pub type NodeId = usize;
@@ -120,6 +151,30 @@ pub enum BuildNode {
         label: String,
         value: String,
     },
+    Merge(MergeNode),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeNode {
+    pub parent: NodeId,
+    pub operations: Vec<MergeOperation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MergeOperation {
+    Run {
+        command: String,
+        cwd: String,
+    },
+    CopyFromImage {
+        src_image: NodeId,
+        src_path: String,
+        dst_path: String,
+    },
+    CopyFromLocal {
+        src_path: String,
+        dst_path: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,9 +209,10 @@ pub fn build_dag_from_proofs(
         image_literals: &mut HashMap<Literal, NodeId>,
         tag_with_literal: Option<String>,
     ) -> Option<NodeId> {
-        let mut last_node = None;
         let mut curr_state = State {
+            current_node: None,
             cwd: "".to_string(),
+            current_merge: None,
         };
 
         /* We go through the proof tree in depth-first order, since this is
@@ -177,9 +233,8 @@ pub fn build_dag_from_proofs(
          * built from going into that literal into the image_literals store, to
          * be re-used later.
          */
-        fn process_tree(
+        fn process_tree<'m>(
             proof: &Proof,
-            last_node: &mut Option<NodeId>,
             rules: &Vec<Clause<IRTerm>>,
             res: &mut BuildPlan,
             image_literals: &mut HashMap<Literal, NodeId>,
@@ -188,7 +243,7 @@ pub fn build_dag_from_proofs(
             match proof.clause {
                 ClauseId::Query => {}
                 ClauseId::Builtin(ref intrinsic) => {
-                    process_intrinsic(intrinsic, last_node, rules, res, image_literals, curr_state);
+                    process_intrinsic(intrinsic, rules, res, image_literals, curr_state);
                     debug_assert!(proof.children.is_empty()); // Intrinsics should not have children.
                     return;
                 }
@@ -199,10 +254,10 @@ pub fn build_dag_from_proofs(
                         .iter()
                         .all(|x| x.as_constant().is_some()));
 
-                    if last_node.is_none() {
+                    if !curr_state.has_base() {
                         // Do the optimization mentioned above.
                         if let Some(&node_id) = image_literals.get(&substituted_lit) {
-                            last_node.replace(node_id);
+                            curr_state.set_node(node_id);
                             return; // no need to recurse to children anymore.
                         } else {
                             if let Some(node_id) = process_image(
@@ -212,7 +267,7 @@ pub fn build_dag_from_proofs(
                                 image_literals,
                                 Some(substituted_lit.to_string()),
                             ) {
-                                last_node.replace(node_id);
+                                curr_state.set_node(node_id);
                                 image_literals.insert(substituted_lit, node_id);
                                 return; // no need to recurse to children anymore, since I just built the content of this literal.
                             } else {
@@ -229,7 +284,6 @@ pub fn build_dag_from_proofs(
 
             process_children(
                 &proof.children.iter().collect::<Vec<_>>(),
-                last_node,
                 rules,
                 res,
                 image_literals,
@@ -239,7 +293,6 @@ pub fn build_dag_from_proofs(
 
         fn process_intrinsic(
             intrinsic: &Literal,
-            last_node: &mut Option<NodeId>,
             rules: &Vec<Clause<IRTerm>>,
             res: &mut BuildPlan,
             image_literals: &mut HashMap<Literal, NodeId>,
@@ -249,12 +302,15 @@ pub fn build_dag_from_proofs(
             assert!(!name.starts_with("_operator_")); // operators handled separately below.
             match name {
                 "from" => {
-                    if last_node.is_some() {
+                    if curr_state.current_merge.is_some() {
+                        panic!("You can not generate a new image inside a merge.");
+                    }
+                    if curr_state.has_base() {
                         panic!("from must be the first build instruction.");
                     }
                     // Special sharing for the "from" intrinsic.
                     if let Some(&existing_node) = image_literals.get(&intrinsic) {
-                        last_node.replace(existing_node);
+                        curr_state.set_node(existing_node);
                     } else {
                         let new_node = res.new_node(
                             BuildNode::From {
@@ -262,52 +318,66 @@ pub fn build_dag_from_proofs(
                             },
                             vec![],
                         );
-                        last_node.replace(new_node);
+                        curr_state.set_node(new_node);
                         image_literals.insert(intrinsic.clone(), new_node);
                     }
                 }
                 "run" => {
-                    if last_node.is_none() {
-                        panic!("No base layer yet.");
-                    }
-                    let parent = last_node.unwrap();
                     let command = intrinsic.args[0].as_constant().unwrap().to_owned();
-                    last_node.replace(res.new_node(
-                        BuildNode::Run {
-                            parent: parent,
-                            command: command,
+                    if let Some(ref mut curr_merge) = curr_state.current_merge {
+                        curr_merge.operations.push(MergeOperation::Run {
+                            command,
                             cwd: curr_state.cwd.clone(),
-                        },
-                        vec![parent],
-                    ));
+                        });
+                    } else {
+                        if !curr_state.has_base() {
+                            panic!("No base layer yet.");
+                        }
+                        let parent = curr_state.current_node.unwrap();
+                        curr_state.set_node(res.new_node(
+                            BuildNode::Run {
+                                parent: parent,
+                                command: command,
+                                cwd: curr_state.cwd.clone(),
+                            },
+                            vec![parent],
+                        ));
+                    }
                 }
                 "copy" => {
-                    if last_node.is_none() {
-                        panic!("No base layer yet.");
-                    }
-                    let parent = last_node.unwrap();
                     let src_path = intrinsic.args[0].as_constant().unwrap().to_owned();
                     if src_path.starts_with("/") {
                         panic!("The source of a local copy can not be an absolute path.");
                     }
                     let dst_path = intrinsic.args[1].as_constant().unwrap();
                     let dst_path = join_path(&curr_state.cwd, dst_path);
-                    last_node.replace(res.new_node(
-                        BuildNode::CopyFromLocal {
-                            parent,
-                            src_path,
-                            dst_path,
-                        },
-                        vec![parent],
-                    ));
+                    if let Some(ref mut curr_merge) = curr_state.current_merge {
+                        curr_merge
+                            .operations
+                            .push(MergeOperation::CopyFromLocal { src_path, dst_path });
+                    } else {
+                        if !curr_state.has_base() {
+                            panic!("No base layer yet.");
+                        }
+                        let parent = curr_state.current_node.unwrap();
+                        curr_state.set_node(res.new_node(
+                            BuildNode::CopyFromLocal {
+                                parent,
+                                src_path,
+                                dst_path,
+                            },
+                            vec![parent],
+                        ));
+                    }
                 }
-                _ => {}
+                _ => {
+                    // do nothing - there might be stuff like string_concat.
+                }
             }
         }
 
         fn process_children(
             children: &[&Proof],
-            last_node: &mut Option<NodeId>,
             rules: &Vec<Clause<IRTerm>>,
             res: &mut BuildPlan,
             image_literals: &mut HashMap<Literal, NodeId>,
@@ -342,50 +412,62 @@ pub fn build_dag_from_proofs(
                         let subtree_in_op = &children[i + 1..j];
                         // process this operator
                         match op_name {
+                            // Image-to-image copy. (local copy is not an operator)
                             "copy" => {
-                                let parent = last_node.expect("No base layer yet.");
-                                let img =
+                                let src_image =
                                     process_image(subtree_in_op, rules, res, image_literals, None)
                                         .expect("Stuff inside this copy does not build an image.");
-                                let node = res.new_node(
-                                    // TODO: resolve path relative to state.cwd.
-                                    BuildNode::CopyFromImage {
-                                        parent,
-                                        src_image: img,
-                                        src_path: lit.args[1].as_constant().unwrap().to_owned(),
-                                        dst_path: join_path(
-                                            &curr_state.cwd,
-                                            lit.args[2].as_constant().unwrap(),
-                                        ),
-                                    },
-                                    vec![parent, img],
-                                );
-                                last_node.replace(node);
+                                let src_path = lit.args[1].as_constant().unwrap().to_owned();
+                                let dst_path =
+                                    join_path(&curr_state.cwd, lit.args[2].as_constant().unwrap());
+                                if let Some(ref mut curr_merge) = curr_state.current_merge {
+                                    curr_merge.operations.push(MergeOperation::CopyFromImage {
+                                        src_image,
+                                        src_path,
+                                        dst_path,
+                                    });
+                                } else {
+                                    let parent = curr_state.current_node.expect("No base layer yet.");
+                                    let node = res.new_node(
+                                        // TODO: resolve path relative to state.cwd.
+                                        BuildNode::CopyFromImage {
+                                            parent,
+                                            src_image,
+                                            src_path,
+                                            dst_path,
+                                        },
+                                        vec![parent, src_image],
+                                    );
+                                    curr_state.set_node(node);
+                                }
                             }
                             "in_workdir" => {
-                                let mut new_state = curr_state.clone();
                                 let new_p = lit.args[1].as_constant().unwrap();
-                                new_state.cwd = join_path(&curr_state.cwd, new_p);
+                                let new_cwd = join_path(&curr_state.cwd, new_p);
+                                curr_state.with_new_cwd(new_cwd, |new_state| {
+                                    process_children(
+                                        subtree_in_op,
+                                        rules,
+                                        res,
+                                        image_literals,
+                                        new_state,
+                                    );
+                                });
                                 // TODO: emit a warning if the tree inside attempts
                                 // to build a fresh image - this is probably an incorrect usage.
-                                process_children(
-                                    subtree_in_op,
-                                    last_node,
-                                    rules,
-                                    res,
-                                    image_literals,
-                                    &mut new_state,
-                                );
                             }
                             "set_workdir" => {
+                                if curr_state.current_merge.is_some() {
+                                    panic!("You can not generate a new image inside a merge.");
+                                }
                                 let img =
                                     process_image(subtree_in_op, rules, res, image_literals, None)
                                         .expect("set_workdir should be applied to an image.");
-                                if last_node.is_some() {
+                                if curr_state.has_base() {
                                     panic!("set_workdir generates a new image, so it should be the first instruction.");
                                 }
                                 let new_p = lit.args[1].as_constant().unwrap();
-                                last_node.replace(res.new_node(
+                                curr_state.set_node(res.new_node(
                                     BuildNode::SetWorkdir {
                                         parent: img,
                                         new_workdir: join_path(&curr_state.cwd, new_p),
@@ -394,10 +476,13 @@ pub fn build_dag_from_proofs(
                                 ));
                             }
                             "set_entrypoint" => {
+                                if curr_state.current_merge.is_some() {
+                                    panic!("You can not generate a new image inside a merge.");
+                                }
                                 let img =
                                     process_image(subtree_in_op, rules, res, image_literals, None)
                                         .expect("set_entrypoint should be applied to an image.");
-                                if last_node.is_some() {
+                                if curr_state.has_base() {
                                     panic!("set_entrypoint generates a new image, so it should be the first instruction.");
                                 }
                                 let entrypoint = lit
@@ -406,7 +491,7 @@ pub fn build_dag_from_proofs(
                                     .skip(1)
                                     .map(|x| x.as_constant().unwrap().to_owned())
                                     .collect::<Vec<_>>();
-                                last_node.replace(res.new_node(
+                                curr_state.set_node(res.new_node(
                                     BuildNode::SetEntrypoint {
                                         parent: img,
                                         new_entrypoint: entrypoint,
@@ -414,28 +499,75 @@ pub fn build_dag_from_proofs(
                                     vec![img],
                                 ));
                             }
-                            _ => {}
+                            "merge" => {
+                                if curr_state.current_merge.is_some() {
+                                    process_children(
+                                        subtree_in_op,
+                                        rules,
+                                        res,
+                                        image_literals,
+                                        curr_state,
+                                    );
+                                    continue;
+                                }
+                                if !curr_state.has_base() {
+                                    panic!("merge requires a base layer outside.");
+                                }
+                                let parent = curr_state.current_node.unwrap();
+                                let merge_node = MergeNode {
+                                    parent,
+                                    operations: vec![],
+                                };
+                                let merge_node =
+                                    curr_state.with_new_merge(merge_node, |new_state| {
+                                        process_children(
+                                            subtree_in_op,
+                                            rules,
+                                            res,
+                                            image_literals,
+                                            new_state,
+                                        );
+                                    });
+                                let mut deps: Vec<NodeId> = merge_node
+                                    .operations
+                                    .iter()
+                                    .filter_map(|x| match x {
+                                        MergeOperation::CopyFromImage { src_image, .. } => {
+                                            Some(*src_image)
+                                        }
+                                        // Explicitly list out all the no-dependency cases to prevent future errors.
+                                        MergeOperation::CopyFromLocal { .. }
+                                        | MergeOperation::Run { .. } => None,
+                                    })
+                                    .collect();
+                                deps.push(parent);
+                                curr_state.set_node(res.new_node(BuildNode::Merge(merge_node), deps));
+                            }
+                            _ => {
+                                panic!("Unkown operator: {}", op_name);
+                            }
                         }
                         i = j + 1;
                         continue;
                     }
                 }
-                process_tree(child, last_node, rules, res, image_literals, curr_state);
+                process_tree(child, rules, res, image_literals, curr_state);
                 i += 1;
             }
         }
 
         process_children(
             subtree,
-            &mut last_node,
             rules,
             res,
             image_literals,
             &mut curr_state,
         );
 
-        if last_node.is_some() && tag_with_literal.is_some() {
-            let node = last_node.unwrap();
+        debug_assert!(curr_state.current_merge.is_none());
+
+        if curr_state.current_node.is_some() && tag_with_literal.is_some() {
+            let node = curr_state.current_node.unwrap();
             let tagged_node = res.new_node(
                 BuildNode::SetLabel {
                     parent: node,
@@ -444,9 +576,9 @@ pub fn build_dag_from_proofs(
                 },
                 vec![node],
             );
-            last_node.replace(tagged_node);
+            curr_state.set_node(tagged_node);
         }
-        last_node
+        curr_state.current_node
     }
 
     for (query, proof) in query_and_proofs.into_iter() {

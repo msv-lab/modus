@@ -25,7 +25,7 @@ use codespan_reporting::diagnostic::Diagnostic;
 
 use crate::{
     dockerfile::{Dockerfile, Image, Instruction, ResolvedDockerfile, ResolvedParent, Run},
-    imagegen::{self, BuildPlan, NodeId},
+    imagegen::{self, BuildPlan, MergeNode, NodeId},
     logic::{self, Clause, IRTerm, Literal, Predicate},
     modusfile::Modusfile,
     sld::{self, ClauseId},
@@ -54,7 +54,10 @@ pub fn prove_goal(
     }
 }
 
-pub fn transpile(mf: Modusfile, query: logic::Literal) -> Result<Dockerfile<ResolvedParent>, Diagnostic<()>> {
+pub fn transpile(
+    mf: Modusfile,
+    query: logic::Literal,
+) -> Result<Dockerfile<ResolvedParent>, Diagnostic<()>> {
     let build_plan = imagegen::plan_from_modusfile(mf, query)?;
     Ok(plan_to_docker(&build_plan))
 }
@@ -136,7 +139,8 @@ fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
                 ],
                 BuildNode::SetLabel {
                     parent,
-                    label, value
+                    label,
+                    value,
                 } => vec![
                     Instruction::From(From {
                         parent: ResolvedParent::Stage(format!("n_{}", parent)),
@@ -144,6 +148,42 @@ fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
                     }),
                     Instruction::Label(label.to_owned(), value.to_owned()),
                 ],
+                BuildNode::Merge(MergeNode { parent, operations }) => {
+                    let mut insts = Vec::new();
+                    insts.push(Instruction::From(From {
+                        parent: ResolvedParent::Stage(format!("n_{}", parent)),
+                        alias: Some(str_id),
+                    }));
+                    for op in operations {
+                        use imagegen::MergeOperation;
+                        match op {
+                            MergeOperation::Run { command, cwd } => {
+                                insts.push(Instruction::Run(Run(if cwd.is_empty() {
+                                    command.to_owned()
+                                } else {
+                                    format!("cd {:?} || exit 1; {}", cwd, command)
+                                })));
+                            }
+                            MergeOperation::CopyFromLocal { src_path, dst_path } => {
+                                insts.push(Instruction::Copy(Copy(format!(
+                                    "{:?} {:?}",
+                                    src_path, dst_path
+                                ))));
+                            }
+                            MergeOperation::CopyFromImage {
+                                src_image,
+                                src_path,
+                                dst_path,
+                            } => {
+                                insts.push(Instruction::Copy(Copy(format!(
+                                    "--from=n_{} {:?} {:?}",
+                                    src_image, src_path, dst_path
+                                ))));
+                            }
+                        }
+                    }
+                    insts
+                }
             }
         })
         .flatten()
