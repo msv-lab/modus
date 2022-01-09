@@ -306,16 +306,19 @@ pub mod parser {
         ))
     }
 
+    fn modus_literal(i: Span) -> IResult<Span, Expression> {
+        map(literal(modus_term), Expression::Literal)(i)
+    }
+
     fn expression_inner(i: Span) -> IResult<Span, Expression> {
         let l_paren_with_comments = |i| terminated(tag("("), comments)(i);
         let r_paren_with_comments = |i| preceded(comments, cut(tag(")")))(i);
 
-        let lit_parser = map(literal(modus_term), Expression::Literal);
         let unification_expr_parser = map(unification_sugar, Expression::Literal);
         // These inner expression parsers can fully recurse.
         let op_application_parser = map(
             separated_pair(
-                delimited(l_paren_with_comments, body, r_paren_with_comments),
+                alt((modus_literal, delimited(l_paren_with_comments, body, r_paren_with_comments))),
                 tag("::"),
                 cut(literal(modus_term)),
             ),
@@ -324,8 +327,8 @@ pub mod parser {
         let parenthesized_expr = delimited(l_paren_with_comments, body, r_paren_with_comments);
         alt((
             unification_expr_parser,
-            lit_parser,
             op_application_parser,
+            modus_literal,
             parenthesized_expr,
         ))(i)
     }
@@ -608,6 +611,8 @@ mod tests {
         assert!(r1.eq_ignoring_position(&actual2));
 
         assert_eq!("foo :- (a)::merge.", r2.to_string());
+        let actual3 = "foo :- a::merge.".parse().unwrap();
+        assert!(r2.eq_ignoring_position(&actual3));
         let actual3 = "foo :- ( a )::merge.".parse().unwrap();
         assert!(r2.eq_ignoring_position(&actual3));
     }
