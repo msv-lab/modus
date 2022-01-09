@@ -233,7 +233,7 @@ pub fn build_dag_from_proofs(
          * built from going into that literal into the image_literals store, to
          * be re-used later.
          */
-        fn process_tree<'m>(
+        fn process_tree(
             proof: &Proof,
             rules: &Vec<Clause<IRTerm>>,
             res: &mut BuildPlan,
@@ -429,7 +429,6 @@ pub fn build_dag_from_proofs(
                                 } else {
                                     let parent = curr_state.current_node.expect("No base layer yet.");
                                     let node = res.new_node(
-                                        // TODO: resolve path relative to state.cwd.
                                         BuildNode::CopyFromImage {
                                             parent,
                                             src_image,
