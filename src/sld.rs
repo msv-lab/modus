@@ -394,13 +394,12 @@ pub fn sld(
                 }
             }
 
+            // TODO: could also check the severity of errors and terminate early?
+            // Although, semantic analysis would likely be better for those kinds of
+            // issues anyway.
             if resolvents.is_empty() {
                 Err(errs)
             } else {
-                // TODO: this will hide/drop errors if one of the resolvents work.
-                // Could make this better by (1) considering the severity of the error
-                // and (2) always returning the list of SLD resolution erros instead of
-                // Result?
                 Ok(Tree {
                     goal: goal.clone(),
                     level,
