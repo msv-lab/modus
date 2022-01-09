@@ -257,7 +257,7 @@ pub fn build<P: AsRef<Path>>(
     match build_plan.outputs.len() {
         0 => unreachable!(), // not possible because if there is no solution to the initial query, there will be an SLD failure.
         1 => {
-            println!("{}", "Running docker build...".blue());
+            eprintln!("{}", "Running docker build...".blue());
             let iidfile = TmpFilename::gen(".iid");
             invoke_buildkit(
                 &dockerfile,
@@ -275,7 +275,7 @@ pub fn build<P: AsRef<Path>>(
             Ok(vec![iid])
         }
         nb_outputs => {
-            println!("{}", "Running docker build...".blue());
+            eprintln!("{}", "Running docker build...".blue());
             if check_terminate(&mut signals) {
                 return Err(Interrupted);
             }
