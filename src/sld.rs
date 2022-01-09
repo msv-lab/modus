@@ -130,7 +130,6 @@ pub enum ResolutionError {
 impl ResolutionError {
     pub fn get_diagnostic(self) -> Diagnostic<()> {
         fn get_position_labels(literals: &[Literal]) -> Vec<Label<()>> {
-            // TODO: add note or label if the literal doesn't have a position
             literals
                 .iter()
                 .filter_map(|lit| lit.position.as_ref())
@@ -138,39 +137,50 @@ impl ResolutionError {
                 .collect()
         }
 
-        let (message, labels, severity) = match self {
+        // Displays literals that don't have a span in the notes of the diagnostic.
+        fn get_notes(literals: &[Literal]) -> Vec<String> {
+            literals.iter().filter_map(|lit| if lit.position.is_none() { Some(lit.to_string()) } else { None }).collect()
+        }
+
+        let (message, labels, notes, severity) = match self {
             ResolutionError::UnknownPredicate(literal) => (
                 if literal.predicate.is_operator() {
                     format!("unknown operator - {}", literal.predicate)
                 } else {
                     format!("unknown predicate - {}", literal.predicate)
                 },
-                get_position_labels(&[literal]),
+                get_position_labels(&[literal.clone()]),
+                get_notes(&[literal]),
                 Severity::Error,
             ),
             ResolutionError::InsufficientGroundness(literals) => (
-                format!("insufficient groundess for {} goals", literals.len()),
+                format!("insufficient groundess for {} goal(s)", literals.len()),
                 get_position_labels(&literals),
+                get_notes(&literals),
                 Severity::Warning,
             ),
             ResolutionError::MaximumDepthExceeded(literals, max_depth) => (
                 format!("exceeded maximum depth of {}", max_depth),
                 get_position_labels(&literals),
+                get_notes(&literals),
                 Severity::Warning,
             ),
             ResolutionError::BuiltinFailure(literal, builtin_name) => (
                 format!("builtin {} failed to apply or unify", builtin_name),
-                get_position_labels(&[literal]),
+                get_position_labels(&[literal.clone()]),
+                get_notes(&[literal]),
                 Severity::Warning,
             ),
             ResolutionError::InsufficientRules(literal) => (
                 format!("could not find a rule to resolve with literal {}", literal),
-                get_position_labels(&[literal]),
+                get_position_labels(&[literal.clone()]),
+                get_notes(&[literal]),
                 Severity::Warning,
             ),
             ResolutionError::InconsistentGroundnessSignature(signatures) => (
                 // TODO: capture the inconsistent clauses
-                format!("{} clauses have inconsistent signatures", signatures.len()),
+                format!("{} clause(s) have inconsistent signatures", signatures.len()),
+                Vec::new(),
                 Vec::new(),
                 Severity::Error,
             ),
@@ -179,6 +189,7 @@ impl ResolutionError {
         Diagnostic::new(severity)
             .with_message(message)
             .with_labels(labels)
+            .with_notes(notes)
     }
 }
 
