@@ -269,6 +269,7 @@ fn main() {
             let input_file = sub.value_of("FILE").unwrap();
             let file = get_file(Path::new(input_file));
             let query: Option<logic::Literal> = sub.value_of("QUERY").map(|l| l.parse().unwrap());
+            let query = query.map(|lit| lit.with_position(None));
 
             match (file.source().parse::<Modusfile>(), query) {
                 (Ok(modus_f), None) => println!(

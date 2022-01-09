@@ -130,6 +130,7 @@ pub enum ResolutionError {
 impl ResolutionError {
     pub fn get_diagnostic(self) -> Diagnostic<()> {
         fn get_position_labels(literals: &[Literal]) -> Vec<Label<()>> {
+            // TODO: add note or label if the literal doesn't have a position
             literals
                 .iter()
                 .filter_map(|lit| lit.position.as_ref())
