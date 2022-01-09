@@ -239,6 +239,8 @@ intrinsic_predicate!(_operator_set_workdir_end, false, false);
 intrinsic_predicate!(_operator_set_entrypoint_begin, false, false);
 intrinsic_predicate!(_operator_set_entrypoint_end, false, false);
 intrinsic_predicate!(copy, false, false);
+intrinsic_predicate!(_operator_merge_begin, false);
+intrinsic_predicate!(_operator_merge_end, false);
 
 /// Convenience macro that returns Some(b) for the first b that can be selected.
 macro_rules! select_builtins {
@@ -281,7 +283,9 @@ pub fn select_builtin<'a>(
         _operator_set_entrypoint_end,
         copy,
         equality::StringEq1,
-        equality::StringEq2
+        equality::StringEq2,
+        _operator_merge_begin,
+        _operator_merge_end
     )
 }
 

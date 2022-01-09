@@ -56,7 +56,10 @@ use crate::{
 };
 
 use colored::Colorize;
-use rand::distributions::{Distribution, Uniform};
+use rand::{
+    distributions::{Distribution, Uniform},
+    Rng,
+};
 use std::io::Write;
 
 use thiserror::Error;
@@ -88,7 +91,7 @@ pub enum BuildError {
 use BuildError::*;
 
 fn invoke_buildkit(
-    dockerfile: &TmpFilename,
+    dockerfile: &AutoDeleteTmpFilename,
     tag: Option<String>,
     target: Option<String>,
     has_dockerignore: bool,
@@ -166,22 +169,32 @@ fn invoke_buildkit(
 }
 
 /// A holder for a file name that deletes the file when dropped.
-struct TmpFilename(String);
+struct AutoDeleteTmpFilename(String);
 pub const TMP_PREFIX: &str = "buildkit_temp_";
 pub const TMP_PREFIX_IGNORE_PATTERN: &str = "buildkit_temp_*";
 
-impl TmpFilename {
+pub fn gen_tmp_filename() -> String {
+    const RANDOM_LEN: usize = 15;
+    let mut rng = rand::thread_rng();
+    let letters = Uniform::new_inclusive('a', 'z');
+    let uletters = Uniform::new_inclusive('A', 'Z');
+    let mut name = String::with_capacity(TMP_PREFIX.len() + RANDOM_LEN);
+    name.push_str(TMP_PREFIX);
+    for _ in 0..RANDOM_LEN {
+        if rng.gen_bool(0.5) {
+            name.push(letters.sample(&mut rng));
+        } else {
+            name.push(uletters.sample(&mut rng));
+        }
+    }
+    name
+}
+
+impl AutoDeleteTmpFilename {
     /// Generate a name, but does not create the file.
     fn gen(suffix: &str) -> Self {
-        const RANDOM_LEN: usize = 15;
-        let mut rng = rand::thread_rng();
-        let letters = Uniform::new_inclusive('a', 'z');
-        let mut name = String::with_capacity(TMP_PREFIX.len() + RANDOM_LEN + suffix.len());
-        name.push_str(TMP_PREFIX);
-        for _ in 0..RANDOM_LEN {
-            name.push(letters.sample(&mut rng));
-        }
-        name.push_str(".Dockerfile");
+        let mut name = gen_tmp_filename();
+        name.push_str(suffix);
         Self(name)
     }
 
@@ -190,7 +203,7 @@ impl TmpFilename {
     }
 }
 
-impl Drop for TmpFilename {
+impl Drop for AutoDeleteTmpFilename {
     fn drop(&mut self) {
         if let Err(e) = std::fs::remove_file(self.name()) {
             if e.kind() != std::io::ErrorKind::NotFound {
@@ -204,8 +217,8 @@ impl Drop for TmpFilename {
     }
 }
 
-fn write_tmp_dockerfile(content: &str) -> Result<TmpFilename, std::io::Error> {
-    let tmp_file = TmpFilename::gen(".Dockerfile");
+fn write_tmp_dockerfile(content: &str) -> Result<AutoDeleteTmpFilename, std::io::Error> {
+    let tmp_file = AutoDeleteTmpFilename::gen(".Dockerfile");
     let mut f = OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -231,7 +244,7 @@ impl Drop for RestoreCwd {
 pub fn build<P: AsRef<Path>>(
     build_plan: &BuildPlan,
     context: P,
-    verbose: bool
+    verbose: bool,
 ) -> Result<Vec<String>, BuildError> {
     let mut signals = SignalsInfo::with_exfiltrator(&[SIGINT, SIGTERM, SIGCHLD], SignalOnly)
         .expect("Failed to create signal handler.");
@@ -258,7 +271,7 @@ pub fn build<P: AsRef<Path>>(
         0 => unreachable!(), // not possible because if there is no solution to the initial query, there will be an SLD failure.
         1 => {
             eprintln!("{}", "Running docker build...".blue());
-            let iidfile = TmpFilename::gen(".iid");
+            let iidfile = AutoDeleteTmpFilename::gen(".iid");
             invoke_buildkit(
                 &dockerfile,
                 None,
@@ -314,7 +327,7 @@ pub fn build<P: AsRef<Path>>(
                     .blue()
                 )?;
                 stderr.flush()?;
-                let iidfile = TmpFilename::gen(".iid");
+                let iidfile = AutoDeleteTmpFilename::gen(".iid");
                 invoke_buildkit(
                     &dockerfile,
                     None,
