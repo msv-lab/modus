@@ -44,7 +44,8 @@ pub fn prove_goal(
             .collect();
 
     let t = sld::sld(&clauses, goal, max_depth).map_err(|errs| {
-        errs.into_iter()
+        errs.1
+            .into_iter()
             .map(ResolutionError::get_diagnostic)
             .collect::<Vec<_>>()
     })?;
@@ -61,14 +62,11 @@ pub fn render_tree<W: Write>(mf: &Modusfile, goal: &Vec<logic::Literal>, output:
             })
             .collect();
 
-    // TODO: render tree regardless of errors, and maybe display the failing branches
-    let t = sld::sld(&clauses, goal, max_depth)
-        .map_err(|errs| {
-            errs.into_iter()
-                .map(ResolutionError::get_diagnostic)
-                .collect::<Vec<_>>()
-        })
-        .unwrap();
+    let t = match sld::sld(&clauses, goal, max_depth) {
+        Ok(t) => t,
+        // TODO: we could rewrite this to display more specific resolution errors in the graph.
+        Err((t, _)) => t,
+    };
     let g = t.to_graph(&clauses);
 
     dot::render(&g, output).unwrap()

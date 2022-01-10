@@ -98,19 +98,26 @@ impl Tree {
             nodes.push(curr_label);
             let curr_index = nodes.len() - 1;
 
-            let mut resolvent_pairs = t.resolvents.iter().collect::<Vec<_>>();
-            resolvent_pairs.sort_by_key(|(k, _)| k.0); // for some consistency
+            if !t.goal.is_empty() && t.resolvents.is_empty() {
+                // REVIEW: is this needed? Or will the user understand that only if a leaf node has no goals
+                // it is a success?
+                nodes.push("FAIL".to_string());
+                edges.push((curr_index, curr_index + 1, "".to_string()));
+            } else {
+                let mut resolvent_pairs = t.resolvents.iter().collect::<Vec<_>>();
+                resolvent_pairs.sort_by_key(|(k, _)| k.0); // for some consistency
 
-            for (k, v) in resolvent_pairs {
-                let new_index = nodes.len();
-                convert(&v.2, rules, nodes, edges);
+                for (k, v) in resolvent_pairs {
+                    let new_index = nodes.len();
+                    convert(&v.2, rules, nodes, edges);
 
-                let edge_label = match &k.1 {
-                    ClauseId::Rule(rid) => rules[*rid].head.to_string(),
-                    ClauseId::Query => todo!(),
-                    ClauseId::Builtin(lit) => lit.to_string(),
-                };
-                edges.push((curr_index, new_index, edge_label));
+                    let edge_label = match &k.1 {
+                        ClauseId::Rule(rid) => rules[*rid].head.to_string(),
+                        ClauseId::Query => "query".to_string(),
+                        ClauseId::Builtin(lit) => lit.to_string(),
+                    };
+                    edges.push((curr_index, new_index, edge_label));
+                }
             }
         }
 
@@ -304,7 +311,7 @@ pub fn sld(
     rules: &Vec<Clause<IRTerm>>,
     goal: &Goal,
     maxdepth: TreeLevel,
-) -> Result<Tree, Vec<ResolutionError>> {
+) -> Result<Tree, (Tree, Vec<ResolutionError>)> {
     /// select leftmost literal with compatible groundness
     fn select(
         goal: &GoalWithHistory,
@@ -382,7 +389,7 @@ pub fn sld(
         maxdepth: TreeLevel,
         level: TreeLevel,
         grounded: &HashMap<Signature, Vec<bool>>,
-    ) -> Result<Tree, Vec<ResolutionError>> {
+    ) -> Result<Tree, (Tree, Vec<ResolutionError>)> {
         #[cfg(debug_assertions)]
         {
             // FIXME: move this ad-hoc debug code elsewhere
@@ -418,14 +425,32 @@ pub fn sld(
                 resolvents: HashMap::new(),
             })
         } else if level >= maxdepth {
-            Err(vec![ResolutionError::MaximumDepthExceeded(
-                goal.iter()
-                    .map(|lit_hist| lit_hist.literal.clone())
-                    .collect(),
-                maxdepth,
-            )])
+            let t = Tree {
+                goal: goal.clone(),
+                level,
+                resolvents: HashMap::default(),
+            };
+
+            Err((
+                t,
+                vec![ResolutionError::MaximumDepthExceeded(
+                    goal.iter()
+                        .map(|lit_hist| lit_hist.literal.clone())
+                        .collect(),
+                    maxdepth,
+                )],
+            ))
         } else {
-            let (lid, l) = select(goal, grounded).map_err(|e| vec![e])?;
+            let (lid, l) = select(goal, grounded).map_err(|e| {
+                (
+                    Tree {
+                        goal: goal.clone(),
+                        level,
+                        resolvents: HashMap::default(),
+                    },
+                    vec![e],
+                )
+            })?;
 
             let mut errs: Vec<ResolutionError> = Vec::new();
 
@@ -489,6 +514,10 @@ pub fn sld(
                 (LiteralGoalId, ClauseId),
                 (Substitution, Substitution, Tree),
             > = HashMap::new();
+            let mut err_resolvents: HashMap<
+                (LiteralGoalId, ClauseId),
+                (Substitution, Substitution, Tree),
+            > = HashMap::new();
             for (rid, mgu, renaming, resolvent) in
                 builtin_resolves.into_iter().chain(user_rules_resolves)
             {
@@ -497,7 +526,10 @@ pub fn sld(
                     Ok(tree) => {
                         resolvents.insert((lid, rid), (mgu, renaming, tree));
                     }
-                    Err(mut e) => errs.append(&mut e),
+                    Err((tree, mut sld_errs)) => {
+                        err_resolvents.insert((lid, rid), (mgu, renaming, tree));
+                        errs.append(&mut sld_errs);
+                    }
                 }
             }
 
@@ -505,38 +537,49 @@ pub fn sld(
             // Although, semantic analysis would likely be better for those kinds of
             // issues anyway.
             if resolvents.is_empty() {
-                Err(errs)
+                let tree = Tree {
+                    goal: goal.clone(),
+                    level,
+                    resolvents: err_resolvents,
+                };
+                Err((tree, errs))
             } else {
-                Ok(Tree {
+                let tree = Tree {
                     goal: goal.clone(),
                     level,
                     resolvents,
-                })
+                };
+                Ok(tree)
             }
         }
     }
 
     let grounded_result = wellformed::check_grounded_variables(rules);
+    let goal_with_history = goal
+        .iter()
+        .enumerate()
+        .map(|(id, l)| {
+            let origin = LiteralOrigin {
+                clause: ClauseId::Query,
+                body_index: id,
+            };
+            LiteralWithHistory {
+                literal: l.clone(),
+                introduction: 0,
+                origin,
+            }
+        })
+        .collect();
     match grounded_result {
-        Ok(grounded) => {
-            let goal_with_history = goal
-                .iter()
-                .enumerate()
-                .map(|(id, l)| {
-                    let origin = LiteralOrigin {
-                        clause: ClauseId::Query,
-                        body_index: id,
-                    };
-                    LiteralWithHistory {
-                        literal: l.clone(),
-                        introduction: 0,
-                        origin,
-                    }
-                })
-                .collect();
-            inner(rules, &goal_with_history, maxdepth, 0, &grounded)
-        }
-        Err(e) => Err(vec![ResolutionError::InconsistentGroundnessSignature(e)]),
+        Ok(grounded) => inner(rules, &goal_with_history, maxdepth, 0, &grounded),
+        Err(e) => Err((
+            Tree {
+                goal: goal_with_history,
+                level: 0,
+                resolvents: HashMap::default(),
+            },
+            vec![ResolutionError::InconsistentGroundnessSignature(e)],
+        )),
     }
 }
 
@@ -776,8 +819,8 @@ mod tests {
         }];
         let result = sld(&clauses, &goal, 10);
         assert_eq!(
-            Err(vec![ResolutionError::InsufficientGroundness(goal)]),
-            result
+            vec![ResolutionError::InsufficientGroundness(goal)],
+            result.err().map(|(_, e)| e).unwrap()
         )
     }
 
