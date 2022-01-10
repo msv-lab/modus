@@ -15,7 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::str::FromStr;
+use std::{io::Write, str::FromStr};
 
 use codespan_reporting::diagnostic::Diagnostic;
 
@@ -49,6 +49,29 @@ pub fn prove_goal(
             .collect::<Vec<_>>()
     })?;
     Ok(sld::proofs(&t, &clauses, &goal))
+}
+
+pub fn render_tree<W: Write>(mf: &Modusfile, goal: &Vec<logic::Literal>, output: &mut W) {
+    let max_depth = 20;
+    let clauses: Vec<Clause> =
+        mf.0.iter()
+            .flat_map(|mc| {
+                let clauses: Vec<Clause> = mc.into();
+                clauses
+            })
+            .collect();
+
+    // TODO: render tree regardless of errors, and maybe display the failing branches
+    let t = sld::sld(&clauses, goal, max_depth)
+        .map_err(|errs| {
+            errs.into_iter()
+                .map(ResolutionError::get_diagnostic)
+                .collect::<Vec<_>>()
+        })
+        .unwrap();
+    let g = t.to_graph(&clauses);
+
+    dot::render(&g, output).unwrap()
 }
 
 pub fn transpile(

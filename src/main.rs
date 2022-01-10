@@ -44,6 +44,7 @@ use codespan_reporting::{
 use colored::Colorize;
 use std::{ffi::OsStr, fs, path::Path};
 use std::{io::Write, path::PathBuf};
+use transpiler::render_tree;
 
 use modusfile::Modusfile;
 
@@ -148,11 +149,13 @@ fn main() {
                     Arg::with_name("QUERY")
                         .help("Specifies the target to prove")
                         .index(2),
-                ),
+                )
+                .arg_from_usage("-g --graph 'Outputs a (DOT) graph that of the SLD tree traversed in resolution.'"),
         )
         .get_matches();
 
-    let writer = StandardStream::stderr(codespan_reporting::term::termcolor::ColorChoice::Auto);
+    let out_writer = StandardStream::stdout(codespan_reporting::term::termcolor::ColorChoice::Auto);
+    let err_writer = StandardStream::stderr(codespan_reporting::term::termcolor::ColorChoice::Auto);
     let config = codespan_reporting::term::Config::default();
 
     match matches.subcommand() {
@@ -170,7 +173,7 @@ fn main() {
                 Ok(df) => println!("{}", df),
                 Err(e) => {
                     for diag_error in e {
-                        term::emit(&mut writer.lock(), &config, &file, &diag_error)
+                        term::emit(&mut err_writer.lock(), &config, &file, &diag_error)
                             .expect("Error when printing to stderr.")
                     }
                     std::process::exit(1)
@@ -198,7 +201,7 @@ fn main() {
                 Ok(plan) => plan,
                 Err(e) => {
                     for diag_error in e {
-                        term::emit(&mut writer.lock(), &config, &file, &diag_error)
+                        term::emit(&mut err_writer.lock(), &config, &file, &diag_error)
                             .expect("Error when printing to stderr.")
                     }
                     std::process::exit(1)
@@ -222,7 +225,7 @@ fn main() {
             let verbose = sub.is_present("VERBOSE");
             match buildkit::build(&build_plan, context_dir, verbose) {
                 Err(e) => {
-                    print_build_error_and_exit(&e.to_string(), &writer);
+                    print_build_error_and_exit(&e.to_string(), &err_writer);
                 }
                 Ok(image_ids) => {
                     if sub.is_present("JSON_OUTPUT") {
@@ -243,7 +246,7 @@ fn main() {
                                             o_path.to_string_lossy(),
                                             &e
                                         ),
-                                        &writer,
+                                        &err_writer,
                                     );
                                 }
                             };
@@ -259,13 +262,14 @@ fn main() {
                             &build_plan,
                             &image_ids[..],
                         ) {
-                            print_build_error_and_exit(&e, &writer);
+                            print_build_error_and_exit(&e, &err_writer);
                         }
                     }
                 }
             }
         }
         ("proof", Some(sub)) => {
+            let should_output_graph = sub.is_present("graph");
             let input_file = sub.value_of("FILE").unwrap();
             let file = get_file(Path::new(input_file));
             let query: Option<logic::Literal> = sub.value_of("QUERY").map(|l| l.parse().unwrap());
@@ -277,22 +281,28 @@ fn main() {
                     input_file,
                     modus_f.0.len()
                 ),
-                (Ok(modus_f), Some(l)) => match prove_goal(&modus_f, &vec![l.clone()]) {
-                    Ok(proofs) => {
-                        println!(
-                            "{} proof(s) found for query {}",
-                            proofs.len(),
-                            l.to_string().blue()
-                        );
-                        // TODO: pretty print proof, we could use the 'colored' library for terminal colors
-                    }
-                    Err(e) => {
-                        for diag_error in e {
-                            term::emit(&mut writer.lock(), &config, &file, &diag_error)
-                                .expect("Error when printing to stderr.")
+                (Ok(modus_f), Some(l)) => {
+                    if should_output_graph {
+                        render_tree(&modus_f, &vec![l.clone()], &mut out_writer.lock());
+                    } else {
+                        match prove_goal(&modus_f, &vec![l.clone()]) {
+                            Ok(proofs) => {
+                                println!(
+                                    "{} proof(s) found for query {}",
+                                    proofs.len(),
+                                    l.to_string().blue()
+                                );
+                                // TODO: pretty print proof, we could use the 'colored' library for terminal colors
+                            }
+                            Err(e) => {
+                                for diag_error in e {
+                                    term::emit(&mut err_writer.lock(), &config, &file, &diag_error)
+                                        .expect("Error when printing to stderr.")
+                                }
+                            }
                         }
                     }
-                },
+                }
                 (Err(error), _) => {
                     println!(
                         "❌ Did not parse {} successfully. Error trace:\n{}",

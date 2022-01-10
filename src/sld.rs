@@ -81,6 +81,101 @@ pub struct Tree {
     resolvents: HashMap<(LiteralGoalId, ClauseId), (Substitution, Substitution, Tree)>,
 }
 
+impl Tree {
+    pub fn to_graph(&self, rules: &Vec<Clause>) -> Graph {
+        fn convert(
+            t: &Tree,
+            rules: &Vec<Clause>,
+            nodes: &mut Vec<String>,
+            edges: &mut Vec<(usize, usize, String)>,
+        ) {
+            let curr_label = t
+                .goal
+                .iter()
+                .map(|l| l.literal.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            nodes.push(curr_label);
+            let curr_index = nodes.len() - 1;
+
+            let mut resolvent_pairs = t.resolvents.iter().collect::<Vec<_>>();
+            resolvent_pairs.sort_by_key(|(k, _)| k.0); // for some consistency
+
+            for (k, v) in resolvent_pairs {
+                let new_index = nodes.len();
+                convert(&v.2, rules, nodes, edges);
+
+                let edge_label = match &k.1 {
+                    ClauseId::Rule(rid) => rules[*rid].head.to_string(),
+                    ClauseId::Query => todo!(),
+                    ClauseId::Builtin(lit) => lit.to_string(),
+                };
+                edges.push((curr_index, new_index, edge_label));
+            }
+        }
+
+        let name = "SLD_Tree";
+        let mut nodes = Vec::new();
+        let mut edges = Vec::new();
+        convert(self, rules, &mut nodes, &mut edges);
+        Graph { name, nodes, edges }
+    }
+}
+
+type Nd<'a> = (usize, &'a str);
+type Ed<'a> = (Nd<'a>, Nd<'a>, &'a str);
+
+pub struct Graph {
+    name: &'static str,
+    nodes: Vec<String>,
+    edges: Vec<(usize, usize, String)>, // labelled edges
+}
+
+impl<'a> dot::Labeller<'a, Nd<'a>, Ed<'a>> for Graph {
+    fn graph_id(&'a self) -> dot::Id<'a> {
+        dot::Id::new(self.name).unwrap()
+    }
+
+    fn node_id(&'a self, n: &Nd) -> dot::Id<'a> {
+        dot::Id::new(format!("N{}", n.0)).unwrap()
+    }
+
+    fn node_label(&'a self, n: &Nd<'a>) -> dot::LabelText<'a> {
+        dot::LabelText::LabelStr(n.1.into())
+    }
+
+    fn edge_label(&'a self, e: &Ed<'a>) -> dot::LabelText<'a> {
+        dot::LabelText::LabelStr(e.2.into())
+    }
+}
+
+impl<'a> dot::GraphWalk<'a, Nd<'a>, Ed<'a>> for Graph {
+    fn nodes(&'a self) -> dot::Nodes<'a, Nd<'a>> {
+        self.nodes.iter().map(|n| &n[..]).enumerate().collect()
+    }
+
+    fn edges(&'a self) -> dot::Edges<'a, Ed> {
+        self.edges
+            .iter()
+            .map(|(i, j, label)| {
+                (
+                    (*i, &self.nodes[*i][..]),
+                    (*j, &self.nodes[*j][..]),
+                    &label[..],
+                )
+            })
+            .collect()
+    }
+
+    fn source(&'a self, edge: &Ed<'a>) -> Nd {
+        edge.0
+    }
+
+    fn target(&'a self, edge: &Ed<'a>) -> Nd {
+        edge.1
+    }
+}
+
 /// A proof tree consist of
 /// - a clause
 /// - a valuation for this clause
@@ -139,7 +234,16 @@ impl ResolutionError {
 
         // Displays literals that don't have a span in the notes of the diagnostic.
         fn get_notes(literals: &[Literal]) -> Vec<String> {
-            literals.iter().filter_map(|lit| if lit.position.is_none() { Some(lit.to_string()) } else { None }).collect()
+            literals
+                .iter()
+                .filter_map(|lit| {
+                    if lit.position.is_none() {
+                        Some(lit.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
         }
 
         let (message, labels, notes, severity) = match self {
@@ -179,7 +283,10 @@ impl ResolutionError {
             ),
             ResolutionError::InconsistentGroundnessSignature(signatures) => (
                 // TODO: capture the inconsistent clauses
-                format!("{} clause(s) have inconsistent signatures", signatures.len()),
+                format!(
+                    "{} clause(s) have inconsistent signatures",
+                    signatures.len()
+                ),
                 Vec::new(),
                 Vec::new(),
                 Severity::Error,
@@ -315,7 +422,7 @@ pub fn sld(
                 goal.iter()
                     .map(|lit_hist| lit_hist.literal.clone())
                     .collect(),
-                maxdepth
+                maxdepth,
             )])
         } else {
             let (lid, l) = select(goal, grounded).map_err(|e| vec![e])?;

@@ -40,7 +40,7 @@ impl fmt::Display for IRTerm {
             IRTerm::UserVariable(s) => write!(f, "{}", s),
             // there may be aux variables after translating to IR
             IRTerm::AuxiliaryVariable(i) => write!(f, "__AUX_{}", i),
-            _ => unimplemented!(),
+            IRTerm::RenamedVariable(i, t) => write!(f, "{}_{}", t, i),
         }
     }
 }

@@ -20,8 +20,9 @@ use buildkit_llb_types::OwnedOutput;
 
 use std::{
     collections::{BTreeMap, HashMap},
+    ffi::{OsStr, OsString},
     path::PathBuf,
-    sync::Arc, ffi::{OsStr, OsString},
+    sync::Arc,
 };
 
 use buildkit_frontend::{

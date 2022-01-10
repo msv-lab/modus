@@ -427,7 +427,8 @@ pub fn build_dag_from_proofs(
                                         dst_path,
                                     });
                                 } else {
-                                    let parent = curr_state.current_node.expect("No base layer yet.");
+                                    let parent =
+                                        curr_state.current_node.expect("No base layer yet.");
                                     let node = res.new_node(
                                         BuildNode::CopyFromImage {
                                             parent,
@@ -540,7 +541,8 @@ pub fn build_dag_from_proofs(
                                     })
                                     .collect();
                                 deps.push(parent);
-                                curr_state.set_node(res.new_node(BuildNode::Merge(merge_node), deps));
+                                curr_state
+                                    .set_node(res.new_node(BuildNode::Merge(merge_node), deps));
                             }
                             _ => {
                                 panic!("Unkown operator: {}", op_name);
@@ -555,13 +557,7 @@ pub fn build_dag_from_proofs(
             }
         }
 
-        process_children(
-            subtree,
-            rules,
-            res,
-            image_literals,
-            &mut curr_state,
-        );
+        process_children(subtree, rules, res, image_literals, &mut curr_state);
 
         debug_assert!(curr_state.current_merge.is_none());
 
