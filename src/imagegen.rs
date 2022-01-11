@@ -627,14 +627,9 @@ pub fn plan_from_modusfile(
             })
             .collect();
 
-    let res_tree = sld::sld(&clauses, &goal, max_depth).map_err(|errs| {
-        errs.1
-            .into_iter()
-            .map(ResolutionError::get_diagnostic)
-            .collect::<Vec<_>>()
-    })?;
+    let success_tree = Result::from(sld::sld(&clauses, &goal, max_depth))?;
     // TODO: sld::proofs should return the ground query corresponding to each proof.
-    let proofs = sld::proofs(&res_tree, &clauses, &goal);
+    let proofs = sld::proofs(&success_tree, &clauses, &goal);
     let query_and_proofs = proofs
         .into_iter()
         .map(|p| (query.substitute(&p.valuation), p))

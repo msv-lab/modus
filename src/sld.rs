@@ -307,20 +307,33 @@ impl ResolutionError {
     }
 }
 
+/// Result of building the SLD tree.
+///
 /// Uses a custom result type in resolution since we often have some information about
 /// either state, an 'Ok' and 'Err' state is too disjoint for our purposes.
-struct SLDResult {
-    success_tree: Option<Tree>,
-    full_tree: Tree,
-    errors: Vec<ResolutionError>,
+pub struct SLDResult {
+    /// The subset of the full SLD tree that leads to paths with empty goals (i.e. successful resolution).
+    pub success_tree: Option<Tree>,
+    pub full_tree: Tree,
+    pub errors: Vec<ResolutionError>,
+}
+
+impl From<SLDResult> for Result<Tree, Vec<Diagnostic<()>>> {
+    fn from(sld_result: SLDResult) -> Self {
+        if let Some(t) = sld_result.success_tree {
+            Ok(t)
+        } else {
+            Err(sld_result
+                .errors
+                .into_iter()
+                .map(ResolutionError::get_diagnostic)
+                .collect::<Vec<_>>())
+        }
+    }
 }
 
 /// Returns both the SLD tree of only valid paths and the full tree.
-pub fn sld(
-    rules: &Vec<Clause<IRTerm>>,
-    goal: &Goal,
-    maxdepth: TreeLevel,
-) -> SLDResult {
+pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLDResult {
     /// select leftmost literal with compatible groundness
     fn select(
         goal: &GoalWithHistory,
@@ -434,7 +447,7 @@ pub fn sld(
                 resolvents: HashMap::new(),
             };
             SLDResult {
-                success_tree: Some(t),
+                success_tree: Some(t.clone()),
                 full_tree: t,
                 errors: Vec::new(),
             }
@@ -445,11 +458,11 @@ pub fn sld(
                 resolvents: HashMap::default(),
             };
             let errors = vec![ResolutionError::MaximumDepthExceeded(
-                    goal.iter()
-                        .map(|lit_hist| lit_hist.literal.clone())
-                        .collect(),
-                    maxdepth,
-                )];
+                goal.iter()
+                    .map(|lit_hist| lit_hist.literal.clone())
+                    .collect(),
+                maxdepth,
+            )];
             SLDResult {
                 success_tree: None,
                 full_tree: t,
@@ -540,8 +553,15 @@ pub fn sld(
             for (rid, mgu, renaming, resolvent) in
                 builtin_resolves.into_iter().chain(user_rules_resolves)
             {
-                let SLDResult { success_tree, full_tree, errors } = inner(rules, &resolvent, maxdepth, level + 1, grounded);
-                all_resolvents.insert((lid, rid), (mgu, renaming, full_tree));
+                let SLDResult {
+                    success_tree,
+                    full_tree,
+                    mut errors,
+                } = inner(rules, &resolvent, maxdepth, level + 1, grounded);
+                all_resolvents.insert(
+                    (lid, rid.clone()),
+                    (mgu.clone(), renaming.clone(), full_tree),
+                );
                 errs.append(&mut errors);
                 if let Some(success_tree) = success_tree {
                     success_resolvents.insert((lid, rid), (mgu, renaming, success_tree));
@@ -551,7 +571,7 @@ pub fn sld(
             // TODO: could also check the severity of errors and terminate early?
             // Although, semantic analysis would likely be better for those kinds of
             // issues anyway.
-            let success_tree = if !success_resolvents.is_empty() {
+            let success_tree = if success_resolvents.is_empty() {
                 None
             } else {
                 Some(Tree {
@@ -797,7 +817,7 @@ mod tests {
                 body: vec![],
             },
         ];
-        let tree = sld(&clauses, &goal, 10).unwrap(); // FIXME: migrate to different return type
+        let tree = sld(&clauses, &goal, 10).success_tree.unwrap();
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 2);
 
@@ -819,7 +839,7 @@ mod tests {
             head: "a(X)".parse().unwrap(),
             body: vec![],
         }];
-        let tree = sld(&clauses, &goal, 10).unwrap();
+        let tree = sld(&clauses, &goal, 10).success_tree.unwrap();
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 1);
         assert!(contains_ignoring_position(
@@ -839,7 +859,7 @@ mod tests {
         let result = sld(&clauses, &goal, 10);
         assert_eq!(
             vec![ResolutionError::InsufficientGroundness(goal)],
-            result.err().map(|(_, e)| e).unwrap()
+            result.errors
         )
     }
 
@@ -865,7 +885,7 @@ mod tests {
                 body: vec![],
             },
         ];
-        let tree = sld(&clauses, &goal, 10).unwrap();
+        let tree = sld(&clauses, &goal, 10).success_tree.unwrap();
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 1);
         assert!(contains_ignoring_position(
@@ -897,7 +917,7 @@ mod tests {
                 body: vec![],
             },
         ];
-        let tree = sld(&clauses, &goal, 10).unwrap();
+        let tree = sld(&clauses, &goal, 10).success_tree.unwrap();
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 2);
         assert!(contains_ignoring_position(
@@ -946,7 +966,7 @@ mod tests {
                 body: vec![],
             },
         ];
-        let tree = sld(&clauses, &goal, 15).unwrap();
+        let tree = sld(&clauses, &goal, 15).success_tree.unwrap();
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 4);
         assert!(contains_ignoring_position(
@@ -973,7 +993,7 @@ mod tests {
         let goal: Goal<logic::IRTerm> =
             vec!["string_concat(\"hello\", \"world\", X)".parse().unwrap()];
         let clauses: Vec<logic::Clause> = vec![];
-        let tree = sld(&clauses, &goal, 10).unwrap();
+        let tree = sld(&clauses, &goal, 10).success_tree.unwrap();
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 1);
         assert!(contains_ignoring_position(
@@ -1007,14 +1027,14 @@ mod tests {
             ];
             let tree_res = sld(&clauses, &goal, 50);
             if is_good {
-                let solutions = solutions(&tree_res.unwrap());
+                let solutions = solutions(&tree_res.success_tree.unwrap());
                 assert_eq!(solutions.len(), 1);
                 assert!(contains_ignoring_position(
                     &solutions,
                     &vec![format!("a(\"{}\")", s).parse().unwrap()]
                 ));
             } else {
-                assert!(tree_res.is_err());
+                assert!(tree_res.success_tree.is_none());
             }
         }
     }
