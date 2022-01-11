@@ -307,11 +307,20 @@ impl ResolutionError {
     }
 }
 
+/// Uses a custom result type in resolution since we often have some information about
+/// either state, an 'Ok' and 'Err' state is too disjoint for our purposes.
+struct SLDResult {
+    success_tree: Option<Tree>,
+    full_tree: Tree,
+    errors: Vec<ResolutionError>,
+}
+
+/// Returns both the SLD tree of only valid paths and the full tree.
 pub fn sld(
     rules: &Vec<Clause<IRTerm>>,
     goal: &Goal,
     maxdepth: TreeLevel,
-) -> Result<Tree, (Tree, Vec<ResolutionError>)> {
+) -> SLDResult {
     /// select leftmost literal with compatible groundness
     fn select(
         goal: &GoalWithHistory,
@@ -389,7 +398,7 @@ pub fn sld(
         maxdepth: TreeLevel,
         level: TreeLevel,
         grounded: &HashMap<Signature, Vec<bool>>,
-    ) -> Result<Tree, (Tree, Vec<ResolutionError>)> {
+    ) -> SLDResult {
         #[cfg(debug_assertions)]
         {
             // FIXME: move this ad-hoc debug code elsewhere
@@ -419,38 +428,48 @@ pub fn sld(
             );
         }
         if goal.is_empty() {
-            Ok(Tree {
+            let t = Tree {
                 goal: goal.clone(),
                 level,
                 resolvents: HashMap::new(),
-            })
+            };
+            SLDResult {
+                success_tree: Some(t),
+                full_tree: t,
+                errors: Vec::new(),
+            }
         } else if level >= maxdepth {
             let t = Tree {
                 goal: goal.clone(),
                 level,
                 resolvents: HashMap::default(),
             };
-
-            Err((
-                t,
-                vec![ResolutionError::MaximumDepthExceeded(
+            let errors = vec![ResolutionError::MaximumDepthExceeded(
                     goal.iter()
                         .map(|lit_hist| lit_hist.literal.clone())
                         .collect(),
                     maxdepth,
-                )],
-            ))
+                )];
+            SLDResult {
+                success_tree: None,
+                full_tree: t,
+                errors,
+            }
         } else {
-            let (lid, l) = select(goal, grounded).map_err(|e| {
-                (
-                    Tree {
-                        goal: goal.clone(),
-                        level,
-                        resolvents: HashMap::default(),
-                    },
-                    vec![e],
-                )
-            })?;
+            let selection_res = select(goal, grounded);
+            if let Err(e) = selection_res {
+                let t = Tree {
+                    goal: goal.clone(),
+                    level,
+                    resolvents: HashMap::default(),
+                };
+                return SLDResult {
+                    success_tree: None,
+                    full_tree: t,
+                    errors: vec![e],
+                };
+            }
+            let (lid, l) = selection_res.unwrap();
 
             let mut errs: Vec<ResolutionError> = Vec::new();
 
@@ -510,46 +529,45 @@ pub fn sld(
                 errs.push(ResolutionError::InsufficientRules(l.literal.clone()));
             }
 
-            let mut resolvents: HashMap<
+            let mut success_resolvents: HashMap<
                 (LiteralGoalId, ClauseId),
                 (Substitution, Substitution, Tree),
             > = HashMap::new();
-            let mut err_resolvents: HashMap<
+            let mut all_resolvents: HashMap<
                 (LiteralGoalId, ClauseId),
                 (Substitution, Substitution, Tree),
             > = HashMap::new();
             for (rid, mgu, renaming, resolvent) in
                 builtin_resolves.into_iter().chain(user_rules_resolves)
             {
-                let tree_result = inner(rules, &resolvent, maxdepth, level + 1, grounded);
-                match tree_result {
-                    Ok(tree) => {
-                        resolvents.insert((lid, rid), (mgu, renaming, tree));
-                    }
-                    Err((tree, mut sld_errs)) => {
-                        err_resolvents.insert((lid, rid), (mgu, renaming, tree));
-                        errs.append(&mut sld_errs);
-                    }
+                let SLDResult { success_tree, full_tree, errors } = inner(rules, &resolvent, maxdepth, level + 1, grounded);
+                all_resolvents.insert((lid, rid), (mgu, renaming, full_tree));
+                errs.append(&mut errors);
+                if let Some(success_tree) = success_tree {
+                    success_resolvents.insert((lid, rid), (mgu, renaming, success_tree));
                 }
             }
 
             // TODO: could also check the severity of errors and terminate early?
             // Although, semantic analysis would likely be better for those kinds of
             // issues anyway.
-            if resolvents.is_empty() {
-                let tree = Tree {
-                    goal: goal.clone(),
-                    level,
-                    resolvents: err_resolvents,
-                };
-                Err((tree, errs))
+            let success_tree = if !success_resolvents.is_empty() {
+                None
             } else {
-                let tree = Tree {
+                Some(Tree {
                     goal: goal.clone(),
                     level,
-                    resolvents,
-                };
-                Ok(tree)
+                    resolvents: success_resolvents,
+                })
+            };
+            SLDResult {
+                success_tree,
+                full_tree: Tree {
+                    goal: goal.clone(),
+                    level,
+                    resolvents: all_resolvents,
+                },
+                errors: errs,
             }
         }
     }
@@ -572,14 +590,15 @@ pub fn sld(
         .collect();
     match grounded_result {
         Ok(grounded) => inner(rules, &goal_with_history, maxdepth, 0, &grounded),
-        Err(e) => Err((
-            Tree {
+        Err(e) => SLDResult {
+            success_tree: None,
+            full_tree: Tree {
                 goal: goal_with_history,
                 level: 0,
                 resolvents: HashMap::default(),
             },
-            vec![ResolutionError::InconsistentGroundnessSignature(e)],
-        )),
+            errors: vec![ResolutionError::InconsistentGroundnessSignature(e)],
+        },
     }
 }
 
@@ -778,7 +797,7 @@ mod tests {
                 body: vec![],
             },
         ];
-        let tree = sld(&clauses, &goal, 10).unwrap();
+        let tree = sld(&clauses, &goal, 10).unwrap(); // FIXME: migrate to different return type
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 2);
 
