@@ -98,6 +98,14 @@ impl IRTerm {
             _ => None,
         }
     }
+
+    /// Gets the original IRTerm from a renamed one, or returns itself.
+    pub fn get_original(&self) -> &IRTerm {
+        match self {
+            IRTerm::RenamedVariable(_, t) => t.get_original(),
+            t => t,
+        }
+    }
 }
 
 /// Structure that holds information about the position of some section of the source code.

@@ -82,6 +82,7 @@ pub struct Tree {
 }
 
 impl Tree {
+    /// Converts this tree to a directed graph.
     pub fn to_graph(&self, rules: &Vec<Clause>) -> Graph {
         fn convert(
             t: &Tree,
@@ -126,6 +127,72 @@ impl Tree {
         let mut edges = Vec::new();
         convert(self, rules, &mut nodes, &mut edges);
         Graph { name, nodes, edges }
+    }
+
+    /// Returns a string explaining the SLD tree, using indentation, etc.
+    pub fn explain(&self, rules: &Vec<Clause>) -> String {
+        fn dfs(t: &Tree, rules: &Vec<Clause>, lines: &mut Vec<String>) {
+            let curr = if t.goal.is_empty() {
+                format!("{}Success", " ".repeat(t.level))
+            } else {
+                format!(
+                    "{}{} We require {}",
+                    " ".repeat(t.level),
+                    t.level,
+                    t.goal
+                        .iter()
+                        .map(|l| l.literal.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            lines.push(curr);
+
+            let mut resolvent_pairs = t.resolvents.iter().collect::<Vec<_>>();
+            resolvent_pairs.sort_by_key(|(k, _)| k.0);
+
+            for (k, v) in &resolvent_pairs {
+                let (goal_id, cid) = k;
+
+                let chosen_rule_body = match cid {
+                    ClauseId::Rule(rid) => rules[*rid]
+                        .substitute(
+                            &v.0.iter()
+                                .map(|(t1, t2)| (t1.get_original().clone(), t2.clone()))
+                                .collect(),
+                        )
+                        .body
+                        .iter()
+                        .map(|x| x.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    ClauseId::Query => unimplemented!(),
+                    ClauseId::Builtin(lit) => lit.substitute(&v.0).to_string(),
+                };
+                let curr_attempt = format!(
+                    "{}{} {} requires {}",
+                    " ".repeat(t.level),
+                    "|".repeat(t.level.to_string().len()),
+                    t.goal[*goal_id].literal,
+                    if chosen_rule_body.is_empty() {
+                        "nothing, it's a fact.".to_owned()
+                    } else {
+                        chosen_rule_body
+                    }
+                );
+                lines.push(curr_attempt);
+
+                dfs(&v.2, rules, lines);
+            }
+
+            if !t.goal.is_empty() && resolvent_pairs.is_empty() {
+                lines.push(format!("{}Fail", " ".repeat(t.level)));
+            }
+        }
+
+        let mut lines: Vec<String> = Vec::new();
+        dfs(self, rules, &mut lines);
+        lines.join("\n")
     }
 }
 
@@ -412,34 +479,6 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
         level: TreeLevel,
         grounded: &HashMap<Signature, Vec<bool>>,
     ) -> SLDResult {
-        #[cfg(debug_assertions)]
-        {
-            // FIXME: move this ad-hoc debug code elsewhere
-            eprintln!(
-                "{}inner(rules, goal=[ {} ], level={}/{})",
-                "  ".to_string().repeat(level),
-                goal.iter()
-                    .map(|g| format!(
-                        "{}({})",
-                        &g.literal.predicate.0,
-                        g.literal
-                            .args
-                            .iter()
-                            .map(|x| match x {
-                                IRTerm::Constant(x) => x.to_string(),
-                                IRTerm::UserVariable(v) =>
-                                    format!("{:?}", v).trim_matches('\"').to_string(),
-                                _ => format!("{:?}", x),
-                            })
-                            .collect::<Vec<String>>()
-                            .join(", ")
-                    ))
-                    .collect::<Vec<String>>()
-                    .join(", "),
-                level,
-                maxdepth
-            );
-        }
         if goal.is_empty() {
             let t = Tree {
                 goal: goal.clone(),

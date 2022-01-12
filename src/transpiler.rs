@@ -24,44 +24,15 @@ use crate::{
     imagegen::{self, BuildPlan, MergeNode, NodeId},
     logic::{self, Clause, IRTerm, Literal, Predicate},
     modusfile::Modusfile,
-    sld::{self, ClauseId, ResolutionError, Tree},
+    sld::{self, ClauseId, ResolutionError, SLDResult, Tree},
 };
 
 use crate::imagegen::BuildNode;
 
-// TODO: remove/rewrite
-pub fn prove_goal(
-    mf: &Modusfile,
-    goal: &Vec<logic::Literal>,
-) -> Result<Vec<sld::Proof>, Vec<Diagnostic<()>>> {
-    let max_depth = 20;
-    let clauses: Vec<Clause> =
-        mf.0.iter()
-            .flat_map(|mc| {
-                let clauses: Vec<Clause> = mc.into();
-                clauses
-            })
-            .collect();
-
-    let t = Result::from(sld::sld(&clauses, goal, max_depth))?;
-    Ok(sld::proofs(&t, &clauses, &goal))
-}
-
 /// Renders the entire SLD tree as a DOT graph, to the writer.
-pub fn render_tree<W: Write>(mf: &Modusfile, goal: &Vec<logic::Literal>, output: &mut W) {
-    let max_depth = 20;
-    let clauses: Vec<Clause> =
-        mf.0.iter()
-            .flat_map(|mc| {
-                let clauses: Vec<Clause> = mc.into();
-                clauses
-            })
-            .collect();
-
+pub fn render_tree<W: Write>(clauses: &Vec<Clause>, sld_result: SLDResult, output: &mut W) {
     // TODO: we could figure out the corresponding error for each failed path
-    let sld_result = sld::sld(&clauses, goal, max_depth);
-    let g = sld_result.full_tree.to_graph(&clauses);
-
+    let g = sld_result.full_tree.to_graph(clauses);
     dot::render(&g, output).unwrap()
 }
 

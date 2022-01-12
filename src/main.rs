@@ -48,7 +48,7 @@ use transpiler::render_tree;
 
 use modusfile::Modusfile;
 
-use crate::transpiler::prove_goal;
+use crate::logic::Clause;
 
 fn get_file(path: &Path) -> SimpleFile<&str, String> {
     let file_name: &str = path
@@ -150,6 +150,7 @@ fn main() {
                         .help("Specifies the target to prove")
                         .index(2),
                 )
+                .arg_from_usage("-e --explain 'Prints out an explanation of the steps taken in resolution.'")
                 .arg_from_usage("-g --graph 'Outputs a (DOT) graph that of the SLD tree traversed in resolution.'"),
         )
         .get_matches();
@@ -270,6 +271,8 @@ fn main() {
         }
         ("proof", Some(sub)) => {
             let should_output_graph = sub.is_present("graph");
+            let should_explain = sub.is_present("explain");
+
             let input_file = sub.value_of("FILE").unwrap();
             let file = get_file(Path::new(input_file));
             let query: Option<logic::Literal> = sub.value_of("QUERY").map(|l| l.parse().unwrap());
@@ -282,10 +285,26 @@ fn main() {
                     modus_f.0.len()
                 ),
                 (Ok(modus_f), Some(l)) => {
+                    let max_depth = 20;
+                    let clauses: Vec<Clause> = modus_f
+                        .0
+                        .iter()
+                        .flat_map(|mc| {
+                            let clauses: Vec<Clause> = mc.into();
+                            clauses
+                        })
+                        .collect();
+                    let goal = &vec![l.clone()];
+                    let sld_result = sld::sld(&clauses, goal, max_depth);
+
                     if should_output_graph {
-                        render_tree(&modus_f, &vec![l.clone()], &mut out_writer.lock());
+                        render_tree(&clauses, sld_result, &mut out_writer.lock());
+                    } else if should_explain {
+                        println!("{}", sld_result.full_tree.explain(&clauses));
                     } else {
-                        match prove_goal(&modus_f, &vec![l.clone()]) {
+                        let proof_result = Result::from(sld::sld(&clauses, goal, max_depth))
+                            .map(|t| sld::proofs(&t, &clauses, goal));
+                        match proof_result {
                             Ok(proofs) => {
                                 println!(
                                     "{} proof(s) found for query {}",
