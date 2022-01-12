@@ -83,10 +83,10 @@ pub struct Tree {
 
 impl Tree {
     /// Converts this tree to a directed graph.
-    pub fn to_graph(&self, rules: &Vec<Clause>) -> Graph {
+    pub fn to_graph(&self, rules: &[Clause]) -> Graph {
         fn convert(
             t: &Tree,
-            rules: &Vec<Clause>,
+            rules: &[Clause],
             nodes: &mut Vec<String>,
             edges: &mut Vec<(usize, usize, String)>,
         ) {
@@ -130,13 +130,13 @@ impl Tree {
     }
 
     /// Returns a string explaining the SLD tree, using indentation, etc.
-    pub fn explain(&self, rules: &Vec<Clause>) -> String {
-        fn dfs(t: &Tree, rules: &Vec<Clause>, lines: &mut Vec<String>) {
+    pub fn explain(&self, rules: &[Clause]) -> String {
+        fn dfs(t: &Tree, rules: &[Clause], lines: &mut Vec<String>) {
             let curr = if t.goal.is_empty() {
-                format!("{}Success", " ".repeat(t.level))
+                format!("{}| Success", " ".repeat(t.level))
             } else {
                 format!(
-                    "{}{} We require {}",
+                    "{}| {} We require {}",
                     " ".repeat(t.level),
                     t.level,
                     t.goal
@@ -154,13 +154,20 @@ impl Tree {
             for (k, v) in &resolvent_pairs {
                 let (goal_id, cid) = k;
 
+                let substitution_map: HashMap<_, _> =
+                    v.0.iter()
+                        .map(|(t1, t2)| (t1.get_original().clone(), t2.clone()))
+                        .collect();
+                // let variable_choice = format!(
+                //     "{}| Taking {}",
+                //     " ".repeat(t.level),
+                //     substitution_map.iter().map(|(prev, new_val)| prev.to_string() + " = " + &new_val.to_string()).collect::<Vec<_>>().join(", ")
+                // );
+                // lines.push(variable_choice);
+
                 let chosen_rule_body = match cid {
                     ClauseId::Rule(rid) => rules[*rid]
-                        .substitute(
-                            &v.0.iter()
-                                .map(|(t1, t2)| (t1.get_original().clone(), t2.clone()))
-                                .collect(),
-                        )
+                        .substitute(&substitution_map)
                         .body
                         .iter()
                         .map(|x| x.to_string())
@@ -170,9 +177,8 @@ impl Tree {
                     ClauseId::Builtin(lit) => lit.substitute(&v.0).to_string(),
                 };
                 let curr_attempt = format!(
-                    "{}{} {} requires {}",
+                    "{}| {} requires {}",
                     " ".repeat(t.level),
-                    "|".repeat(t.level.to_string().len()),
                     t.goal[*goal_id].literal,
                     if chosen_rule_body.is_empty() {
                         "nothing, it's a fact.".to_owned()
@@ -186,7 +192,7 @@ impl Tree {
             }
 
             if !t.goal.is_empty() && resolvent_pairs.is_empty() {
-                lines.push(format!("{}Fail", " ".repeat(t.level)));
+                lines.push(format!("{}| Fail", " ".repeat(t.level)));
             }
         }
 
