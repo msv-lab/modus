@@ -74,6 +74,10 @@ type GoalWithHistory = Vec<LiteralWithHistory>;
 /// - a goal with its dependencies (at which level and from which part of body each literal was introduced)
 /// - a level, which is incremented as tree grows
 /// - a mapping from (selected literal in goal, applied rule) to (mgu after rule renaming, rule renaming, resolvent subtree)
+///
+/// TODO: there is likely some convenient way to extend this type to hold errors as well, so
+/// we can preserve the tree structure of errors instead of flattening into a list
+/// like we currently do.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Tree {
     goal: GoalWithHistory,
