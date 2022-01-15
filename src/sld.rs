@@ -99,7 +99,7 @@ impl Tree {
                 .iter()
                 .map(|l| l.literal.to_string())
                 .collect::<Vec<_>>()
-                .join(", ");
+                .join(",\n");
             nodes.push(curr_label);
             let curr_index = nodes.len() - 1;
 
