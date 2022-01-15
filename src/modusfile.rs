@@ -318,7 +318,10 @@ pub mod parser {
         // These inner expression parsers can fully recurse.
         let op_application_parser = map(
             separated_pair(
-                alt((modus_literal, delimited(l_paren_with_comments, body, r_paren_with_comments))),
+                alt((
+                    modus_literal,
+                    delimited(l_paren_with_comments, body, r_paren_with_comments),
+                )),
                 tag("::"),
                 cut(literal(modus_term)),
             ),
@@ -727,8 +730,11 @@ mod tests {
 
         assert_eq!(s1, r#"Hello\nWorld"#);
         assert_eq!(s2, r#"Tabs\tare\tbetter\tthan\tspaces"#);
-        assert_eq!(s3, r#"Testing \
-                       multiline."#);
+        assert_eq!(
+            s3,
+            r#"Testing \
+                       multiline."#
+        );
     }
 
     #[test]

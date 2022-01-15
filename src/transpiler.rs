@@ -15,11 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{
-    collections::{HashMap, HashSet},
-    str::FromStr,
-    sync::atomic::{AtomicU32, Ordering},
-};
+use std::{io::Write, str::FromStr};
 
 use codespan_reporting::diagnostic::Diagnostic;
 
@@ -28,36 +24,22 @@ use crate::{
     imagegen::{self, BuildPlan, MergeNode, NodeId},
     logic::{self, Clause, IRTerm, Literal, Predicate},
     modusfile::Modusfile,
-    sld::{self, ClauseId},
+    sld::{self, ClauseId, ResolutionError, SLDResult, Tree},
 };
 
 use crate::imagegen::BuildNode;
 
-// TODO: remove/rewrite
-pub fn prove_goal(
-    mf: &Modusfile,
-    goal: &Vec<logic::Literal>,
-) -> Result<Vec<sld::Proof>, Diagnostic<()>> {
-    let max_depth = 20;
-    let clauses: Vec<Clause> =
-        mf.0.iter()
-            .flat_map(|mc| {
-                let clauses: Vec<Clause> = mc.into();
-                clauses
-            })
-            .collect();
-
-    let res = sld::sld(&clauses, goal, max_depth)?;
-    match res {
-        Some(t) => Ok(sld::proofs(&t, &clauses, &goal)),
-        None => Err(Diagnostic::warning().with_message("Failed in SLD tree construction.")),
-    }
+/// Renders the entire SLD tree as a DOT graph, to the writer.
+pub fn render_tree<W: Write>(clauses: &Vec<Clause>, sld_result: SLDResult, output: &mut W) {
+    // TODO: we could figure out the corresponding error for each failed path
+    let g = sld_result.full_tree.to_graph(clauses);
+    dot::render(&g, output).unwrap()
 }
 
 pub fn transpile(
     mf: Modusfile,
     query: logic::Literal,
-) -> Result<Dockerfile<ResolvedParent>, Diagnostic<()>> {
+) -> Result<Dockerfile<ResolvedParent>, Vec<Diagnostic<()>>> {
     let build_plan = imagegen::plan_from_modusfile(mf, query)?;
     Ok(plan_to_docker(&build_plan))
 }

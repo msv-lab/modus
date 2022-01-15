@@ -40,7 +40,7 @@ impl fmt::Display for IRTerm {
             IRTerm::UserVariable(s) => write!(f, "{}", s),
             // there may be aux variables after translating to IR
             IRTerm::AuxiliaryVariable(i) => write!(f, "__AUX_{}", i),
-            _ => unimplemented!(),
+            IRTerm::RenamedVariable(i, t) => write!(f, "{}_{}", t, i),
         }
     }
 }
@@ -70,6 +70,13 @@ impl sld::Auxiliary for IRTerm {
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Predicate(pub String);
 
+impl Predicate {
+    /// True if this predicate symbol represents an operator.
+    pub fn is_operator(&self) -> bool {
+        self.0.starts_with("_operator_")
+    }
+}
+
 impl From<String> for Predicate {
     fn from(s: String) -> Self {
         Predicate(s)
@@ -89,6 +96,14 @@ impl IRTerm {
         match self {
             IRTerm::Constant(c) => Some(&c[..]),
             _ => None,
+        }
+    }
+
+    /// Gets the original IRTerm from a renamed one, or returns itself.
+    pub fn get_original(&self) -> &IRTerm {
+        match self {
+            IRTerm::RenamedVariable(_, t) => t.get_original(),
+            t => t,
         }
     }
 }
@@ -182,10 +197,7 @@ impl Literal {
     }
 
     pub fn with_position(self, position: Option<SpannedPosition>) -> Literal {
-        Literal {
-            position,
-            ..self
-        }
+        Literal { position, ..self }
     }
 }
 

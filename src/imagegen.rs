@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::logic::{Clause, IRTerm, Literal, Predicate};
 use crate::modusfile::Modusfile;
-use crate::sld::{self, ClauseId, Proof};
+use crate::sld::{self, ClauseId, Proof, ResolutionError};
 use crate::unification::Substitute;
 
 use codespan_reporting::diagnostic::Diagnostic;
@@ -427,7 +427,8 @@ pub fn build_dag_from_proofs(
                                         dst_path,
                                     });
                                 } else {
-                                    let parent = curr_state.current_node.expect("No base layer yet.");
+                                    let parent =
+                                        curr_state.current_node.expect("No base layer yet.");
                                     let node = res.new_node(
                                         BuildNode::CopyFromImage {
                                             parent,
@@ -540,7 +541,8 @@ pub fn build_dag_from_proofs(
                                     })
                                     .collect();
                                 deps.push(parent);
-                                curr_state.set_node(res.new_node(BuildNode::Merge(merge_node), deps));
+                                curr_state
+                                    .set_node(res.new_node(BuildNode::Merge(merge_node), deps));
                             }
                             _ => {
                                 panic!("Unkown operator: {}", op_name);
@@ -555,13 +557,7 @@ pub fn build_dag_from_proofs(
             }
         }
 
-        process_children(
-            subtree,
-            rules,
-            res,
-            image_literals,
-            &mut curr_state,
-        );
+        process_children(subtree, rules, res, image_literals, &mut curr_state);
 
         debug_assert!(curr_state.current_merge.is_none());
 
@@ -617,7 +613,10 @@ fn join_path(base: &str, path: &str) -> String {
     }
 }
 
-pub fn plan_from_modusfile(mf: Modusfile, query: Literal) -> Result<BuildPlan, Diagnostic<()>> {
+pub fn plan_from_modusfile(
+    mf: Modusfile,
+    query: Literal,
+) -> Result<BuildPlan, Vec<Diagnostic<()>>> {
     let goal = vec![query.clone()];
     let max_depth = 50;
     let clauses: Vec<Clause> =
@@ -628,9 +627,9 @@ pub fn plan_from_modusfile(mf: Modusfile, query: Literal) -> Result<BuildPlan, D
             })
             .collect();
 
-    let res_tree = sld::sld(&clauses, &goal, max_depth)?.expect("Failed in SLD tree construction.");
+    let success_tree = Result::from(sld::sld(&clauses, &goal, max_depth))?;
     // TODO: sld::proofs should return the ground query corresponding to each proof.
-    let proofs = sld::proofs(&res_tree, &clauses, &goal);
+    let proofs = sld::proofs(&success_tree, &clauses, &goal);
     let query_and_proofs = proofs
         .into_iter()
         .map(|p| (query.substitute(&p.valuation), p))

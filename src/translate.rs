@@ -19,7 +19,14 @@ use std::sync::atomic::AtomicUsize;
 
 use nom::{bytes::streaming::tag, sequence::delimited};
 
-use crate::{logic::{self, parser::Span, IRTerm, Predicate, SpannedPosition}, modusfile::{Expression, ModusClause, ModusTerm, parser::{modus_var, outside_format_expansion, process_raw_string}}, sld::Auxiliary};
+use crate::{
+    logic::{self, parser::Span, IRTerm, Predicate, SpannedPosition},
+    modusfile::{
+        parser::{modus_var, outside_format_expansion, process_raw_string},
+        Expression, ModusClause, ModusTerm,
+    },
+    sld::Auxiliary,
+};
 
 /// Takes the content of a format string.
 /// Returns an IRTerm to be used instead of the format string term, and a list of literals
@@ -266,24 +273,28 @@ mod tests {
 
         let case = "";
 
-        let lits = vec![
-            logic::Literal {
-                position: Some(SpannedPosition {
-                    offset: 0,
-                    length: 1,
-                }),
-                predicate: logic::Predicate("string_concat".to_owned()),
-                args: vec![
-                    IRTerm::Constant("".to_owned()),
-                    IRTerm::Constant("".to_owned()),
-                    IRTerm::AuxiliaryVariable(0),
-                ],
-            },
-        ];
+        let lits = vec![logic::Literal {
+            position: Some(SpannedPosition {
+                offset: 0,
+                length: 1,
+            }),
+            predicate: logic::Predicate("string_concat".to_owned()),
+            args: vec![
+                IRTerm::Constant("".to_owned()),
+                IRTerm::Constant("".to_owned()),
+                IRTerm::AuxiliaryVariable(0),
+            ],
+        }];
 
         assert_eq!(
             (lits, IRTerm::AuxiliaryVariable(0)),
-            convert_format_string(&SpannedPosition { offset: 0, length: case.len() + 3 }, case)
+            convert_format_string(
+                &SpannedPosition {
+                    offset: 0,
+                    length: case.len() + 3
+                },
+                case
+            )
         );
     }
 
