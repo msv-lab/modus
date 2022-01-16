@@ -17,7 +17,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fmt::Debug,
+    fmt::{self, Debug},
     hash::Hash,
 };
 
@@ -75,15 +75,15 @@ type GoalWithHistory = Vec<LiteralWithHistory>;
 /// - a goal with its dependencies (at which level and from which part of body each literal was introduced)
 /// - a level, which is incremented as tree grows
 /// - a mapping from (selected literal in goal, applied rule) to (mgu after rule renaming, rule renaming, resolvent subtree)
-///
-/// TODO: there is likely some convenient way to extend this type to hold errors as well, so
-/// we can preserve the tree structure of errors instead of flattening into a list
-/// like we currently do.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Tree {
     goal: GoalWithHistory,
     level: TreeLevel,
     resolvents: HashMap<(LiteralGoalId, ClauseId), (Substitution, Substitution, Tree)>,
+    /// Possible error associated with this node. It should be a leaf if present.
+    /// Note that even if this error is not present, the tree may still have failing paths,
+    /// it's just that this particular node is not the point where it failed.
+    error: Option<ResolutionError>,
 }
 
 impl Tree {
@@ -105,10 +105,13 @@ impl Tree {
             let curr_index = nodes.len() - 1;
 
             if !t.goal.is_empty() && t.resolvents.is_empty() {
-                // REVIEW: is this needed? Or will the user understand that only if a leaf node has no goals
-                // it is a success?
+                let err = t
+                    .error
+                    .as_ref()
+                    .expect("Failed path should store SLD error.");
+                let error_msg = err.to_string();
                 nodes.push("FAIL".to_string());
-                edges.push((curr_index, curr_index + 1, "".to_string()));
+                edges.push((curr_index, curr_index + 1, error_msg));
             } else {
                 let mut resolvent_pairs = t.resolvents.iter().collect::<Vec<_>>();
                 resolvent_pairs.sort_by_key(|(k, _)| k.0); // for some consistency
@@ -136,7 +139,7 @@ impl Tree {
 
     /// Returns a string explaining the SLD tree, using indentation, etc.
     pub fn explain(&self, rules: &[Clause]) -> StringItem {
-        fn dfs(t: &Tree, rules: &[Clause], mut builder: &mut TreeBuilder) {
+        fn dfs(t: &Tree, rules: &[Clause], builder: &mut TreeBuilder) {
             let mut resolvent_pairs = t.resolvents.iter().collect::<Vec<_>>();
             resolvent_pairs.sort_by_key(|(k, _)| k.0);
 
@@ -169,14 +172,19 @@ impl Tree {
                     }
                 );
                 builder.begin_child(curr_attempt);
-                dfs(&v.2, rules, &mut builder);
+                dfs(&v.2, rules, builder);
                 builder.end_child();
             }
 
             if t.goal.is_empty() {
                 builder.add_empty_child("Success".to_owned());
             } else if !t.goal.is_empty() && resolvent_pairs.is_empty() {
-                builder.add_empty_child("Failure.".to_owned());
+                let err = t
+                    .error
+                    .as_ref()
+                    .expect("Failed path should store SLD error.");
+                let error_msg = err.to_string();
+                builder.add_empty_child(error_msg);
             }
         }
 
@@ -293,6 +301,39 @@ pub enum ResolutionError {
     InconsistentGroundnessSignature(HashSet<Signature>),
 }
 
+impl fmt::Display for ResolutionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ResolutionError::UnknownPredicate(literal) => {
+                if literal.predicate.is_operator() {
+                    write!(f, "unknown operator - {}", literal.predicate)
+                } else {
+                    write!(f, "unknown predicate - {}", literal.predicate)
+                }
+            }
+            ResolutionError::InsufficientGroundness(literals) => {
+                write!(f, "insufficient groundess for {} goal(s)", literals.len())
+            }
+            ResolutionError::MaximumDepthExceeded(_, max_depth) => {
+                write!(f, "exceeded maximum depth of {}", max_depth)
+            }
+            ResolutionError::BuiltinFailure(_, builtin_name) => {
+                write!(f, "builtin {} failed to apply or unify", builtin_name)
+            }
+            ResolutionError::InsufficientRules(literal) => write!(
+                f,
+                "could not find a rule to resolve with literal {}",
+                literal
+            ),
+            ResolutionError::InconsistentGroundnessSignature(signatures) => write!(
+                f,
+                "{} clause(s) have inconsistent signatures",
+                signatures.len()
+            ),
+        }
+    }
+}
+
 impl ResolutionError {
     pub fn get_diagnostic(self) -> Diagnostic<()> {
         fn get_position_labels(literals: &[Literal]) -> Vec<Label<()>> {
@@ -317,47 +358,35 @@ impl ResolutionError {
                 .collect()
         }
 
-        let (message, labels, notes, severity) = match self {
+        let message = self.to_string();
+        let (labels, notes, severity) = match self {
             ResolutionError::UnknownPredicate(literal) => (
-                if literal.predicate.is_operator() {
-                    format!("unknown operator - {}", literal.predicate)
-                } else {
-                    format!("unknown predicate - {}", literal.predicate)
-                },
                 get_position_labels(&[literal.clone()]),
                 get_notes(&[literal]),
                 Severity::Error,
             ),
             ResolutionError::InsufficientGroundness(literals) => (
-                format!("insufficient groundess for {} goal(s)", literals.len()),
                 get_position_labels(&literals),
                 get_notes(&literals),
                 Severity::Warning,
             ),
-            ResolutionError::MaximumDepthExceeded(literals, max_depth) => (
-                format!("exceeded maximum depth of {}", max_depth),
+            ResolutionError::MaximumDepthExceeded(literals, _) => (
                 get_position_labels(&literals),
                 get_notes(&literals),
                 Severity::Warning,
             ),
-            ResolutionError::BuiltinFailure(literal, builtin_name) => (
-                format!("builtin {} failed to apply or unify", builtin_name),
+            ResolutionError::BuiltinFailure(literal, _) => (
                 get_position_labels(&[literal.clone()]),
                 get_notes(&[literal]),
                 Severity::Warning,
             ),
             ResolutionError::InsufficientRules(literal) => (
-                format!("could not find a rule to resolve with literal {}", literal),
                 get_position_labels(&[literal.clone()]),
                 get_notes(&[literal]),
                 Severity::Warning,
             ),
-            ResolutionError::InconsistentGroundnessSignature(signatures) => (
+            ResolutionError::InconsistentGroundnessSignature(_) => (
                 // TODO: capture the inconsistent clauses
-                format!(
-                    "{} clause(s) have inconsistent signatures",
-                    signatures.len()
-                ),
                 Vec::new(),
                 Vec::new(),
                 Severity::Error,
@@ -481,6 +510,7 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
                 goal: goal.clone(),
                 level,
                 resolvents: HashMap::new(),
+                error: None,
             };
             SLDResult {
                 success_tree: Some(t.clone()),
@@ -488,17 +518,19 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
                 errors: Vec::new(),
             }
         } else if level >= maxdepth {
-            let t = Tree {
-                goal: goal.clone(),
-                level,
-                resolvents: HashMap::default(),
-            };
-            let errors = vec![ResolutionError::MaximumDepthExceeded(
+            let error = ResolutionError::MaximumDepthExceeded(
                 goal.iter()
                     .map(|lit_hist| lit_hist.literal.clone())
                     .collect(),
                 maxdepth,
-            )];
+            );
+            let t = Tree {
+                goal: goal.clone(),
+                level,
+                resolvents: HashMap::default(),
+                error: Some(error.clone()),
+            };
+            let errors = vec![error];
             SLDResult {
                 success_tree: None,
                 full_tree: t,
@@ -511,6 +543,7 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
                     goal: goal.clone(),
                     level,
                     resolvents: HashMap::default(),
+                    error: Some(e.clone()),
                 };
                 return SLDResult {
                     success_tree: None,
@@ -604,25 +637,36 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
                 }
             }
 
-            // TODO: could also check the severity of errors and terminate early?
-            // Although, semantic analysis would likely be better for those kinds of
-            // issues anyway.
-            let success_tree = if success_resolvents.is_empty() {
-                None
+            // Success tree and full tree depend on if we were able to successfully resolve.
+            let (success_tree, full_tree) = if success_resolvents.is_empty() {
+                (
+                    None,
+                    Tree {
+                        goal: goal.clone(),
+                        level,
+                        resolvents: all_resolvents,
+                        error: Some(errs[0].clone()),
+                    },
+                )
             } else {
-                Some(Tree {
-                    goal: goal.clone(),
-                    level,
-                    resolvents: success_resolvents,
-                })
+                (
+                    Some(Tree {
+                        goal: goal.clone(),
+                        level,
+                        resolvents: success_resolvents,
+                        error: None,
+                    }),
+                    Tree {
+                        goal: goal.clone(),
+                        level,
+                        resolvents: all_resolvents,
+                        error: None,
+                    },
+                )
             };
             SLDResult {
                 success_tree,
-                full_tree: Tree {
-                    goal: goal.clone(),
-                    level,
-                    resolvents: all_resolvents,
-                },
+                full_tree,
                 errors: errs,
             }
         }
@@ -652,6 +696,7 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
                 goal: goal_with_history,
                 level: 0,
                 resolvents: HashMap::default(),
+                error: Some(ResolutionError::InconsistentGroundnessSignature(e.clone())),
             },
             errors: vec![ResolutionError::InconsistentGroundnessSignature(e)],
         },
