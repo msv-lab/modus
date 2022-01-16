@@ -2,7 +2,7 @@ name: Rust
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, ci ]
   pull_request:
     branches: [ main ]
 
@@ -16,7 +16,21 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-    - name: Build
+    - name: Debug Build
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+    - name: Generating Dockerfile from Modusfile
+      run: target/debug/modus transpile Modusfile 'all("frontend", "release")' > /tmp/modus-frontend.Dockerfile && cat /tmp/modus-frontend.Dockerfile
+    - name: Login to GitHub Container Registry
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Docker build frontend
+      run: >
+        SHORT_SHA=$(echo {{ github.sha }} | head -c 10) && \
+        IMAGE_REF=ghcr.io/{{ github.repository_owner }}/buildkit-frontend:$SHORT_SHA && \
+        docker build -t $IMAGE_REF -f /tmp/modus-frontend.Dockerfile . && \
+        docker push $IMAGE_REF
