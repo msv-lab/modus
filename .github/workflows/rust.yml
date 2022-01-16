@@ -24,11 +24,13 @@ jobs:
       run: target/debug/modus transpile Modusfile 'all("frontend", "release")' > /tmp/modus-frontend.Dockerfile && cat /tmp/modus-frontend.Dockerfile
     - name: Login to GitHub Container Registry
       uses: docker/login-action@v1
+      if: github.event_name != 'pull_request'
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     - name: Docker build frontend
+      if: github.event_name != 'pull_request'
       run: >
         SHORT_SHA=$(echo $GITHUB_SHA | head -c 10) &&
         IMAGE_REF=ghcr.io/$GITHUB_REPOSITORY-buildkit-frontend:$SHORT_SHA &&
