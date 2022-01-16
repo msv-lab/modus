@@ -30,7 +30,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     - name: Docker build frontend
       run: >
-        SHORT_SHA=$(echo {{ github.sha }} | head -c 10) && \
-        IMAGE_REF=ghcr.io/{{ github.repository_owner }}/buildkit-frontend:$SHORT_SHA && \
-        docker build -t $IMAGE_REF -f /tmp/modus-frontend.Dockerfile . && \
+        SHORT_SHA=$(echo $GITHUB_SHA | head -c 10) &&
+        IMAGE_REF=ghcr.io/$GITHUB_REPOSITORY-buildkit-frontend:$SHORT_SHA &&
+        docker build -t $IMAGE_REF -f /tmp/modus-frontend.Dockerfile . &&
         docker push $IMAGE_REF
