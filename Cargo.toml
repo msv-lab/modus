@@ -25,6 +25,7 @@ fp-core = "0.1.9"
 colored = "2"
 dot = "0.1.4" # graphviz library
 thiserror = "1.0"
+ptree = "0.4" # pretty-print trees
 
 # For buildkit
 buildkit-frontend = "0.3.0"

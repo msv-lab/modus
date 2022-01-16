@@ -33,6 +33,7 @@ use crate::{
 };
 use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
 use logic::{Clause, IRTerm, Literal};
+use ptree::{item::StringItem, TreeBuilder};
 
 pub trait Auxiliary: Rename<Self> + Sized {
     fn aux() -> Self;
@@ -134,24 +135,8 @@ impl Tree {
     }
 
     /// Returns a string explaining the SLD tree, using indentation, etc.
-    pub fn explain(&self, rules: &[Clause]) -> String {
-        fn dfs(t: &Tree, rules: &[Clause], lines: &mut Vec<String>) {
-            let curr = if t.goal.is_empty() {
-                format!("{}| Success", " ".repeat(t.level))
-            } else {
-                format!(
-                    "{}| {} We require {}",
-                    " ".repeat(t.level),
-                    t.level,
-                    t.goal
-                        .iter()
-                        .map(|l| l.literal.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            };
-            lines.push(curr);
-
+    pub fn explain(&self, rules: &[Clause]) -> StringItem {
+        fn dfs(t: &Tree, rules: &[Clause], mut builder: &mut TreeBuilder) {
             let mut resolvent_pairs = t.resolvents.iter().collect::<Vec<_>>();
             resolvent_pairs.sort_by_key(|(k, _)| k.0);
 
@@ -162,12 +147,6 @@ impl Tree {
                     v.0.iter()
                         .map(|(t1, t2)| (t1.get_original().clone(), t2.clone()))
                         .collect();
-                // let variable_choice = format!(
-                //     "{}| Taking {}",
-                //     " ".repeat(t.level),
-                //     substitution_map.iter().map(|(prev, new_val)| prev.to_string() + " = " + &new_val.to_string()).collect::<Vec<_>>().join(", ")
-                // );
-                // lines.push(variable_choice);
 
                 let chosen_rule_body = match cid {
                     ClauseId::Rule(rid) => rules[*rid]
@@ -181,8 +160,7 @@ impl Tree {
                     ClauseId::Builtin(lit) => lit.substitute(&v.0).to_string(),
                 };
                 let curr_attempt = format!(
-                    "{}| {} requires {}",
-                    " ".repeat(t.level),
+                    "{} requires {}",
                     t.goal[*goal_id].literal,
                     if chosen_rule_body.is_empty() {
                         "nothing, it's a fact.".to_owned()
@@ -190,19 +168,28 @@ impl Tree {
                         chosen_rule_body
                     }
                 );
-                lines.push(curr_attempt);
-
-                dfs(&v.2, rules, lines);
+                builder.begin_child(curr_attempt);
+                dfs(&v.2, rules, &mut builder);
+                builder.end_child();
             }
 
-            if !t.goal.is_empty() && resolvent_pairs.is_empty() {
-                lines.push(format!("{}| Fail", " ".repeat(t.level)));
+            if t.goal.is_empty() {
+                builder.add_empty_child("Success".to_owned());
+            } else if !t.goal.is_empty() && resolvent_pairs.is_empty() {
+                builder.add_empty_child("Failure.".to_owned());
             }
         }
 
-        let mut lines: Vec<String> = Vec::new();
-        dfs(self, rules, &mut lines);
-        lines.join("\n")
+        let mut builder = TreeBuilder::new(format!(
+            "We require {}",
+            self.goal
+                .iter()
+                .map(|l| l.literal.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        dfs(self, rules, &mut builder);
+        builder.build()
     }
 }
 
