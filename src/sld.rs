@@ -312,7 +312,7 @@ impl fmt::Display for ResolutionError {
                 }
             }
             ResolutionError::InsufficientGroundness(literals) => {
-                write!(f, "insufficient groundess for {} goal(s)", literals.len())
+                write!(f, "insufficient groundness for {} goal(s)", literals.len())
             }
             ResolutionError::MaximumDepthExceeded(_, max_depth) => {
                 write!(f, "exceeded maximum depth of {}", max_depth)
