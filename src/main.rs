@@ -136,6 +136,18 @@ fn main() {
                         .long("verbose")
                         .help("Tell docker to print all the output"),
                 )
+                .arg(
+                    Arg::with_name("CUSTOM_FRONTEND")
+                        .long("custom-frontend")
+                        .value_name("IMAGE_REF")
+                        .takes_value(true)
+                        .required(true)
+                        .help("Specify a custom buildkit buildkit frontend to use")
+                        .long_help(concat!("Specify a custom frontend to use for buildkit. It must parse a JSON Modus build plan, and invoke relevant buildkit calls.\n\
+                                    The default is to use a pre-built one hosted on ghcr.io, with commit id ", env!("GIT_SHA"), ".\n\
+                                    This flag allows you to use something other than the default, for example for development on Modus itself."))
+                        .default_value(buildkit::FRONTEND_IMAGE),
+                )
         )
         .subcommand(
             App::new("proof")
@@ -224,7 +236,12 @@ fn main() {
                 std::process::exit(1)
             }
             let verbose = sub.is_present("VERBOSE");
-            match buildkit::build(&build_plan, context_dir, verbose) {
+            match buildkit::build(
+                &build_plan,
+                context_dir,
+                verbose,
+                sub.value_of("CUSTOM_FRONTEND").unwrap(),
+            ) {
                 Err(e) => {
                     print_build_error_and_exit(&e.to_string(), &err_writer);
                 }
