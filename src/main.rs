@@ -42,6 +42,7 @@ use codespan_reporting::{
     },
 };
 use colored::Colorize;
+use ptree::write_tree;
 use std::{ffi::OsStr, fs, path::Path};
 use std::{io::Write, path::PathBuf};
 use transpiler::render_tree;
@@ -317,7 +318,9 @@ fn main() {
                     if should_output_graph {
                         render_tree(&clauses, sld_result, &mut out_writer.lock());
                     } else if should_explain {
-                        println!("{}", sld_result.full_tree.explain(&clauses));
+                        let tree_item = sld_result.full_tree.explain(&clauses);
+                        write_tree(&tree_item, &mut out_writer.lock())
+                            .expect("Error when printing tree to stdout.");
                     } else {
                         let proof_result = Result::from(sld::sld(&clauses, goal, max_depth))
                             .map(|t| sld::proofs(&t, &clauses, goal));
