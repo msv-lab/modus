@@ -27,6 +27,7 @@ mod translate;
 mod transpiler;
 mod unification;
 mod wellformed;
+mod analysis;
 
 extern crate lazy_static;
 
