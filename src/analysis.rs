@@ -1,5 +1,7 @@
 //! This module provides helpers to perform (semantic) analysis over Modusfile ASTs.
 
+use petgraph::Graph;
+
 use crate::logic::Predicate;
 use crate::Modusfile;
 
@@ -27,5 +29,20 @@ impl ModusSemantics for Predicate {
             "run" | "copy" => Ok(Kind::Layer),
             _ => Ok(Kind::Logic),
         }
+    }
+}
+
+trait PredicateDependency {
+    /// Returns a graph where an edge, (n1, n2), means that the predicate
+    /// n1 depends on n2 to compute it's type.
+    ///
+    /// This uses the assumption that predicate names refer to a unique groundness
+    /// signature.
+    fn compute_dependency(&self) -> Graph<&str, &str>;
+}
+
+impl PredicateDependency for Modusfile {
+    fn compute_dependency(&self) -> Graph<&str, &str> {
+        todo!()
     }
 }
