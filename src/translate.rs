@@ -164,7 +164,7 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                     body: literals,
                 });
             }
-            Some(Expression::OperatorApplication(expr, op)) => clauses.extend(
+            Some(Expression::OperatorApplication(_, expr, op)) => clauses.extend(
                 Self::from(&ModusClause {
                     head: modus_clause.head.clone(),
                     body: Some(*expr.clone()),
@@ -197,7 +197,7 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                     }
                 }),
             ),
-            Some(Expression::And(expr1, expr2)) => {
+            Some(Expression::And(_, expr1, expr2)) => {
                 let c1 = Self::from(&ModusClause {
                     head: modus_clause.head.clone(),
                     body: Some(*expr1.clone()),
@@ -223,7 +223,7 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                     }
                 }
             }
-            Some(Expression::Or(expr1, expr2)) => {
+            Some(Expression::Or(_, expr1, expr2)) => {
                 let c1 = Self::from(&ModusClause {
                     head: modus_clause.head.clone(),
                     body: Some(*expr1.clone()),

@@ -29,6 +29,7 @@ use crate::unification::Rename;
 use std::convert::TryInto;
 use std::fmt;
 use std::fmt::Debug;
+use std::ops::Range;
 use std::str;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::{collections::HashSet, hash::Hash};
@@ -75,6 +76,11 @@ impl Predicate {
     pub fn is_operator(&self) -> bool {
         self.0.starts_with("_operator_")
     }
+
+    pub fn is_specific_operator(&self, name: &str) -> bool {
+        let pref = format!("_operator_{}", name);
+        self.0.starts_with(&pref)
+    }
 }
 
 impl From<String> for Predicate {
@@ -118,6 +124,12 @@ pub struct SpannedPosition {
 
     /// Length of this spanned position. Assumes ASCII text (i.e. each character is a byte).
     pub length: usize,
+}
+
+impl From<&SpannedPosition> for Range<usize> {
+    fn from(s: &SpannedPosition) -> Self {
+        s.offset..(s.offset + s.length)
+    }
 }
 
 impl From<Span<'_>> for SpannedPosition {

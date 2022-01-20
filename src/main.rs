@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
+mod analysis;
 mod buildkit;
 mod builtin;
 mod dockerfile;
@@ -27,7 +28,6 @@ mod translate;
 mod transpiler;
 mod unification;
 mod wellformed;
-mod analysis;
 
 extern crate lazy_static;
 
