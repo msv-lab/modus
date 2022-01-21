@@ -6,11 +6,13 @@
 //! Note that this does not necessarily mean that it is not solvable, but that it would require a different approach.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
-use codespan_reporting::diagnostic::Diagnostic;
+use codespan_reporting::diagnostic::{Diagnostic, Label};
+use petgraph::algo::has_path_connecting;
 
-use crate::logic::Predicate;
-use crate::modusfile::Expression;
+use crate::logic::{Predicate, SpannedPosition};
+use crate::modusfile::{Expression, ModusClause};
 use crate::Modusfile;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -43,102 +45,195 @@ impl Kind {
     }
 }
 
-// impl ModusSemantics for Expression {
-//     fn kind(&self) -> Result<Kind, Diagnostic<()>> {
-//         fn generate_diagnostic(
-//             span: &Option<SpannedPosition>,
-//             e1: &Expression,
-//             e2: &Expression,
-//             sem1: &Kind,
-//             sem2: &Kind,
-//         ) -> Diagnostic<()> {
-//             let message = "Couldn't determine type of `Expression`.";
-//             let mut labels = Vec::new();
-//             if let Some(span) = span {
-//                 labels.push(
-//                     Label::primary((), span.offset..(span.offset + span.length))
-//                         .with_message("This `Expression` type couldn't be determined."),
-//                 );
-//                 labels.push(
-//                     Label::secondary((), Range::from(e1.get_spanned_position().as_ref().unwrap()))
-//                         .with_message(format!("this is found to be a `{:?}` expression", sem1)),
-//                 );
-//                 labels.push(
-//                     Label::secondary((), Range::from(e2.get_spanned_position().as_ref().unwrap()))
-//                         .with_message(format!("this is found to be a `{:?}` expression", sem2)),
-//                 );
-//             }
-
-//             let diag = Diagnostic::error()
-//                 .with_message(message)
-//                 .with_labels(labels);
-//             diag
-//         }
-
-//         match self {
-//             Expression::Literal(lit) => lit.predicate.kind(),
-//             Expression::OperatorApplication(_, expr, op) => {
-//                 let expr_kind = expr.kind()?;
-//                 if expr_kind.is_image() && op.predicate.is_specific_operator("copy") {
-//                     Ok(Kind::Layer)
-//                 } else if expr_kind.is_image() {
-//                     Ok(Kind::Image)
-//                 } else {
-//                     Ok(expr_kind)
-//                 }
-//             }
-//             Expression::And(span, e1, e2) => {
-//                 // Could propogate multiple errors up instead of terminating early with '?'
-//                 let sem1 = e1.kind()?;
-//                 let sem2 = e2.kind()?;
-
-//                 let is_image_expr =
-//                     (sem1.is_image() && !sem2.is_image()) || (sem1.is_logic() && sem2.is_image());
-//                 let is_layer_expr = sem1.is_layer() && sem2.is_layer();
-//                 let is_logic_expr = sem1.is_logic() && sem2.is_logic();
-
-//                 if is_image_expr {
-//                     Ok(Kind::Image)
-//                 } else if is_layer_expr {
-//                     Ok(Kind::Layer)
-//                 } else if is_logic_expr {
-//                     Ok(Kind::Logic)
-//                 } else {
-//                     Err(generate_diagnostic(span, e1, e2, &sem1, &sem2))
-//                 }
-//             }
-//             Expression::Or(span, e1, e2) => {
-//                 let sem1 = e1.kind()?;
-//                 let sem2 = e2.kind()?;
-
-//                 let matching_expr = sem1 == sem2;
-//                 if matching_expr {
-//                     Ok(sem1)
-//                 } else {
-//                     Err(generate_diagnostic(span, e1, e2, &sem1, &sem2))
-//                 }
-//             }
-//         }
-//     }
-// }
+struct KindResult {
+    pred_kind: HashMap<String, Kind>,
+    errs: Vec<Diagnostic<()>>,
+}
 
 /// A trait for objects that have some interpretation w.r.t. the build graph.
 trait ModusSemantics {
-    /// Returns the kind based on it's name.
-    fn naive_predicate_kind(pred: Predicate) -> Kind {
-        match pred.0.as_str() {
-            "from" => Kind::Image,
-            "run" | "copy" => Kind::Layer,
-            _ => Kind::Logic,
-        }
-    }
-
-    fn kind(&self) -> Vec<Result<Kind, Diagnostic<()>>>;
+    fn kinds(&self) -> KindResult;
 }
 
 impl ModusSemantics for Modusfile {
-    fn kind(&self) -> Vec<Result<Kind, Diagnostic<()>>> {
-        todo!()
+    fn kinds(&self) -> KindResult {
+        /// Returns the kind based on it's name.
+        fn naive_predicate_kind(pred: &Predicate) -> Kind {
+            match pred.0.as_str() {
+                "from" => Kind::Image,
+                "run" | "copy" => Kind::Layer,
+                _ => Kind::Logic,
+            }
+        }
+
+        fn generate_diagnostic(
+            span: &Option<SpannedPosition>,
+            e1: &Expression,
+            e2: &Expression,
+            sem1: &Kind,
+            sem2: &Kind,
+        ) -> Diagnostic<()> {
+            let message = "Couldn't determine type of `Expression`.";
+            let mut labels = Vec::new();
+            if let Some(span) = span {
+                labels.push(
+                    Label::primary((), span.offset..(span.offset + span.length))
+                        .with_message("This `Expression` type couldn't be determined."),
+                );
+                labels.push(
+                    Label::secondary((), Range::from(e1.get_spanned_position().as_ref().unwrap()))
+                        .with_message(format!("this is found to be a `{:?}` expression", sem1)),
+                );
+                labels.push(
+                    Label::secondary((), Range::from(e2.get_spanned_position().as_ref().unwrap()))
+                        .with_message(format!("this is found to be a `{:?}` expression", sem2)),
+                );
+            }
+
+            let diag = Diagnostic::error()
+                .with_message(message)
+                .with_labels(labels);
+            diag
+        }
+
+        fn evaluate_kind(
+            expr: &Expression,
+            clauses: &Vec<ModusClause>,
+            pred_rid_map: &HashMap<&str, Vec<RuleId>>,
+            pred_kind: &mut HashMap<String, Kind>,
+        ) -> Result<Kind, Diagnostic<()>> {
+            match expr {
+                Expression::Literal(lit) => {
+                    // If we haven't seen this predicate kind before, evaluate it and cache it.
+                    // Note that we should be able to recursively compute predicate kind because we would've
+                    // already computed which predicates are problematic.
+                    if let Some(kind) = pred_kind.get(lit.predicate.0.as_str()) {
+                        return Ok(kind.clone());
+                    }
+
+                    // TODO: cleanup this expression
+                    // NOTE: there may be multiple expression bodies related to some predicate name.
+                    // We just take the first one. We could/should emit some kind of warning maybe.
+                    if let Some(Some(expr_body)) =
+                        pred_rid_map.get(lit.predicate.0.as_str()).map(|rids| {
+                            rids.into_iter()
+                                .filter_map(|rid| clauses[*rid].body.as_ref())
+                                .next()
+                        })
+                    {
+                        let k = evaluate_kind(&expr_body, clauses, pred_rid_map, pred_kind)?;
+                        pred_kind.insert(lit.predicate.0.clone(), k.clone());
+                        Ok(k)
+                    } else {
+                        Ok(naive_predicate_kind(&lit.predicate))
+                    }
+                }
+                Expression::OperatorApplication(_, expr, op) => {
+                    let expr_kind = evaluate_kind(expr, clauses, pred_rid_map, pred_kind)?;
+                    println!("{}", op.predicate);
+                    if expr_kind.is_image() && op.predicate.0 == "copy" {
+                        Ok(Kind::Layer)
+                    } else {
+                        Ok(expr_kind)
+                    }
+                }
+                Expression::And(span, e1, e2) => {
+                    // Could propogate multiple errors up instead of terminating early with '?'
+                    let sem1 = evaluate_kind(e1, clauses, pred_rid_map, pred_kind)?;
+                    let sem2 = evaluate_kind(e2, clauses, pred_rid_map, pred_kind)?;
+
+                    let is_image_expr = (sem1.is_image() && !sem2.is_image())
+                        || (sem1.is_logic() && sem2.is_image());
+                    let is_layer_expr = sem1.is_layer() && sem2.is_layer();
+                    let is_logic_expr = sem1.is_logic() && sem2.is_logic();
+
+                    if is_image_expr {
+                        Ok(Kind::Image)
+                    } else if is_layer_expr {
+                        Ok(Kind::Layer)
+                    } else if is_logic_expr {
+                        Ok(Kind::Logic)
+                    } else {
+                        Err(generate_diagnostic(span, e1, e2, &sem1, &sem2))
+                    }
+                }
+                Expression::Or(span, e1, e2) => {
+                    let sem1 = evaluate_kind(e1, clauses, pred_rid_map, pred_kind)?;
+                    let sem2 = evaluate_kind(e2, clauses, pred_rid_map, pred_kind)?;
+
+                    let matching_expr = sem1 == sem2;
+                    if matching_expr {
+                        Ok(sem1)
+                    } else {
+                        Err(generate_diagnostic(span, e1, e2, &sem1, &sem2))
+                    }
+                }
+            }
+        }
+
+        let pred_graph = self.compute_dependency();
+
+        // Every node in a non-trivial strongly connected component (scc) must be part of
+        // a non-trivial cycle.
+        // So if there's a path from a node n to a node that's in a non-trivial scc, then
+        // node n depends on something involved in a cyclic dependency, and we shouldn't
+        // bother trying to evaluate it.
+        let sccs = petgraph::algo::tarjan_scc(&pred_graph);
+        // This is probably slow, could optimise this by flipping edge direction and computing reachibility through DFS?
+        let mut problem_nodes = sccs
+            .into_iter()
+            .filter(|ids| ids.len() > 1)
+            .flatten()
+            .collect::<HashSet<_>>();
+        for node in pred_graph.node_indices() {
+            if problem_nodes.contains(&node) {
+                continue;
+            }
+
+            if problem_nodes
+                .iter()
+                .any(|c_node| has_path_connecting(&pred_graph, node, *c_node, None))
+            {
+                problem_nodes.insert(node);
+            }
+        }
+        let problem_preds = problem_nodes
+            .into_iter()
+            .map(|id| pred_graph[id])
+            .collect::<HashSet<_>>();
+
+        // Compute the index positions of the predicates
+        type RuleId = usize; // index position w.r.t. clauses
+        let mut pred_to_rid: HashMap<&str, Vec<RuleId>> = HashMap::new();
+        for (i, c) in self.0.iter().enumerate() {
+            let curr = pred_to_rid.entry(&c.head.predicate.0).or_default();
+            curr.push(i);
+        }
+
+        // Then evaluate all predicate kinds that are not a problem.
+        let mut pred_kind: HashMap<String, Kind> = HashMap::new();
+        let mut errs = Vec::new();
+
+        for c in self
+            .0
+            .iter()
+            .filter(|c| !problem_preds.contains(c.head.predicate.0.as_str()) && c.body.is_some())
+        {
+            let res = evaluate_kind(
+                &c.body.as_ref().unwrap(),
+                &self.0,
+                &pred_to_rid,
+                &mut pred_kind,
+            );
+            match res {
+                Ok(kind) => {
+                    pred_kind.insert(c.head.predicate.0.clone(), kind);
+                }
+                Err(e) => errs.push(e),
+            }
+        }
+
+        KindResult { pred_kind, errs }
     }
 }
 
@@ -214,9 +309,16 @@ impl PredicateDependency for Modusfile {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use petgraph::algo::{is_cyclic_directed, is_isomorphic};
 
-    use crate::{analysis::PredicateDependency, modusfile::Modusfile};
+    use crate::{
+        analysis::{ModusSemantics, PredicateDependency},
+        modusfile::Modusfile,
+    };
+
+    // TODO: more unit tests
 
     #[test]
     fn acyclic_dependency() {
@@ -230,7 +332,7 @@ mod tests {
         expected_dep.extend_with_edges(&[(f, b), (b, bz)]);
 
         let actual_dep = mf.compute_dependency();
-        assert!(is_isomorphic(&expected_dep, &actual_dep));
+        assert!(is_isomorphic(&expected_dep, &actual_dep)); // isomorphism check may be expensive
         assert!(!is_cyclic_directed(&actual_dep));
     }
 
@@ -252,5 +354,55 @@ mod tests {
         let actual_dep = mf.compute_dependency();
         assert!(is_isomorphic(&expected_dep, &actual_dep));
         assert!(is_cyclic_directed(&actual_dep));
+    }
+
+    #[test]
+    fn simple_image_predicate_kind() {
+        let clauses = vec!["a :- from(\"ubuntu\"), run(\"apt-get update\")."];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+
+        let kind_res = mf.kinds();
+        assert!(kind_res.pred_kind.contains_key("a"));
+        assert_eq!(&Kind::Image, kind_res.pred_kind.get("a").unwrap());
+    }
+
+    #[test]
+    fn layer_predicate_kind() {
+        let clauses = vec![
+            "a :- from(\"ubuntu\"), run(\"apt-get update\").",
+            "b :- a::copy(\".\", \".\").",
+        ];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+
+        let kind_res = mf.kinds();
+        assert_eq!(Some(&Kind::Layer), kind_res.pred_kind.get("b"));
+    }
+
+    #[test]
+    fn simple_indirect_kind() {
+        let clauses = vec![
+            "a(X) :- from(X), run(\"apt-get update\").",
+            "b(X) :- a(X).",
+            "c(X) :- b(X).",
+        ];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+
+        let kind_res = mf.kinds();
+        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get("a"));
+        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get("b"));
+        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get("c"));
+    }
+
+    #[test]
+    fn ignores_recursion() {
+        let clauses = vec![
+            "foo(X) :- bar(X).",
+            "bar(X) :- foo(X).",
+            "a(X) :- from(X), run(\"apt-get update\").",
+        ];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+
+        let kind_res = mf.kinds();
+        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get("a"));
     }
 }

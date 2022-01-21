@@ -167,6 +167,7 @@ fn main() {
                 .arg_from_usage("-e --explain 'Prints out an explanation of the steps taken in resolution.'")
                 .arg_from_usage("-g --graph 'Outputs a (DOT) graph that of the SLD tree traversed in resolution.'"),
         )
+        // TODO: check subcommand that uses analysis.rs
         .get_matches();
 
     let out_writer = StandardStream::stdout(codespan_reporting::term::termcolor::ColorChoice::Auto);

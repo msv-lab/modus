@@ -76,11 +76,6 @@ impl Predicate {
     pub fn is_operator(&self) -> bool {
         self.0.starts_with("_operator_")
     }
-
-    pub fn is_specific_operator(&self, name: &str) -> bool {
-        let pref = format!("_operator_{}", name);
-        self.0.starts_with(&pref)
-    }
 }
 
 impl From<String> for Predicate {
