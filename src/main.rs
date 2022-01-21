@@ -52,6 +52,8 @@ use modusfile::Modusfile;
 
 use crate::logic::Clause;
 
+use analysis::ModusSemantics;
+
 fn get_file(path: &Path) -> SimpleFile<&str, String> {
     let file_name: &str = path
         .file_name()
@@ -167,7 +169,16 @@ fn main() {
                 .arg_from_usage("-e --explain 'Prints out an explanation of the steps taken in resolution.'")
                 .arg_from_usage("-g --graph 'Outputs a (DOT) graph that of the SLD tree traversed in resolution.'"),
         )
-        // TODO: check subcommand that uses analysis.rs
+        .subcommand(
+            App::new("check")
+                .about("Analyses a Modusfile and checks the predicate kinds.")
+                .arg(
+                    Arg::with_name("FILE")
+                        .required(true)
+                        .help("Sets the input Modusfile")
+                        .index(1),
+                )
+        )
         .get_matches();
 
     let out_writer = StandardStream::stdout(codespan_reporting::term::termcolor::ColorChoice::Auto);
@@ -351,6 +362,24 @@ fn main() {
                         error
                     )
                 }
+            }
+        }
+        ("check", Some(sub)) => {
+            let input_file = sub.value_of("FILE").unwrap();
+            let file = get_file(Path::new(input_file));
+            match file.source().parse::<Modusfile>() {
+                Ok(mf) => {
+                    let kind_res = mf.kinds();
+                    for (k, v) in kind_res.pred_kind.iter() {
+                        // TODO: use span?
+                        println!("{} is {:?}", k, v);
+                    }
+                    for err in kind_res.errs {
+                        term::emit(&mut err_writer.lock(), &config, &file, &err)
+                            .expect("Error when printing to stderr.")
+                    }
+                }
+                Err(e) => eprintln!("{}", e),
             }
         }
         _ => (),

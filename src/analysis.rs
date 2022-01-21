@@ -16,7 +16,7 @@ use crate::modusfile::{Expression, ModusClause};
 use crate::Modusfile;
 
 #[derive(Debug, PartialEq, Clone)]
-enum Kind {
+pub enum Kind {
     Image,
     Layer,
     Logic,
@@ -45,13 +45,13 @@ impl Kind {
     }
 }
 
-struct KindResult {
-    pred_kind: HashMap<String, Kind>,
-    errs: Vec<Diagnostic<()>>,
+pub struct KindResult {
+    pub pred_kind: HashMap<String, Kind>,
+    pub errs: Vec<Diagnostic<()>>,
 }
 
 /// A trait for objects that have some interpretation w.r.t. the build graph.
-trait ModusSemantics {
+pub trait ModusSemantics {
     fn kinds(&self) -> KindResult;
 }
 
@@ -111,16 +111,16 @@ impl ModusSemantics for Modusfile {
                         return Ok(kind.clone());
                     }
 
-                    // TODO: cleanup this expression
                     // NOTE: there may be multiple expression bodies related to some predicate name.
                     // We just take the first one. We could/should emit some kind of warning maybe.
-                    if let Some(Some(expr_body)) =
-                        pred_rid_map.get(lit.predicate.0.as_str()).map(|rids| {
-                            rids.into_iter()
-                                .filter_map(|rid| clauses[*rid].body.as_ref())
-                                .next()
-                        })
-                    {
+                    let maybe_expr = pred_rid_map.get(lit.predicate.0.as_str()).and_then(|rids| {
+                        // if it doesn't have a body, it won't give us any new information,
+                        // so skip facts
+                        rids.into_iter()
+                            .filter_map(|rid| clauses[*rid].body.as_ref())
+                            .next()
+                    });
+                    if let Some(expr_body) = maybe_expr {
                         let k = evaluate_kind(&expr_body, clauses, pred_rid_map, pred_kind)?;
                         pred_kind.insert(lit.predicate.0.clone(), k.clone());
                         Ok(k)
@@ -130,7 +130,6 @@ impl ModusSemantics for Modusfile {
                 }
                 Expression::OperatorApplication(_, expr, op) => {
                     let expr_kind = evaluate_kind(expr, clauses, pred_rid_map, pred_kind)?;
-                    println!("{}", op.predicate);
                     if expr_kind.is_image() && op.predicate.0 == "copy" {
                         Ok(Kind::Layer)
                     } else {
@@ -225,9 +224,22 @@ impl ModusSemantics for Modusfile {
                 &pred_to_rid,
                 &mut pred_kind,
             );
+
             match res {
                 Ok(kind) => {
-                    pred_kind.insert(c.head.predicate.0.clone(), kind);
+                    if let Some(k) = pred_kind.get(&c.head.predicate.0) {
+                        // display a warning if the predicate kind is different using
+                        // a different expr body
+                        if k != &kind {
+                            errs.push(
+                                Diagnostic::warning().with_message(
+                                    "A matching predicate rule has a different kind.",
+                                ), // TODO labels
+                            )
+                        }
+                    } else {
+                        pred_kind.insert(c.head.predicate.0.clone(), kind);
+                    }
                 }
                 Err(e) => errs.push(e),
             }
@@ -318,8 +330,6 @@ mod tests {
         modusfile::Modusfile,
     };
 
-    // TODO: more unit tests
-
     #[test]
     fn acyclic_dependency() {
         let clauses = vec!["foo(X) :- bar(X).", "bar(X) :- baz(X)."];
@@ -376,6 +386,17 @@ mod tests {
 
         let kind_res = mf.kinds();
         assert_eq!(Some(&Kind::Layer), kind_res.pred_kind.get("b"));
+    }
+
+    #[test]
+    fn simple_logic_predicate_kind() {
+        let clauses = vec![
+            "b(X) :- X = \"test\".",
+        ];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+
+        let kind_res = mf.kinds();
+        assert_eq!(Some(&Kind::Logic), kind_res.pred_kind.get("b"));
     }
 
     #[test]
