@@ -90,15 +90,14 @@ impl ModusSemantics for Modusfile {
                 );
             }
 
-            let diag = Diagnostic::error()
+            Diagnostic::error()
                 .with_message(message)
-                .with_labels(labels);
-            diag
+                .with_labels(labels)
         }
 
         fn evaluate_kind(
             expr: &Expression,
-            clauses: &Vec<ModusClause>,
+            clauses: &[ModusClause],
             pred_rid_map: &HashMap<&str, Vec<RuleId>>,
             pred_kind: &mut HashMap<String, Kind>,
         ) -> Result<Kind, Diagnostic<()>> {
@@ -116,12 +115,12 @@ impl ModusSemantics for Modusfile {
                     let maybe_expr = pred_rid_map.get(lit.predicate.0.as_str()).and_then(|rids| {
                         // if it doesn't have a body, it won't give us any new information,
                         // so skip facts
-                        rids.into_iter()
+                        rids.iter()
                             .filter_map(|rid| clauses[*rid].body.as_ref())
                             .next()
                     });
                     if let Some(expr_body) = maybe_expr {
-                        let k = evaluate_kind(&expr_body, clauses, pred_rid_map, pred_kind)?;
+                        let k = evaluate_kind(expr_body, clauses, pred_rid_map, pred_kind)?;
                         pred_kind.insert(lit.predicate.0.clone(), k.clone());
                         Ok(k)
                     } else {
@@ -219,7 +218,7 @@ impl ModusSemantics for Modusfile {
             .filter(|c| !problem_preds.contains(c.head.predicate.0.as_str()) && c.body.is_some())
         {
             let res = evaluate_kind(
-                &c.body.as_ref().unwrap(),
+                c.body.as_ref().unwrap(),
                 &self.0,
                 &pred_to_rid,
                 &mut pred_kind,
@@ -231,10 +230,20 @@ impl ModusSemantics for Modusfile {
                         // display a warning if the predicate kind is different using
                         // a different expr body
                         if k != &kind {
+                            // TODO: also display the original span
+                            let labels = if let Some(span_curr) =
+                                c.body.as_ref().unwrap().get_spanned_position().as_ref()
+                            {
+                                vec![Label::primary((), Range::from(span_curr)).with_message(
+                                    format!("this was found to be a {:?} kind", kind),
+                                )]
+                            } else {
+                                Vec::new()
+                            };
                             errs.push(
-                                Diagnostic::warning().with_message(
-                                    "A matching predicate rule has a different kind.",
-                                ), // TODO labels
+                                Diagnostic::warning()
+                                    .with_message("A matching predicate rule has a different kind.")
+                                    .with_labels(labels),
                             )
                         }
                     } else {
@@ -390,9 +399,7 @@ mod tests {
 
     #[test]
     fn simple_logic_predicate_kind() {
-        let clauses = vec![
-            "b(X) :- X = \"test\".",
-        ];
+        let clauses = vec!["b(X) :- X = \"test\"."];
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
         let kind_res = mf.kinds();
