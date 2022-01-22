@@ -129,9 +129,7 @@ impl ModusSemantics for Modusfile {
                     let maybe_expr = pred_rid_map.get(lit.predicate.0.as_str()).and_then(|rids| {
                         // if it doesn't have a body, it won't give us any new information,
                         // so skip facts
-                        rids.iter()
-                            .filter_map(|rid| clauses[*rid].body.as_ref())
-                            .next()
+                        rids.iter().find_map(|rid| clauses[*rid].body.as_ref())
                     });
                     if let Some(expr_body) = maybe_expr {
                         let k = evaluate_kind(expr_body, clauses, pred_rid_map, pred_kind)?;
@@ -191,7 +189,8 @@ impl ModusSemantics for Modusfile {
         // node n depends on something involved in a cyclic dependency, and we shouldn't
         // bother trying to evaluate it.
         let sccs = petgraph::algo::tarjan_scc(&pred_graph);
-        // This is probably slow, could optimise this by flipping edge direction and computing reachibility through DFS?
+        // TODO: This is probably slow, could optimise this by flipping edge direction and
+        // computing reachibility through DFS, etc.?
         let mut problem_nodes = sccs
             .into_iter()
             .filter(|ids| ids.len() > 1)
@@ -241,30 +240,46 @@ impl ModusSemantics for Modusfile {
 
             match res {
                 Ok(kind) => {
-                    if let Some(k) = pred_kind.get(&c.head.predicate.0) {
-                        // display a warning if the predicate kind is different using
-                        // a different expr body
+                    let pred_name = c.head.predicate.0.as_str();
+                    if let Some(k) = pred_kind.get(pred_name) {
                         if k != &kind {
-                            // TODO: also display the original span
-                            let labels = if let Some(span_curr) =
-                                c.body.as_ref().unwrap().get_spanned_position().as_ref()
+                            // display a warning if the predicate kind is different using
+                            // a different expr body
+                            let maybe_curr_span =
+                                c.body.as_ref().unwrap().get_spanned_position().as_ref();
+                            let maybe_prev_span = pred_to_rid[pred_name].iter().find_map(|rid| {
+                                self.0[*rid]
+                                    .body
+                                    .as_ref()
+                                    .and_then(|e| e.get_spanned_position().as_ref())
+                            });
+                            let labels = if let (Some(span_curr), Some(span_prev)) =
+                                (maybe_curr_span, maybe_prev_span)
                             {
-                                vec![Label::primary((), Range::from(span_curr)).with_message(
-                                    format!("this was found to be a {:?} kind", kind),
-                                )]
+                                vec![
+                                    Label::secondary((), Range::from(span_prev)).with_message(
+                                        format!("previous kind was found to be {:?}", k),
+                                    ),
+                                    Label::primary((), Range::from(span_curr)).with_message(
+                                        format!("but this was found to be a {:?} kind", kind),
+                                    ),
+                                ]
                             } else {
                                 Vec::new()
                             };
                             errs.push(
                                 Diagnostic::warning()
-                                    .with_message("A matching predicate rule has a different kind.")
+                                    .with_message(
+                                        "A rule with matching head predicate has a different kind.",
+                                    )
                                     .with_labels(labels),
-                            )
+                            );
+                            continue;
                         }
-                    } else {
-                        messages.push(generate_msg_diagnostic(c, &kind));
-                        pred_kind.insert(c.head.predicate.0.clone(), kind);
                     }
+
+                    messages.push(generate_msg_diagnostic(c, &kind));
+                    pred_kind.insert(pred_name.to_owned(), kind);
                 }
                 Err(e) => errs.push(e),
             }
