@@ -45,8 +45,8 @@ impl Kind {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct KindResult {
-    #[cfg(test)]
     pred_kind: HashMap<String, Kind>,
 
     /// For convenience, informational diagnostic messages that describe the predicate
