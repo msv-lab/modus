@@ -46,6 +46,9 @@ impl Kind {
 }
 
 pub struct KindResult {
+    #[cfg(test)]
+    pred_kind: HashMap<String, Kind>,
+
     /// For convenience, informational diagnostic messages that describe the predicate
     /// kind using spans.
     pub messages: Vec<Diagnostic<()>>,
@@ -285,6 +288,7 @@ impl ModusSemantics for Modusfile {
         }
 
         KindResult {
+            pred_kind,
             messages,
             errs,
         }
