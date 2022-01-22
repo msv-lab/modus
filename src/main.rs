@@ -370,9 +370,9 @@ fn main() {
             match file.source().parse::<Modusfile>() {
                 Ok(mf) => {
                     let kind_res = mf.kinds();
-                    for (k, v) in kind_res.pred_kind.iter() {
-                        // TODO: use span?
-                        println!("{} is {:?}", k, v);
+                    for msg in kind_res.messages {
+                        term::emit(&mut out_writer.lock(), &config, &file, &msg)
+                            .expect("Error when printing to stdout");
                     }
                     for err in kind_res.errs {
                         term::emit(&mut err_writer.lock(), &config, &file, &err)

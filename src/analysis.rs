@@ -46,7 +46,10 @@ impl Kind {
 }
 
 pub struct KindResult {
-    pub pred_kind: HashMap<String, Kind>,
+    pred_kind: HashMap<String, Kind>,
+    /// For convenience, informational diagnostic messages that describe the predicate
+    /// kind using spans.
+    pub messages: Vec<Diagnostic<()>>,
     pub errs: Vec<Diagnostic<()>>,
 }
 
@@ -66,19 +69,19 @@ impl ModusSemantics for Modusfile {
             }
         }
 
-        fn generate_diagnostic(
+        fn generate_err_diagnostic(
             span: &Option<SpannedPosition>,
             e1: &Expression,
             e2: &Expression,
             sem1: &Kind,
             sem2: &Kind,
         ) -> Diagnostic<()> {
-            let message = "Couldn't determine type of `Expression`.";
+            let message = "Couldn't determine kind of `Expression`.";
             let mut labels = Vec::new();
             if let Some(span) = span {
                 labels.push(
-                    Label::primary((), span.offset..(span.offset + span.length))
-                        .with_message("This `Expression` type couldn't be determined."),
+                    Label::primary((), Range::from(span))
+                        .with_message("This `Expression` kind couldn't be determined."),
                 );
                 labels.push(
                     Label::secondary((), Range::from(e1.get_spanned_position().as_ref().unwrap()))
@@ -93,6 +96,17 @@ impl ModusSemantics for Modusfile {
             Diagnostic::error()
                 .with_message(message)
                 .with_labels(labels)
+        }
+
+        fn generate_msg_diagnostic(c1: &ModusClause, k1: &Kind) -> Diagnostic<()> {
+            let message = format!("{} is of kind {:?}", c1.head.predicate.0, k1);
+            let labels = if let Some(span) = c1.body.as_ref().unwrap().get_spanned_position() {
+                vec![Label::primary((), Range::from(span))
+                    .with_message(format!("since this is found to be a {:?} expression", k1))]
+            } else {
+                Vec::new()
+            };
+            Diagnostic::note().with_message(message).with_labels(labels)
         }
 
         fn evaluate_kind(
@@ -152,7 +166,7 @@ impl ModusSemantics for Modusfile {
                     } else if is_logic_expr {
                         Ok(Kind::Logic)
                     } else {
-                        Err(generate_diagnostic(span, e1, e2, &sem1, &sem2))
+                        Err(generate_err_diagnostic(span, e1, e2, &sem1, &sem2))
                     }
                 }
                 Expression::Or(span, e1, e2) => {
@@ -163,7 +177,7 @@ impl ModusSemantics for Modusfile {
                     if matching_expr {
                         Ok(sem1)
                     } else {
-                        Err(generate_diagnostic(span, e1, e2, &sem1, &sem2))
+                        Err(generate_err_diagnostic(span, e1, e2, &sem1, &sem2))
                     }
                 }
             }
@@ -210,6 +224,7 @@ impl ModusSemantics for Modusfile {
 
         // Then evaluate all predicate kinds that are not a problem.
         let mut pred_kind: HashMap<String, Kind> = HashMap::new();
+        let mut messages = Vec::new();
         let mut errs = Vec::new();
 
         for c in self
@@ -247,6 +262,7 @@ impl ModusSemantics for Modusfile {
                             )
                         }
                     } else {
+                        messages.push(generate_msg_diagnostic(c, &kind));
                         pred_kind.insert(c.head.predicate.0.clone(), kind);
                     }
                 }
@@ -254,7 +270,11 @@ impl ModusSemantics for Modusfile {
             }
         }
 
-        KindResult { pred_kind, errs }
+        KindResult {
+            pred_kind,
+            messages,
+            errs,
+        }
     }
 }
 
