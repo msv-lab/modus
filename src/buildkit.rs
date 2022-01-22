@@ -64,7 +64,10 @@ use std::io::Write;
 
 use thiserror::Error;
 
-pub const FRONTEND_IMAGE: &str = concat!("ghcr.io/modus-continens/modus-buildkit-frontend:", env!("GIT_SHA"));
+pub const FRONTEND_IMAGE: &str = concat!(
+    "ghcr.io/modus-continens/modus-buildkit-frontend:",
+    env!("GIT_SHA")
+);
 
 #[derive(Error, Debug)]
 pub enum BuildError {
@@ -247,7 +250,7 @@ pub fn build<P: AsRef<Path>>(
     build_plan: &BuildPlan,
     context: P,
     verbose: bool,
-    frontend_image: &str
+    frontend_image: &str,
 ) -> Result<Vec<String>, BuildError> {
     let mut signals = SignalsInfo::with_exfiltrator(&[SIGINT, SIGTERM, SIGCHLD], SignalOnly)
         .expect("Failed to create signal handler.");

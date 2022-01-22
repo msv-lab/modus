@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
+mod analysis;
 mod buildkit;
 mod builtin;
 mod dockerfile;
@@ -50,6 +51,8 @@ use transpiler::render_tree;
 use modusfile::Modusfile;
 
 use crate::logic::Clause;
+
+use analysis::ModusSemantics;
 
 fn get_file(path: &Path) -> SimpleFile<&str, String> {
     let file_name: &str = path
@@ -165,6 +168,16 @@ fn main() {
                 )
                 .arg_from_usage("-e --explain 'Prints out an explanation of the steps taken in resolution.'")
                 .arg_from_usage("-g --graph 'Outputs a (DOT) graph that of the SLD tree traversed in resolution.'"),
+        )
+        .subcommand(
+            App::new("check")
+                .about("Analyses a Modusfile and checks the predicate kinds.")
+                .arg(
+                    Arg::with_name("FILE")
+                        .required(true)
+                        .help("Sets the input Modusfile")
+                        .index(1),
+                )
         )
         .get_matches();
 
@@ -303,6 +316,15 @@ fn main() {
                     modus_f.0.len()
                 ),
                 (Ok(modus_f), Some(l)) => {
+                    // we don't attempt SLD if there are any kind errors
+                    let kind_res = modus_f.kinds();
+                    if !kind_res.errs.is_empty()  {
+                        for err in kind_res.errs {
+                            term::emit(&mut err_writer.lock(), &config, &file, &err).expect("Error writing to stderr.")
+                        }
+                        return;
+                    }
+
                     let max_depth = 20;
                     let clauses: Vec<Clause> = modus_f
                         .0
@@ -349,6 +371,24 @@ fn main() {
                         error
                     )
                 }
+            }
+        }
+        ("check", Some(sub)) => {
+            let input_file = sub.value_of("FILE").unwrap();
+            let file = get_file(Path::new(input_file));
+            match file.source().parse::<Modusfile>() {
+                Ok(mf) => {
+                    let kind_res = mf.kinds();
+                    for msg in kind_res.messages {
+                        term::emit(&mut out_writer.lock(), &config, &file, &msg)
+                            .expect("Error when printing to stdout");
+                    }
+                    for err in kind_res.errs {
+                        term::emit(&mut err_writer.lock(), &config, &file, &err)
+                            .expect("Error when printing to stderr.")
+                    }
+                }
+                Err(e) => eprintln!("{}", e),
             }
         }
         _ => (),
