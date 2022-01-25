@@ -33,7 +33,9 @@ jobs:
       if: github.event_name != 'pull_request'
       run: >
         SHORT_SHA=$(echo $GITHUB_SHA | head -c 10) &&
-        IMAGE_REF=ghcr.io/$GITHUB_REPOSITORY-buildkit-frontend:$SHORT_SHA &&
+        IMAGE_BASE=ghcr.io/$GITHUB_REPOSITORY-buildkit-frontend &&
+        IMAGE_REF=$IMAGE_BASE:$SHORT_SHA &&
         docker build -t $IMAGE_REF -f /tmp/modus-frontend.Dockerfile . &&
-        docker tag $IMAGE_REF ghcr.io/$GITHUB_REPOSITORY-buildkit-frontend:latest &&
-        docker push $IMAGE_REF
+        docker tag $IMAGE_REF $IMAGE_BASE:latest &&
+        docker push $IMAGE_REF &&
+        docker push $IMAGE_BASE:latest
