@@ -316,6 +316,9 @@ impl ModusSemantics for Modusfile {
     }
 }
 
+// TODO: change approach to computing signature dependency instead, so each node would be
+// a (predicate, num_args) pair instead of just predicate.
+// Also, should compare approach with how imagegen does it to ensure we are consistent.
 trait PredicateDependency {
     /// Returns a graph where an edge, (n1, n2), means that the predicate
     /// n1 depends on n2 to compute it's type.
