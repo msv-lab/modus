@@ -318,9 +318,10 @@ fn main() {
                 (Ok(modus_f), Some(l)) => {
                     // we don't attempt SLD if there are any kind errors
                     let kind_res = modus_f.kinds();
-                    if !kind_res.errs.is_empty()  {
+                    if !kind_res.errs.is_empty() {
                         for err in kind_res.errs {
-                            term::emit(&mut err_writer.lock(), &config, &file, &err).expect("Error writing to stderr.")
+                            term::emit(&mut err_writer.lock(), &config, &file, &err)
+                                .expect("Error writing to stderr.")
                         }
                         return;
                     }
