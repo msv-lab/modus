@@ -11,6 +11,7 @@ build_deps(profile) :-
   cargo_build(profile).
 
 build(profile) :-
+  profile = "debug",
   build_env,
   build_deps(profile),
   copy(".", "."),
@@ -19,6 +20,11 @@ build(profile) :-
   # done by build_deps, we touch all the source files to force a re-build.
   run("touch src/*"),
   cargo_build(profile).
+
+build("release") :-
+  build_env,
+  copy(".", "."),
+  cargo_build("release").
 
 frontend_img(profile) :-
   (run_env,
