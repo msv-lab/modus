@@ -23,7 +23,10 @@ build(profile) :-
 frontend_img(profile) :-
   (run_env,
     profile_to_target_folder(profile, target_folder),
-    (build(profile))::copy(f"${target_folder}/buildkit-frontend", "./buildkit-frontend")
+    # Work-around for https://github.com/modus-continens/modus/issues/98
+    # We need to transpile this to Dockerfile to bootstrap the frontend.
+    # Normally just saying f"${target_folder}/..." is good enough.
+    (build(profile))::copy(f"/usr/src/app/${target_folder}/buildkit-frontend", "./buildkit-frontend")
   )::set_entrypoint("./buildkit-frontend").
 
 modus(profile) :-
