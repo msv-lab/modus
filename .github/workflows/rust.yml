@@ -2,7 +2,7 @@ name: Rust
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, ci ]
   pull_request:
     branches: [ main ]
 
@@ -35,4 +35,5 @@ jobs:
         SHORT_SHA=$(echo $GITHUB_SHA | head -c 10) &&
         IMAGE_REF=ghcr.io/$GITHUB_REPOSITORY-buildkit-frontend:$SHORT_SHA &&
         docker build -t $IMAGE_REF -f /tmp/modus-frontend.Dockerfile . &&
+        docker tag $IMAGE_REF ghcr.io/$GITHUB_REPOSITORY-buildkit-frontend:latest &&
         docker push $IMAGE_REF
