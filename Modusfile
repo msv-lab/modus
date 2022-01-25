@@ -1,5 +1,5 @@
-build_env :- from("rust").
-run_env :- (from("debian"))::set_workdir("/usr/src/app").
+build_env :- from("rust")::set_workdir("/usr/src/app").
+run_env :- from("debian")::set_workdir("/usr/src/app").
 
 cargo_build("debug") :- run(f"cargo build").
 cargo_build("release") :- run(f"cargo build --release").
