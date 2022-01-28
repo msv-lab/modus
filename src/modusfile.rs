@@ -482,7 +482,7 @@ pub mod parser {
     /// Parses a substring outside of the expansion part of a format string's content.
     pub fn outside_format_expansion(i: Span) -> IResult<Span, Span> {
         // We want to parse until we see '$', except if it was preceded with escape char.
-        recognize(opt(escaped(none_of("\\$"), '\\', one_of("$\\nrt0\n"))))(i)
+        recognize(opt(escaped(none_of("\\$"), '\\', one_of("$\"\\nrt0\n"))))(i)
     }
 
     fn modus_format_string(i: Span) -> IResult<Span, (SpannedPosition, String)> {
