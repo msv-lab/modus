@@ -361,7 +361,8 @@ mod tests {
     fn format_string_translation_with_escape() {
         setup();
 
-        let case = "use ${feature} like this \\${...}";
+        let case = r#"use ${feature} like this \${...} \
+                      foobar"#;
 
         let lits = vec![
             logic::Literal {
@@ -403,12 +404,12 @@ mod tests {
             logic::Literal {
                 position: Some(SpannedPosition {
                     offset: 16,
-                    length: 18,
+                    length: 49,
                 }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(2),
-                    IRTerm::Constant(" like this ${...}".to_owned()),
+                    IRTerm::Constant(" like this ${...} foobar".to_owned()),
                     IRTerm::AuxiliaryVariable(3),
                 ],
             },
