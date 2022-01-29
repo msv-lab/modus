@@ -285,7 +285,7 @@ impl Substitute<IRTerm> for GoalWithHistory {
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug, Hash)]
 pub enum ResolutionError {
     /// Contains the literal with the unknown predicate name.
     UnknownPredicate(Literal),
@@ -298,7 +298,7 @@ pub enum ResolutionError {
     /// Contains the literal that didn't match with any rule head.
     InsufficientRules(Literal),
     /// Contains the set of inconsistent signatures.
-    InconsistentGroundnessSignature(HashSet<Signature>),
+    InconsistentGroundnessSignature(Vec<Signature>),
 }
 
 impl fmt::Display for ResolutionError {
@@ -408,7 +408,7 @@ pub struct SLDResult {
     /// The subset of the full SLD tree that leads to paths with empty goals (i.e. successful resolution).
     pub success_tree: Option<Tree>,
     pub full_tree: Tree,
-    pub errors: Vec<ResolutionError>,
+    pub errors: HashSet<ResolutionError>,
 }
 
 impl From<SLDResult> for Result<Tree, Vec<Diagnostic<()>>> {
@@ -515,7 +515,7 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
             SLDResult {
                 success_tree: Some(t.clone()),
                 full_tree: t,
-                errors: Vec::new(),
+                errors: HashSet::new(),
             }
         } else if level >= maxdepth {
             let error = ResolutionError::MaximumDepthExceeded(
@@ -530,7 +530,7 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
                 resolvents: HashMap::default(),
                 error: Some(error.clone()),
             };
-            let errors = vec![error];
+            let errors = vec![error].into_iter().collect();
             SLDResult {
                 success_tree: None,
                 full_tree: t,
@@ -548,12 +548,12 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
                 return SLDResult {
                     success_tree: None,
                     full_tree: t,
-                    errors: vec![e],
+                    errors: vec![e].into_iter().collect(),
                 };
             }
             let (lid, l) = selection_res.unwrap();
 
-            let mut errs: Vec<ResolutionError> = Vec::new();
+            let mut errs: HashSet<ResolutionError> = HashSet::new();
 
             let selected_builtin = builtin::select_builtin(&l.literal);
             let builtin_resolves = match selected_builtin {
@@ -582,13 +582,13 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
                 })
             });
             if selected_builtin.0.is_match() && builtin_resolves.is_none() {
-                errs.push(ResolutionError::BuiltinFailure(
+                errs.insert(ResolutionError::BuiltinFailure(
                     l.literal.clone(),
                     selected_builtin
                         .1
                         .expect("match should provide builtin")
                         .name(),
-                ))
+                ));
             }
 
             let user_rules_resolves = rules
@@ -608,7 +608,7 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
                 })
                 .collect::<Vec<_>>();
             if !selected_builtin.0.is_match() && user_rules_resolves.is_empty() {
-                errs.push(ResolutionError::InsufficientRules(l.literal.clone()));
+                errs.insert(ResolutionError::InsufficientRules(l.literal.clone()));
             }
 
             let mut success_resolvents: HashMap<
@@ -625,13 +625,13 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
                 let SLDResult {
                     success_tree,
                     full_tree,
-                    mut errors,
+                    errors,
                 } = inner(rules, &resolvent, maxdepth, level + 1, grounded);
                 all_resolvents.insert(
                     (lid, rid.clone()),
                     (mgu.clone(), renaming.clone(), full_tree),
                 );
-                errs.append(&mut errors);
+                errs.extend(errors);
                 if let Some(success_tree) = success_tree {
                     success_resolvents.insert((lid, rid), (mgu, renaming, success_tree));
                 }
@@ -645,7 +645,7 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
                         goal: goal.clone(),
                         level,
                         resolvents: all_resolvents,
-                        error: Some(errs[0].clone()),
+                        error: Some(errs.iter().next().unwrap().clone()),
                     },
                 )
             } else {
@@ -696,9 +696,15 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
                 goal: goal_with_history,
                 level: 0,
                 resolvents: HashMap::default(),
-                error: Some(ResolutionError::InconsistentGroundnessSignature(e.clone())),
+                error: Some(ResolutionError::InconsistentGroundnessSignature(
+                    e.iter().cloned().collect(),
+                )),
             },
-            errors: vec![ResolutionError::InconsistentGroundnessSignature(e)],
+            errors: vec![ResolutionError::InconsistentGroundnessSignature(
+                e.into_iter().collect(),
+            )]
+            .into_iter()
+            .collect(),
         },
     }
 }
@@ -940,7 +946,7 @@ mod tests {
         let result = sld(&clauses, &goal, 10);
         assert_eq!(
             vec![ResolutionError::InsufficientGroundness(goal)],
-            result.errors
+            result.errors.into_iter().collect::<Vec<_>>()
         )
     }
 

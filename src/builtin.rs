@@ -414,7 +414,10 @@ mod test {
         let lit = Literal {
             position: None,
             predicate: Predicate("number_gt".to_owned()),
-            args: vec![IRTerm::Constant("42.0".to_owned()), IRTerm::Constant("-273.15".to_owned())],
+            args: vec![
+                IRTerm::Constant("42.0".to_owned()),
+                IRTerm::Constant("-273.15".to_owned()),
+            ],
         };
         let b = super::select_builtin(&lit);
         assert!(b.0.is_match());
