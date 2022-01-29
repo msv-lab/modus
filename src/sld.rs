@@ -277,7 +277,7 @@ impl Substitute<IRTerm> for GoalWithHistory {
                      origin,
                  }| LiteralWithHistory {
                     literal: literal.substitute(s),
-                    introduction: introduction.clone(),
+                    introduction: *introduction,
                     origin: origin.clone(),
                 },
             )
@@ -426,7 +426,7 @@ impl From<SLDResult> for Result<Tree, Vec<Diagnostic<()>>> {
 }
 
 /// Returns both the SLD tree of only valid paths and the full tree.
-pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLDResult {
+pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel) -> SLDResult {
     /// select leftmost literal with compatible groundness
     fn select(
         goal: &GoalWithHistory,
@@ -476,7 +476,7 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
         rule: &Clause,
         level: TreeLevel,
     ) -> GoalWithHistory {
-        let mut g: GoalWithHistory = goal.clone();
+        let mut g: GoalWithHistory = goal.to_owned();
         g.remove(lid);
         g.extend(
             rule.body
@@ -499,7 +499,7 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
     }
 
     fn inner(
-        rules: &Vec<Clause<IRTerm>>,
+        rules: &[Clause<IRTerm>],
         goal: &GoalWithHistory,
         maxdepth: TreeLevel,
         level: TreeLevel,
@@ -507,7 +507,7 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
     ) -> SLDResult {
         if goal.is_empty() {
             let t = Tree {
-                goal: goal.clone(),
+                goal: goal.to_owned(),
                 level,
                 resolvents: HashMap::new(),
                 error: None,
@@ -525,7 +525,7 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
                 maxdepth,
             );
             let t = Tree {
-                goal: goal.clone(),
+                goal: goal.to_owned(),
                 level,
                 resolvents: HashMap::default(),
                 error: Some(error.clone()),
@@ -540,7 +540,7 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
             let selection_res = select(goal, grounded);
             if let Err(e) = selection_res {
                 let t = Tree {
-                    goal: goal.clone(),
+                    goal: goal.to_owned(),
                     level,
                     resolvents: HashMap::default(),
                     error: Some(e.clone()),
@@ -642,7 +642,7 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
                 (
                     None,
                     Tree {
-                        goal: goal.clone(),
+                        goal: goal.to_owned(),
                         level,
                         resolvents: all_resolvents,
                         error: Some(errs.iter().next().unwrap().clone()),
@@ -651,13 +651,13 @@ pub fn sld(rules: &Vec<Clause<IRTerm>>, goal: &Goal, maxdepth: TreeLevel) -> SLD
             } else {
                 (
                     Some(Tree {
-                        goal: goal.clone(),
+                        goal: goal.to_owned(),
                         level,
                         resolvents: success_resolvents,
                         error: None,
                     }),
                     Tree {
-                        goal: goal.clone(),
+                        goal: goal.to_owned(),
                         level,
                         resolvents: all_resolvents,
                         error: None,
@@ -754,7 +754,7 @@ struct PathNode {
 // sequence of nodes and global mgu
 type Path = (Vec<PathNode>, Substitution);
 
-pub fn proofs(tree: &Tree, rules: &Vec<Clause>, goal: &Goal) -> Vec<Proof> {
+pub fn proofs(tree: &Tree, rules: &[Clause], goal: &Goal) -> Vec<Proof> {
     fn flatten_compose(
         lid: &LiteralGoalId,
         cid: &ClauseId,
@@ -767,7 +767,7 @@ pub fn proofs(tree: &Tree, rules: &Vec<Clause>, goal: &Goal) -> Vec<Proof> {
                 vec![PathNode {
                     resolvent: tree.goal.clone(),
                     applied: cid.clone(),
-                    selected: lid.clone(),
+                    selected: *lid,
                     renaming: renaming.clone(),
                 }],
                 mgu.clone(),
@@ -782,7 +782,7 @@ pub fn proofs(tree: &Tree, rules: &Vec<Clause>, goal: &Goal) -> Vec<Proof> {
                         let mut nodes = vec![PathNode {
                             resolvent: tree.goal.clone(),
                             applied: cid.clone(),
-                            selected: lid.clone(),
+                            selected: *lid,
                             renaming: renaming.clone(),
                         }];
                         let val = compose_extend(mgu, sub_val);
@@ -796,9 +796,9 @@ pub fn proofs(tree: &Tree, rules: &Vec<Clause>, goal: &Goal) -> Vec<Proof> {
     }
     // reconstruct proof for a given tree level
     fn proof_for_level(
-        path: &Vec<PathNode>,
+        path: &[PathNode],
         mgu: &Substitution,
-        rules: &Vec<Clause>,
+        rules: &[Clause],
         level: TreeLevel,
     ) -> Proof {
         let mut sublevels_map: HashMap<usize, TreeLevel> = HashMap::new();

@@ -30,7 +30,7 @@ pub fn check_image_predicates(
 // infer grounded variables, check if grounded variables are grounded in each rule
 //TODO: not sure what to do if there are variables inside compound terms
 pub fn check_grounded_variables(
-    clauses: &Vec<Clause<IRTerm>>,
+    clauses: &[Clause<IRTerm>],
 ) -> Result<HashMap<Signature, Vec<bool>>, HashSet<Signature>> {
     let mut errors: HashSet<Signature> = HashSet::new();
     let mut result: HashMap<Signature, Vec<bool>> = HashMap::new();
