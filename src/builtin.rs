@@ -208,6 +208,32 @@ mod equality {
     }
 }
 
+mod number {
+    use super::BuiltinPredicate;
+
+    pub struct NumberGt0;
+    impl BuiltinPredicate for NumberGt0 {
+        fn name(&self) -> &'static str {
+            "number_gt"
+        }
+
+        fn arg_groundness(&self) -> &'static [bool] {
+            &[false, false]
+        }
+
+        /// Parses and checks that arg1 > arg2.
+        fn apply(&self, lit: &crate::logic::Literal) -> Option<crate::logic::Literal> {
+            let a: f64 = lit.args[0].as_constant().and_then(|s| s.parse().ok())?;
+            let b: f64 = lit.args[1].as_constant().and_then(|s| s.parse().ok())?;
+            if a > b {
+                Some(lit.clone())
+            } else {
+                None
+            }
+        }
+    }
+}
+
 macro_rules! intrinsic_predicate {
     ($name:ident, $($arg_groundness:expr),*) => {
         #[allow(non_camel_case_types)]
@@ -285,7 +311,8 @@ pub fn select_builtin<'a>(
         equality::StringEq1,
         equality::StringEq2,
         _operator_merge_begin,
-        _operator_merge_end
+        _operator_merge_end,
+        number::NumberGt0
     )
 }
 
@@ -378,5 +405,21 @@ mod test {
         let proof = crate::sld::proofs(&tree, &rules, &goals);
         assert_eq!(proof.len(), 1);
         println!("{:?}", proof[0]);
+    }
+
+    #[test]
+    pub fn test_number() {
+        use crate::logic::{Literal, Predicate};
+
+        let lit = Literal {
+            position: None,
+            predicate: Predicate("number_gt".to_owned()),
+            args: vec![IRTerm::Constant("42.0".to_owned()), IRTerm::Constant("-273.15".to_owned())],
+        };
+        let b = super::select_builtin(&lit);
+        assert!(b.0.is_match());
+        let b = b.1.unwrap();
+        assert_eq!(b.name(), "number_gt");
+        assert_eq!(b.apply(&lit), Some(lit));
     }
 }
