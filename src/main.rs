@@ -338,7 +338,7 @@ fn main() {
                         // The checks are quite strict, so we don't quit.
                     }
 
-                    let max_depth = 100;
+                    let max_depth = 175;
                     let clauses: Vec<Clause> = modus_f
                         .0
                         .iter()

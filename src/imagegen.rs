@@ -618,7 +618,7 @@ pub fn plan_from_modusfile(
     query: Literal,
 ) -> Result<BuildPlan, Vec<Diagnostic<()>>> {
     let goal = vec![query.clone()];
-    let max_depth = 150;
+    let max_depth = 175;
     let clauses: Vec<Clause> =
         mf.0.iter()
             .flat_map(|mc| {
