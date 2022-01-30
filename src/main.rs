@@ -357,7 +357,8 @@ fn main() {
                         write_tree(&tree_item, &mut out_writer.lock())
                             .expect("Error when printing tree to stdout.");
                     } else {
-                        let proof_result = Result::from(sld_result).map(|t| sld::proofs(&t, &clauses, goal));
+                        let proof_result =
+                            Result::from(sld_result).map(|t| sld::proofs(&t, &clauses, goal));
                         match proof_result {
                             Ok(proofs) => {
                                 println!(

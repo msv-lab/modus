@@ -97,8 +97,14 @@ impl Tree {
         self.goal.is_empty() || !self.success_resolvents.is_empty()
     }
 
-    fn resolvents(&self) -> HashMap<&(usize, ClauseId), &(HashMap<IRTerm, IRTerm>, HashMap<IRTerm, IRTerm>, Tree)> {
-        self.success_resolvents.iter().chain(&self.fail_resolvents).collect::<HashMap<_, _>>()
+    fn resolvents(
+        &self,
+    ) -> HashMap<&(usize, ClauseId), &(HashMap<IRTerm, IRTerm>, HashMap<IRTerm, IRTerm>, Tree)>
+    {
+        self.success_resolvents
+            .iter()
+            .chain(&self.fail_resolvents)
+            .collect::<HashMap<_, _>>()
     }
 
     /// Converts this tree to a directed graph.
@@ -437,7 +443,13 @@ impl From<SLDResult> for Result<Tree, Vec<Diagnostic<()>>> {
 }
 
 /// Returns a tree that contains both successful and failed paths, also, any resolution errors.
-pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel, store_full_tree: bool) -> SLDResult {
+/// To save on memory usage, can avoid storing the failed paths by passing false to `store_full_tree`.
+pub fn sld(
+    rules: &[Clause<IRTerm>],
+    goal: &Goal,
+    maxdepth: TreeLevel,
+    store_full_tree: bool,
+) -> SLDResult {
     /// select leftmost literal with compatible groundness
     fn select(
         goal: &GoalWithHistory,
@@ -479,6 +491,12 @@ pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel, store_ful
         ))
     }
 
+    /// NOTE: the new goals are added *first*, so the behaviour of SLD changes (but not the
+    /// semantics, I think), making it more 'eager' to resolve.
+    /// This makes it possible to get significant performance boosts by placing ground facts first
+    /// in the body of some expression, in your Modusfile(s).
+    /// For example, `fact(c), expensive_goal(c)`, may waste a lot of time and memory if `fact(c)` is
+    /// not true. With the 'eager' approach, SLD will quickly terminate if `fact(c)` is false.
     fn resolve(
         lid: LiteralGoalId,
         rid: ClauseId,
@@ -487,25 +505,26 @@ pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel, store_ful
         rule: &Clause,
         level: TreeLevel,
     ) -> GoalWithHistory {
-        let mut g: GoalWithHistory = goal.to_owned();
-        g.remove(lid);
-        g.extend(
-            rule.body
-                .iter()
-                .enumerate()
-                .map(|(id, l)| {
-                    let origin = LiteralOrigin {
-                        clause: rid.clone(),
-                        body_index: id,
-                    };
-                    LiteralWithHistory {
-                        literal: l.clone(),
-                        introduction: level,
-                        origin,
-                    }
-                })
-                .collect::<GoalWithHistory>(),
-        );
+        let new_goals = rule.body.iter().enumerate().map(|(id, l)| {
+            let origin = LiteralOrigin {
+                clause: rid.clone(),
+                body_index: id,
+            };
+            LiteralWithHistory {
+                literal: l.clone(),
+                introduction: level,
+                origin,
+            }
+        });
+        let g = new_goals
+            .chain(goal.into_iter().enumerate().filter_map(|(i, v)| {
+                if i != lid {
+                    Some(v.clone())
+                } else {
+                    None
+                }
+            }))
+            .collect::<Vec<_>>();
         g.substitute(mgu)
     }
 
@@ -544,10 +563,7 @@ pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel, store_ful
                 error: Some(error.clone()),
             };
             let errors = vec![error].into_iter().collect();
-            SLDResult {
-                tree: t,
-                errors,
-            }
+            SLDResult { tree: t, errors }
         } else {
             let selection_res = select(goal, grounded);
             if let Err(e) = selection_res {
@@ -640,10 +656,14 @@ pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel, store_ful
             for (rid, mgu, renaming, resolvent) in
                 builtin_resolves.into_iter().chain(user_rules_resolves)
             {
-                let SLDResult {
-                    tree,
-                    errors,
-                } = inner(rules, &resolvent, maxdepth, level + 1, grounded, store_full_tree);
+                let SLDResult { tree, errors } = inner(
+                    rules,
+                    &resolvent,
+                    maxdepth,
+                    level + 1,
+                    grounded,
+                    store_full_tree,
+                );
                 if tree.is_success() {
                     success_resolvents.insert((lid, rid), (mgu, renaming, tree));
                 } else if store_full_tree {
@@ -660,10 +680,7 @@ pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel, store_ful
                 error: leaf_error,
             };
 
-            SLDResult {
-                tree,
-                errors: errs,
-            }
+            SLDResult { tree, errors: errs }
         }
     }
 
@@ -684,7 +701,14 @@ pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel, store_ful
         })
         .collect();
     match grounded_result {
-        Ok(grounded) => inner(rules, &goal_with_history, maxdepth, 0, &grounded, store_full_tree),
+        Ok(grounded) => inner(
+            rules,
+            &goal_with_history,
+            maxdepth,
+            0,
+            &grounded,
+            store_full_tree,
+        ),
         Err(e) => SLDResult {
             tree: Tree {
                 goal: goal_with_history,
