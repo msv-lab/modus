@@ -32,7 +32,7 @@ use crate::imagegen::BuildNode;
 /// Renders the entire SLD tree as a DOT graph, to the writer.
 pub fn render_tree<W: Write>(clauses: &Vec<Clause>, sld_result: SLDResult, output: &mut W) {
     // TODO: we could figure out the corresponding error for each failed path
-    let g = sld_result.full_tree.to_graph(clauses);
+    let g = sld_result.tree.to_graph(clauses);
     dot::render(&g, output).unwrap()
 }
 
