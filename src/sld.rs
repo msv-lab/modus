@@ -279,11 +279,24 @@ impl<'a> dot::GraphWalk<'a, Nd<'a>, Ed<'a>> for Graph {
 /// - a clause
 /// - a valuation for this clause
 /// - proofs for parts of the clause body
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Proof {
     pub clause: ClauseId,
     pub valuation: Substitution,
     pub children: Vec<Proof>,
+}
+
+impl Proof {
+    /// Returns the height of this proof tree, where a leaf node has height 0.
+    fn height(&self) -> usize {
+        self.children.iter().map(|child| child.height() + 1).max().unwrap_or(0)
+    }
+}
+
+impl PartialOrd for Proof {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.height().partial_cmp(&other.height())
+    }
 }
 
 impl Substitute<IRTerm> for GoalWithHistory {
@@ -875,17 +888,18 @@ pub fn proofs(tree: &Tree, rules: &[Clause], goal: &Goal) -> Vec<Proof> {
         .map(|(path, mgu)| proof_for_level(path, mgu, rules, 0))
         .collect();
 
-    //TODO: instead, I should find optimal proofs
-    let mut computed: HashSet<Goal> = HashSet::new();
-    let mut proofs: Vec<Proof> = Vec::new();
+    let mut solution_to_proof_tree: HashMap<Goal, Proof> = HashMap::new();
     for p in all_proofs {
         let solution: Goal = goal.substitute(&p.valuation);
-        if !computed.contains(&solution) {
-            computed.insert(solution.clone());
-            proofs.push(p)
+        // keeps the minimal proof tree
+        if let Some(existing_proof) = solution_to_proof_tree.get(&solution) {
+            if existing_proof <= &p {
+                continue;
+            }
         }
+        solution_to_proof_tree.insert(solution, p);
     }
-    proofs
+    solution_to_proof_tree.into_values().collect()
 }
 
 #[cfg(test)]
@@ -1143,5 +1157,37 @@ mod tests {
                 assert!(!tree_res.tree.is_success());
             }
         }
+    }
+
+    #[test]
+    #[serial]
+    fn leaf_height_is_zero() {
+        let proof = Proof {
+            clause: ClauseId::Rule(0),
+            valuation: HashMap::default(),
+            children: Vec::new(),
+        };
+        assert_eq!(proof.height(), 0);
+    }
+
+    #[test]
+    #[serial]
+    fn proof_minimality() {
+        let goal: Goal<logic::IRTerm> = vec!["foo(X)".parse().unwrap()];
+        let clauses: Vec<logic::Clause> = vec![
+            "foo(X) :- bar(X).".parse().unwrap(),
+            logic::Clause {
+                head: "bar(\"test\")".parse().unwrap(),
+                body: vec![],
+            },
+            logic::Clause {
+                head: "foo(\"test\")".parse().unwrap(),
+                body: vec![],
+            },
+        ];
+        let tree = sld(&clauses, &goal, 15).success_tree.unwrap();
+        let sld_proofs = proofs(&tree, &clauses, &goal);
+        assert_eq!(sld_proofs.len(), 1);
+        assert_eq!(sld_proofs[0].height(), 1, "{:?}", sld_proofs[0]);
     }
 }
