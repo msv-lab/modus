@@ -353,7 +353,7 @@ fn main() {
                     if should_output_graph {
                         render_tree(&clauses, sld_result, &mut out_writer.lock());
                     } else if should_explain {
-                        let tree_item = sld_result.full_tree.explain(&clauses);
+                        let tree_item = sld_result.tree.explain(&clauses);
                         write_tree(&tree_item, &mut out_writer.lock())
                             .expect("Error when printing tree to stdout.");
                     } else {

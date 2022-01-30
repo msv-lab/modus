@@ -79,7 +79,13 @@ type GoalWithHistory = Vec<LiteralWithHistory>;
 pub struct Tree {
     goal: GoalWithHistory,
     level: TreeLevel,
-    resolvents: HashMap<(LiteralGoalId, ClauseId), (Substitution, Substitution, Tree)>,
+
+    /// Branches that could lead to a successful path.
+    success_resolvents: HashMap<(LiteralGoalId, ClauseId), (Substitution, Substitution, Tree)>,
+
+    /// Branches that will lead to failing paths.
+    fail_resolvents: HashMap<(LiteralGoalId, ClauseId), (Substitution, Substitution, Tree)>,
+
     /// Possible error associated with this node. It should be a leaf if present.
     /// Note that even if this error is not present, the tree may still have failing paths,
     /// it's just that this particular node is not the point where it failed.
@@ -87,6 +93,14 @@ pub struct Tree {
 }
 
 impl Tree {
+    fn is_success(&self) -> bool {
+        self.goal.is_empty() || !self.success_resolvents.is_empty()
+    }
+
+    fn resolvents(&self) -> HashMap<&(usize, ClauseId), &(HashMap<IRTerm, IRTerm>, HashMap<IRTerm, IRTerm>, Tree)> {
+        self.success_resolvents.iter().chain(&self.fail_resolvents).collect::<HashMap<_, _>>()
+    }
+
     /// Converts this tree to a directed graph.
     pub fn to_graph(&self, rules: &[Clause]) -> Graph {
         fn convert(
@@ -104,7 +118,7 @@ impl Tree {
             nodes.push(curr_label);
             let curr_index = nodes.len() - 1;
 
-            if !t.goal.is_empty() && t.resolvents.is_empty() {
+            if !t.goal.is_empty() && t.resolvents().is_empty() {
                 let err = t
                     .error
                     .as_ref()
@@ -113,7 +127,7 @@ impl Tree {
                 nodes.push("FAIL".to_string());
                 edges.push((curr_index, curr_index + 1, error_msg));
             } else {
-                let mut resolvent_pairs = t.resolvents.iter().collect::<Vec<_>>();
+                let mut resolvent_pairs = t.resolvents().into_iter().collect::<Vec<_>>();
                 resolvent_pairs.sort_by_key(|(k, _)| k.0); // for some consistency
 
                 for (k, v) in resolvent_pairs {
@@ -140,7 +154,7 @@ impl Tree {
     /// Returns a string explaining the SLD tree, using indentation, etc.
     pub fn explain(&self, rules: &[Clause]) -> StringItem {
         fn dfs(t: &Tree, rules: &[Clause], builder: &mut TreeBuilder) {
-            let mut resolvent_pairs = t.resolvents.iter().collect::<Vec<_>>();
+            let mut resolvent_pairs = t.resolvents().into_iter().collect::<Vec<_>>();
             resolvent_pairs.sort_by_key(|(k, _)| k.0);
 
             for (k, v) in &resolvent_pairs {
@@ -405,16 +419,14 @@ impl ResolutionError {
 /// Uses a custom result type in resolution since we often have some information about
 /// either state, an 'Ok' and 'Err' state is too disjoint for our purposes.
 pub struct SLDResult {
-    /// The subset of the full SLD tree that leads to paths with empty goals (i.e. successful resolution).
-    pub success_tree: Option<Tree>,
-    pub full_tree: Tree,
+    pub tree: Tree,
     pub errors: HashSet<ResolutionError>,
 }
 
 impl From<SLDResult> for Result<Tree, Vec<Diagnostic<()>>> {
     fn from(sld_result: SLDResult) -> Self {
-        if let Some(t) = sld_result.success_tree {
-            Ok(t)
+        if sld_result.tree.is_success() {
+            Ok(sld_result.tree)
         } else {
             Err(sld_result
                 .errors
@@ -509,12 +521,12 @@ pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel) -> SLDRes
             let t = Tree {
                 goal: goal.to_owned(),
                 level,
-                resolvents: HashMap::new(),
+                success_resolvents: HashMap::new(),
+                fail_resolvents: HashMap::new(),
                 error: None,
             };
             SLDResult {
-                success_tree: Some(t.clone()),
-                full_tree: t,
+                tree: t,
                 errors: HashSet::new(),
             }
         } else if level >= maxdepth {
@@ -527,13 +539,13 @@ pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel) -> SLDRes
             let t = Tree {
                 goal: goal.to_owned(),
                 level,
-                resolvents: HashMap::default(),
+                success_resolvents: HashMap::default(),
+                fail_resolvents: HashMap::default(),
                 error: Some(error.clone()),
             };
             let errors = vec![error].into_iter().collect();
             SLDResult {
-                success_tree: None,
-                full_tree: t,
+                tree: t,
                 errors,
             }
         } else {
@@ -542,12 +554,12 @@ pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel) -> SLDRes
                 let t = Tree {
                     goal: goal.to_owned(),
                     level,
-                    resolvents: HashMap::default(),
+                    success_resolvents: HashMap::default(),
+                    fail_resolvents: HashMap::default(),
                     error: Some(e.clone()),
                 };
                 return SLDResult {
-                    success_tree: None,
-                    full_tree: t,
+                    tree: t,
                     errors: vec![e].into_iter().collect(),
                 };
             }
@@ -581,14 +593,18 @@ pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel) -> SLDRes
                     )
                 })
             });
+
+            let mut leaf_error = None;
             if selected_builtin.0.is_match() && builtin_resolves.is_none() {
-                errs.insert(ResolutionError::BuiltinFailure(
+                let err = ResolutionError::BuiltinFailure(
                     l.literal.clone(),
                     selected_builtin
                         .1
                         .expect("match should provide builtin")
                         .name(),
-                ));
+                );
+                errs.insert(err.clone());
+                leaf_error = Some(err);
             }
 
             let user_rules_resolves = rules
@@ -608,14 +624,16 @@ pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel) -> SLDRes
                 })
                 .collect::<Vec<_>>();
             if !selected_builtin.0.is_match() && user_rules_resolves.is_empty() {
-                errs.insert(ResolutionError::InsufficientRules(l.literal.clone()));
+                let err = ResolutionError::InsufficientRules(l.literal.clone());
+                errs.insert(err.clone());
+                leaf_error = leaf_error.or(Some(err));
             }
 
             let mut success_resolvents: HashMap<
                 (LiteralGoalId, ClauseId),
                 (Substitution, Substitution, Tree),
             > = HashMap::new();
-            let mut all_resolvents: HashMap<
+            let mut fail_resolvents: HashMap<
                 (LiteralGoalId, ClauseId),
                 (Substitution, Substitution, Tree),
             > = HashMap::new();
@@ -623,50 +641,27 @@ pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel) -> SLDRes
                 builtin_resolves.into_iter().chain(user_rules_resolves)
             {
                 let SLDResult {
-                    success_tree,
-                    full_tree,
+                    tree,
                     errors,
                 } = inner(rules, &resolvent, maxdepth, level + 1, grounded);
-                all_resolvents.insert(
-                    (lid, rid.clone()),
-                    (mgu.clone(), renaming.clone(), full_tree),
-                );
-                errs.extend(errors);
-                if let Some(success_tree) = success_tree {
-                    success_resolvents.insert((lid, rid), (mgu, renaming, success_tree));
+                if tree.is_success() {
+                    success_resolvents.insert((lid, rid), (mgu, renaming, tree));
+                } else {
+                    fail_resolvents.insert((lid, rid), (mgu, renaming, tree));
                 }
+                errs.extend(errors);
             }
 
-            // Success tree and full tree depend on if we were able to successfully resolve.
-            let (success_tree, full_tree) = if success_resolvents.is_empty() {
-                (
-                    None,
-                    Tree {
-                        goal: goal.to_owned(),
-                        level,
-                        resolvents: all_resolvents,
-                        error: Some(errs.iter().next().unwrap().clone()),
-                    },
-                )
-            } else {
-                (
-                    Some(Tree {
-                        goal: goal.to_owned(),
-                        level,
-                        resolvents: success_resolvents,
-                        error: None,
-                    }),
-                    Tree {
-                        goal: goal.to_owned(),
-                        level,
-                        resolvents: all_resolvents,
-                        error: None,
-                    },
-                )
+            let tree = Tree {
+                goal: goal.to_owned(),
+                level,
+                success_resolvents,
+                fail_resolvents,
+                error: leaf_error,
             };
+
             SLDResult {
-                success_tree,
-                full_tree,
+                tree,
                 errors: errs,
             }
         }
@@ -691,11 +686,11 @@ pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel) -> SLDRes
     match grounded_result {
         Ok(grounded) => inner(rules, &goal_with_history, maxdepth, 0, &grounded),
         Err(e) => SLDResult {
-            success_tree: None,
-            full_tree: Tree {
+            tree: Tree {
                 goal: goal_with_history,
                 level: 0,
-                resolvents: HashMap::default(),
+                success_resolvents: HashMap::default(),
+                fail_resolvents: HashMap::default(),
                 error: Some(ResolutionError::InconsistentGroundnessSignature(
                     e.iter().cloned().collect(),
                 )),
@@ -715,7 +710,7 @@ pub fn solutions(tree: &Tree) -> HashSet<Goal> {
             let s = Substitution::new();
             return vec![s];
         }
-        tree.resolvents
+        tree.success_resolvents
             .iter()
             .map(|(_, (mgu, _, subtree))| (mgu, inner(subtree)))
             .map(|(mgu, sub)| {
@@ -773,7 +768,7 @@ pub fn proofs(tree: &Tree, rules: &[Clause], goal: &Goal) -> Vec<Proof> {
                 mgu.clone(),
             )];
         }
-        tree.resolvents
+        tree.success_resolvents
             .iter()
             .map(|((sub_lid, sub_cid), (sub_mgu, sub_renaming, sub_tree))| {
                 flatten_compose(sub_lid, sub_cid, sub_mgu, sub_renaming, sub_tree)
@@ -904,7 +899,7 @@ mod tests {
                 body: vec![],
             },
         ];
-        let tree = sld(&clauses, &goal, 10).success_tree.unwrap();
+        let tree = sld(&clauses, &goal, 10).tree;
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 2);
 
@@ -926,7 +921,7 @@ mod tests {
             head: "a(X)".parse().unwrap(),
             body: vec![],
         }];
-        let tree = sld(&clauses, &goal, 10).success_tree.unwrap();
+        let tree = sld(&clauses, &goal, 10).tree;
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 1);
         assert!(contains_ignoring_position(
@@ -972,7 +967,7 @@ mod tests {
                 body: vec![],
             },
         ];
-        let tree = sld(&clauses, &goal, 10).success_tree.unwrap();
+        let tree = sld(&clauses, &goal, 10).tree;
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 1);
         assert!(contains_ignoring_position(
@@ -1004,7 +999,7 @@ mod tests {
                 body: vec![],
             },
         ];
-        let tree = sld(&clauses, &goal, 10).success_tree.unwrap();
+        let tree = sld(&clauses, &goal, 10).tree;
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 2);
         assert!(contains_ignoring_position(
@@ -1053,7 +1048,7 @@ mod tests {
                 body: vec![],
             },
         ];
-        let tree = sld(&clauses, &goal, 15).success_tree.unwrap();
+        let tree = sld(&clauses, &goal, 15).tree;
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 4);
         assert!(contains_ignoring_position(
@@ -1080,7 +1075,7 @@ mod tests {
         let goal: Goal<logic::IRTerm> =
             vec!["string_concat(\"hello\", \"world\", X)".parse().unwrap()];
         let clauses: Vec<logic::Clause> = vec![];
-        let tree = sld(&clauses, &goal, 10).success_tree.unwrap();
+        let tree = sld(&clauses, &goal, 10).tree;
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 1);
         assert!(contains_ignoring_position(
@@ -1114,14 +1109,14 @@ mod tests {
             ];
             let tree_res = sld(&clauses, &goal, 50);
             if is_good {
-                let solutions = solutions(&tree_res.success_tree.unwrap());
+                let solutions = solutions(&tree_res.tree);
                 assert_eq!(solutions.len(), 1);
                 assert!(contains_ignoring_position(
                     &solutions,
                     &vec![format!("a(\"{}\")", s).parse().unwrap()]
                 ));
             } else {
-                assert!(tree_res.success_tree.is_none());
+                assert!(!tree_res.tree.is_success());
             }
         }
     }
