@@ -1185,7 +1185,7 @@ mod tests {
                 body: vec![],
             },
         ];
-        let tree = sld(&clauses, &goal, 15).success_tree.unwrap();
+        let tree = sld(&clauses, &goal, 15, true).tree;
         let sld_proofs = proofs(&tree, &clauses, &goal);
         assert_eq!(sld_proofs.len(), 1);
         assert_eq!(sld_proofs[0].height(), 1, "{:?}", sld_proofs[0]);
