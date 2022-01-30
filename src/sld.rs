@@ -399,10 +399,9 @@ impl ResolutionError {
                 get_notes(&[literal]),
                 Severity::Warning,
             ),
-            ResolutionError::InconsistentGroundnessSignature(_) => (
-                // TODO: capture the inconsistent clauses
+            ResolutionError::InconsistentGroundnessSignature(sigs) => (
                 Vec::new(),
-                Vec::new(),
+                sigs.iter().map(|sig| sig.to_string()).collect(),
                 Severity::Error,
             ),
         };
