@@ -376,6 +376,128 @@ pub fn build_dag_from_proofs(
             }
         }
 
+        fn process_operator(
+            subtree_in_op: &[&Proof],
+            op_name: &str,
+            lit: &Literal, // the "begin" literal of the operator.
+            rules: &Vec<Clause<IRTerm>>,
+            res: &mut BuildPlan,
+            image_literals: &mut HashMap<Literal, NodeId>,
+            curr_state: &mut State,
+        ) {
+            match op_name {
+                // Image-to-image copy. (local copy is not an operator)
+                "copy" => {
+                    let src_image = process_image(subtree_in_op, rules, res, image_literals, None)
+                        .expect("Stuff inside this copy does not build an image.");
+                    let src_path = lit.args[1].as_constant().unwrap().to_owned();
+                    let dst_path = join_path(&curr_state.cwd, lit.args[2].as_constant().unwrap());
+                    if let Some(ref mut curr_merge) = curr_state.current_merge {
+                        curr_merge.operations.push(MergeOperation::CopyFromImage {
+                            src_image,
+                            src_path,
+                            dst_path,
+                        });
+                    } else {
+                        let parent = curr_state.current_node.expect("No base layer yet.");
+                        let node = res.new_node(
+                            BuildNode::CopyFromImage {
+                                parent,
+                                src_image,
+                                src_path,
+                                dst_path,
+                            },
+                            vec![parent, src_image],
+                        );
+                        curr_state.set_node(node);
+                    }
+                }
+                "in_workdir" => {
+                    let new_p = lit.args[1].as_constant().unwrap();
+                    let new_cwd = join_path(&curr_state.cwd, new_p);
+                    curr_state.with_new_cwd(new_cwd, |new_state| {
+                        process_children(subtree_in_op, rules, res, image_literals, new_state);
+                    });
+                    // TODO: emit a warning if the tree inside attempts
+                    // to build a fresh image - this is probably an incorrect usage.
+                }
+                "set_workdir" => {
+                    if curr_state.current_merge.is_some() {
+                        panic!("You can not generate a new image inside a merge.");
+                    }
+                    let img = process_image(subtree_in_op, rules, res, image_literals, None)
+                        .expect("set_workdir should be applied to an image.");
+                    if curr_state.has_base() {
+                        panic!("set_workdir generates a new image, so it should be the first instruction.");
+                    }
+                    let new_p = lit.args[1].as_constant().unwrap();
+                    curr_state.set_node(res.new_node(
+                        BuildNode::SetWorkdir {
+                            parent: img,
+                            new_workdir: join_path(&curr_state.cwd, new_p),
+                        },
+                        vec![img],
+                    ));
+                }
+                "set_entrypoint" => {
+                    if curr_state.current_merge.is_some() {
+                        panic!("You can not generate a new image inside a merge.");
+                    }
+                    let img = process_image(subtree_in_op, rules, res, image_literals, None)
+                        .expect("set_entrypoint should be applied to an image.");
+                    if curr_state.has_base() {
+                        panic!("set_entrypoint generates a new image, so it should be the first instruction.");
+                    }
+                    let entrypoint = lit
+                        .args
+                        .iter()
+                        .skip(1)
+                        .map(|x| x.as_constant().unwrap().to_owned())
+                        .collect::<Vec<_>>();
+                    curr_state.set_node(res.new_node(
+                        BuildNode::SetEntrypoint {
+                            parent: img,
+                            new_entrypoint: entrypoint,
+                        },
+                        vec![img],
+                    ));
+                }
+                "merge" => {
+                    if curr_state.current_merge.is_some() {
+                        process_children(subtree_in_op, rules, res, image_literals, curr_state);
+                        return;
+                    }
+                    if !curr_state.has_base() {
+                        panic!("merge requires a base layer outside.");
+                    }
+                    let parent = curr_state.current_node.unwrap();
+                    let merge_node = MergeNode {
+                        parent,
+                        operations: vec![],
+                    };
+                    let merge_node = curr_state.with_new_merge(merge_node, |new_state| {
+                        process_children(subtree_in_op, rules, res, image_literals, new_state);
+                    });
+                    let mut deps: Vec<NodeId> = merge_node
+                        .operations
+                        .iter()
+                        .filter_map(|x| match x {
+                            MergeOperation::CopyFromImage { src_image, .. } => Some(*src_image),
+                            // Explicitly list out all the no-dependency cases to prevent future errors.
+                            MergeOperation::CopyFromLocal { .. } | MergeOperation::Run { .. } => {
+                                None
+                            }
+                        })
+                        .collect();
+                    deps.push(parent);
+                    curr_state.set_node(res.new_node(BuildNode::Merge(merge_node), deps));
+                }
+                _ => {
+                    panic!("Unkown operator: {}", op_name);
+                }
+            }
+        }
+
         fn process_children(
             children: &[&Proof],
             rules: &Vec<Clause<IRTerm>>,
@@ -410,144 +532,7 @@ pub fn build_dag_from_proofs(
                         // at this point j points to the end predicate.
 
                         let subtree_in_op = &children[i + 1..j];
-                        // process this operator
-                        match op_name {
-                            // Image-to-image copy. (local copy is not an operator)
-                            "copy" => {
-                                let src_image =
-                                    process_image(subtree_in_op, rules, res, image_literals, None)
-                                        .expect("Stuff inside this copy does not build an image.");
-                                let src_path = lit.args[1].as_constant().unwrap().to_owned();
-                                let dst_path =
-                                    join_path(&curr_state.cwd, lit.args[2].as_constant().unwrap());
-                                if let Some(ref mut curr_merge) = curr_state.current_merge {
-                                    curr_merge.operations.push(MergeOperation::CopyFromImage {
-                                        src_image,
-                                        src_path,
-                                        dst_path,
-                                    });
-                                } else {
-                                    let parent =
-                                        curr_state.current_node.expect("No base layer yet.");
-                                    let node = res.new_node(
-                                        BuildNode::CopyFromImage {
-                                            parent,
-                                            src_image,
-                                            src_path,
-                                            dst_path,
-                                        },
-                                        vec![parent, src_image],
-                                    );
-                                    curr_state.set_node(node);
-                                }
-                            }
-                            "in_workdir" => {
-                                let new_p = lit.args[1].as_constant().unwrap();
-                                let new_cwd = join_path(&curr_state.cwd, new_p);
-                                curr_state.with_new_cwd(new_cwd, |new_state| {
-                                    process_children(
-                                        subtree_in_op,
-                                        rules,
-                                        res,
-                                        image_literals,
-                                        new_state,
-                                    );
-                                });
-                                // TODO: emit a warning if the tree inside attempts
-                                // to build a fresh image - this is probably an incorrect usage.
-                            }
-                            "set_workdir" => {
-                                if curr_state.current_merge.is_some() {
-                                    panic!("You can not generate a new image inside a merge.");
-                                }
-                                let img =
-                                    process_image(subtree_in_op, rules, res, image_literals, None)
-                                        .expect("set_workdir should be applied to an image.");
-                                if curr_state.has_base() {
-                                    panic!("set_workdir generates a new image, so it should be the first instruction.");
-                                }
-                                let new_p = lit.args[1].as_constant().unwrap();
-                                curr_state.set_node(res.new_node(
-                                    BuildNode::SetWorkdir {
-                                        parent: img,
-                                        new_workdir: join_path(&curr_state.cwd, new_p),
-                                    },
-                                    vec![img],
-                                ));
-                            }
-                            "set_entrypoint" => {
-                                if curr_state.current_merge.is_some() {
-                                    panic!("You can not generate a new image inside a merge.");
-                                }
-                                let img =
-                                    process_image(subtree_in_op, rules, res, image_literals, None)
-                                        .expect("set_entrypoint should be applied to an image.");
-                                if curr_state.has_base() {
-                                    panic!("set_entrypoint generates a new image, so it should be the first instruction.");
-                                }
-                                let entrypoint = lit
-                                    .args
-                                    .iter()
-                                    .skip(1)
-                                    .map(|x| x.as_constant().unwrap().to_owned())
-                                    .collect::<Vec<_>>();
-                                curr_state.set_node(res.new_node(
-                                    BuildNode::SetEntrypoint {
-                                        parent: img,
-                                        new_entrypoint: entrypoint,
-                                    },
-                                    vec![img],
-                                ));
-                            }
-                            "merge" => {
-                                if curr_state.current_merge.is_some() {
-                                    process_children(
-                                        subtree_in_op,
-                                        rules,
-                                        res,
-                                        image_literals,
-                                        curr_state,
-                                    );
-                                    continue;
-                                }
-                                if !curr_state.has_base() {
-                                    panic!("merge requires a base layer outside.");
-                                }
-                                let parent = curr_state.current_node.unwrap();
-                                let merge_node = MergeNode {
-                                    parent,
-                                    operations: vec![],
-                                };
-                                let merge_node =
-                                    curr_state.with_new_merge(merge_node, |new_state| {
-                                        process_children(
-                                            subtree_in_op,
-                                            rules,
-                                            res,
-                                            image_literals,
-                                            new_state,
-                                        );
-                                    });
-                                let mut deps: Vec<NodeId> = merge_node
-                                    .operations
-                                    .iter()
-                                    .filter_map(|x| match x {
-                                        MergeOperation::CopyFromImage { src_image, .. } => {
-                                            Some(*src_image)
-                                        }
-                                        // Explicitly list out all the no-dependency cases to prevent future errors.
-                                        MergeOperation::CopyFromLocal { .. }
-                                        | MergeOperation::Run { .. } => None,
-                                    })
-                                    .collect();
-                                deps.push(parent);
-                                curr_state
-                                    .set_node(res.new_node(BuildNode::Merge(merge_node), deps));
-                            }
-                            _ => {
-                                panic!("Unkown operator: {}", op_name);
-                            }
-                        }
+                        process_operator(subtree_in_op, op_name, lit, rules, res, image_literals, curr_state);
                         i = j + 1;
                         continue;
                     }
