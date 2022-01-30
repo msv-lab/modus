@@ -164,7 +164,7 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                     body: literals,
                 });
             }
-            Some(Expression::OperatorApplication(expr, op)) => clauses.extend(
+            Some(Expression::OperatorApplication(_, expr, op)) => clauses.extend(
                 Self::from(&ModusClause {
                     head: modus_clause.head.clone(),
                     body: Some(*expr.clone()),
@@ -197,7 +197,7 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                     }
                 }),
             ),
-            Some(Expression::And(expr1, expr2)) => {
+            Some(Expression::And(_, expr1, expr2)) => {
                 let c1 = Self::from(&ModusClause {
                     head: modus_clause.head.clone(),
                     body: Some(*expr1.clone()),
@@ -223,7 +223,7 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                     }
                 }
             }
-            Some(Expression::Or(expr1, expr2)) => {
+            Some(Expression::Or(_, expr1, expr2)) => {
                 let c1 = Self::from(&ModusClause {
                     head: modus_clause.head.clone(),
                     body: Some(*expr1.clone()),
@@ -361,7 +361,8 @@ mod tests {
     fn format_string_translation_with_escape() {
         setup();
 
-        let case = "use ${feature} like this \\${...}";
+        let case = r#"use \"${feature}\" like this \${...} \
+                      foobar"#;
 
         let lits = vec![
             logic::Literal {
@@ -379,18 +380,18 @@ mod tests {
             logic::Literal {
                 position: Some(SpannedPosition {
                     offset: 2,
-                    length: 4,
+                    length: 6,
                 }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(0),
-                    IRTerm::Constant("use ".to_owned()),
+                    IRTerm::Constant("use \"".to_owned()),
                     IRTerm::AuxiliaryVariable(1),
                 ],
             },
             logic::Literal {
                 position: Some(SpannedPosition {
-                    offset: 6,
+                    offset: 8,
                     length: 10,
                 }),
                 predicate: logic::Predicate("string_concat".to_owned()),
@@ -402,13 +403,13 @@ mod tests {
             },
             logic::Literal {
                 position: Some(SpannedPosition {
-                    offset: 16,
-                    length: 18,
+                    offset: 18,
+                    length: 51,
                 }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
                     IRTerm::AuxiliaryVariable(2),
-                    IRTerm::Constant(" like this ${...}".to_owned()),
+                    IRTerm::Constant("\" like this ${...} foobar".to_owned()),
                     IRTerm::AuxiliaryVariable(3),
                 ],
             },

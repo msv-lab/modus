@@ -64,6 +64,11 @@ use std::io::Write;
 
 use thiserror::Error;
 
+pub const FRONTEND_IMAGE: &str = concat!(
+    "ghcr.io/modus-continens/modus-buildkit-frontend:",
+    env!("GIT_SHA")
+);
+
 #[derive(Error, Debug)]
 pub enum BuildError {
     #[error("Could not get current working directory")]
@@ -245,6 +250,7 @@ pub fn build<P: AsRef<Path>>(
     build_plan: &BuildPlan,
     context: P,
     verbose: bool,
+    frontend_image: &str,
 ) -> Result<Vec<String>, BuildError> {
     let mut signals = SignalsInfo::with_exfiltrator(&[SIGINT, SIGTERM, SIGCHLD], SignalOnly)
         .expect("Failed to create signal handler.");
@@ -260,7 +266,8 @@ pub fn build<P: AsRef<Path>>(
     let _restore_cwd = RestoreCwd(previous_cwd);
     let has_dockerignore = check_dockerignore()?;
     let mut content = String::new();
-    content.push_str("#syntax=europe-docker.pkg.dev/maowtm/modus-test/modus-bk-frontend"); // TODO
+    content.push_str("#syntax=");
+    content.push_str(frontend_image);
     content.push('\n');
     content.push_str(&serde_json::to_string(build_plan).expect("Unable to serialize build plan"));
     if check_terminate(&mut signals) {

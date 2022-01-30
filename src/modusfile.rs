@@ -32,13 +32,13 @@ pub enum Expression {
     Literal(Literal),
 
     // An operator applied to an expression
-    OperatorApplication(Box<Expression>, Operator),
+    OperatorApplication(Option<SpannedPosition>, Box<Expression>, Operator),
 
     // A conjunction of expressions.
-    And(Box<Expression>, Box<Expression>),
+    And(Option<SpannedPosition>, Box<Expression>, Box<Expression>),
 
     // A disjunction of expressions.
-    Or(Box<Expression>, Box<Expression>),
+    Or(Option<SpannedPosition>, Box<Expression>, Box<Expression>),
 }
 
 impl Expression {
@@ -46,14 +46,24 @@ impl Expression {
     fn eq_ignoring_position(&self, other: &Expression) -> bool {
         match (self, other) {
             (Expression::Literal(l), Expression::Literal(r)) => l.eq_ignoring_position(&r),
-            (Expression::OperatorApplication(l, _), Expression::OperatorApplication(r, _)) => {
-                l.eq_ignoring_position(r)
-            }
-            (Expression::And(l1, l2), Expression::And(r1, r2))
-            | (Expression::Or(l1, l2), Expression::Or(r1, r2)) => {
+            (
+                Expression::OperatorApplication(_, l, _),
+                Expression::OperatorApplication(_, r, _),
+            ) => l.eq_ignoring_position(r),
+            (Expression::And(_, l1, l2), Expression::And(_, r1, r2))
+            | (Expression::Or(_, l1, l2), Expression::Or(_, r1, r2)) => {
                 l1.eq_ignoring_position(r1) && l2.eq_ignoring_position(r2)
             }
             (s, o) => s.eq(o),
+        }
+    }
+
+    pub fn get_spanned_position(&self) -> &Option<SpannedPosition> {
+        match self {
+            Expression::Literal(lit) => &lit.position,
+            Expression::OperatorApplication(s, _, _) => &s,
+            Expression::And(s, _, _) => &s,
+            Expression::Or(s, _, _) => &s,
         }
     }
 }
@@ -195,16 +205,16 @@ impl str::FromStr for Modusfile {
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Expression::OperatorApplication(expr, op) => {
+            Expression::OperatorApplication(_, expr, op) => {
                 write!(f, "({})::{}", expr.to_string(), op)
             }
             Expression::Literal(l) => write!(f, "{}", l.to_string()),
-            Expression::And(expr1, expr2) => {
+            Expression::And(_, expr1, expr2) => {
                 // Explicit parenthesization when printing to output, looks a bit
                 // verbose but shouldn't affect user code.
                 write!(f, "({}, {})", expr1, expr2)
             }
-            Expression::Or(expr1, expr2) => {
+            Expression::Or(_, expr1, expr2) => {
                 write!(f, "({}; {})", expr1, expr2)
             }
         }
@@ -317,15 +327,17 @@ pub mod parser {
         let unification_expr_parser = map(unification_sugar, Expression::Literal);
         // These inner expression parsers can fully recurse.
         let op_application_parser = map(
-            separated_pair(
+            recognized_span(separated_pair(
                 alt((
                     modus_literal,
                     delimited(l_paren_with_comments, body, r_paren_with_comments),
                 )),
                 tag("::"),
                 cut(literal(modus_term)),
-            ),
-            |(expr, operator)| Expression::OperatorApplication(Box::new(expr), operator),
+            )),
+            |(span, (expr, operator))| {
+                Expression::OperatorApplication(Some(span), Box::new(expr), operator)
+            },
         );
         let parenthesized_expr = delimited(l_paren_with_comments, body, r_paren_with_comments);
         alt((
@@ -341,7 +353,18 @@ pub mod parser {
             separated_list1(delimited(comments, tag(","), comments), expression_inner),
             |es| {
                 es.into_iter()
-                    .reduce(|e1, e2| Expression::And(Box::new(e1), Box::new(e2)))
+                    .reduce(|e1, e2| {
+                        // this was just parsed from source code, so it should have a position
+                        let s1 = e1.get_spanned_position().as_ref().unwrap();
+                        let s2 = e2.get_spanned_position().as_ref().unwrap();
+
+                        // This span should include the comma/spacing/etc between e1/e2
+                        let computed_span = SpannedPosition {
+                            offset: s1.offset,
+                            length: s2.offset + s2.length - s1.offset,
+                        };
+                        Expression::And(Some(computed_span), Box::new(e1), Box::new(e2))
+                    })
                     .expect("Converting list to expression pairs.")
             },
         );
@@ -352,7 +375,16 @@ pub mod parser {
             ),
             |es| {
                 es.into_iter()
-                    .reduce(|e1, e2| Expression::Or(Box::new(e1), Box::new(e2)))
+                    .reduce(|e1, e2| {
+                        let s1 = e1.get_spanned_position().as_ref().unwrap();
+                        let s2 = e2.get_spanned_position().as_ref().unwrap();
+
+                        let computed_span = SpannedPosition {
+                            offset: s1.offset,
+                            length: s2.offset + s2.length - s1.offset,
+                        };
+                        Expression::Or(Some(computed_span), Box::new(e1), Box::new(e2))
+                    })
                     .expect("Converting list to expression pairs.")
             },
         );
@@ -450,7 +482,7 @@ pub mod parser {
     /// Parses a substring outside of the expansion part of a format string's content.
     pub fn outside_format_expansion(i: Span) -> IResult<Span, Span> {
         // We want to parse until we see '$', except if it was preceded with escape char.
-        recognize(opt(escaped(none_of("\\$"), '\\', one_of("$"))))(i)
+        recognize(opt(escaped(none_of("\\$"), '\\', one_of("$\"\\nrt0\n"))))(i)
     }
 
     fn modus_format_string(i: Span) -> IResult<Span, (SpannedPosition, String)> {
@@ -546,7 +578,7 @@ mod tests {
         };
         let c = Rule {
             head: l1,
-            body: Expression::And(Box::new(l2.into()), Box::new(l3.into())).into(),
+            body: Expression::And(None, Box::new(l2.into()), Box::new(l3.into())).into(),
         };
 
         assert_eq!("l1 :- (l2, l3).", c.to_string());
@@ -563,7 +595,7 @@ mod tests {
         let l2: Literal = "l2".parse().unwrap();
         let c = Rule {
             head: "foo".parse().unwrap(),
-            body: Expression::Or(Box::new(l1.into()), Box::new(l2.into())).into(),
+            body: Expression::Or(None, Box::new(l1.into()), Box::new(l2.into())).into(),
         };
 
         assert_eq!("foo :- (l1; l2).", c.to_string());
@@ -597,14 +629,16 @@ mod tests {
         let r1 = Rule {
             head: foo.clone(),
             body: Expression::OperatorApplication(
-                Expression::And(Box::new(a.clone().into()), Box::new(b.into())).into(),
+                None,
+                Expression::And(None, Box::new(a.clone().into()), Box::new(b.into())).into(),
                 merge.clone(),
             )
             .into(),
         };
         let r2 = Rule {
             head: foo,
-            body: Expression::OperatorApplication(Box::new(Expression::Literal(a)), merge).into(),
+            body: Expression::OperatorApplication(None, Box::new(Expression::Literal(a)), merge)
+                .into(),
         };
 
         assert_eq!("foo :- ((a, b))::merge.", r1.to_string());
@@ -647,7 +681,8 @@ mod tests {
         let r = Rule {
             head: foo,
             body: Expression::OperatorApplication(
-                Expression::And(Box::new(a.into()), Box::new(b.into())).into(),
+                None,
+                Expression::And(None, Box::new(a.into()), Box::new(b.into())).into(),
                 merge,
             )
             .into(),
@@ -678,7 +713,8 @@ mod tests {
         let r1 = Rule {
             head: foo.clone(),
             body: Expression::OperatorApplication(
-                Expression::Or(Box::new(a.clone().into()), Box::new(b.clone().into())).into(),
+                None,
+                Expression::Or(None, Box::new(a.clone().into()), Box::new(b.clone().into())).into(),
                 merge,
             )
             .into(),
@@ -686,10 +722,13 @@ mod tests {
         let r2 = Rule {
             head: foo.clone(),
             body: Expression::And(
+                None,
                 Box::new(a.clone().into()),
                 Box::new(Expression::And(
+                    None,
                     Box::new(b.clone().into()),
                     Box::new(Expression::Or(
+                        None,
                         Box::new(a.clone().into()),
                         Box::new(b.clone().into()),
                     )),
@@ -744,10 +783,18 @@ mod tests {
         let c: Literal = "c".parse().unwrap();
         let d: Literal = "d".parse().unwrap();
 
-        let e1 = Expression::And(Expression::Literal(a).into(), Expression::Literal(b).into());
-        let e2 = Expression::And(Expression::Literal(c).into(), Expression::Literal(d).into());
+        let e1 = Expression::And(
+            None,
+            Expression::Literal(a).into(),
+            Expression::Literal(b).into(),
+        );
+        let e2 = Expression::And(
+            None,
+            Expression::Literal(c).into(),
+            Expression::Literal(d).into(),
+        );
 
-        let expr = Expression::Or(e1.into(), e2.into());
+        let expr = Expression::Or(None, e1.into(), e2.into());
 
         let expr_str = "((a, b); (c, d))";
         assert_eq!(expr_str, expr.to_string());
@@ -789,8 +836,14 @@ mod tests {
                 args: vec![],
             },
             body: Some(Expression::And(
+                None,
                 Box::new(Expression::OperatorApplication(
-                    Box::new(Expression::And(Box::new(foo.into()), Box::new(bar.into()))),
+                    None,
+                    Box::new(Expression::And(
+                        None,
+                        Box::new(foo.into()),
+                        Box::new(bar.into()),
+                    )),
                     Operator {
                         position: None,
                         predicate: logic::Predicate("setenv".into()),
@@ -801,6 +854,7 @@ mod tests {
                     },
                 )),
                 Box::new(Expression::OperatorApplication(
+                    None,
                     Box::new(baz.into()),
                     Operator {
                         position: None,

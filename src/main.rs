@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
+mod analysis;
 mod buildkit;
 mod builtin;
 mod dockerfile;
@@ -42,6 +43,7 @@ use codespan_reporting::{
     },
 };
 use colored::Colorize;
+use ptree::write_tree;
 use std::{ffi::OsStr, fs, path::Path};
 use std::{io::Write, path::PathBuf};
 use transpiler::render_tree;
@@ -49,6 +51,8 @@ use transpiler::render_tree;
 use modusfile::Modusfile;
 
 use crate::logic::Clause;
+
+use analysis::ModusSemantics;
 
 fn get_file(path: &Path) -> SimpleFile<&str, String> {
     let file_name: &str = path
@@ -136,6 +140,18 @@ fn main() {
                         .long("verbose")
                         .help("Tell docker to print all the output"),
                 )
+                .arg(
+                    Arg::with_name("CUSTOM_FRONTEND")
+                        .long("custom-frontend")
+                        .value_name("IMAGE_REF")
+                        .takes_value(true)
+                        .required(true)
+                        .help("Specify a custom buildkit buildkit frontend to use")
+                        .long_help(concat!("Specify a custom frontend to use for buildkit. It must parse a JSON Modus build plan, and invoke relevant buildkit calls.\n\
+                                    The default is to use a pre-built one hosted on ghcr.io, with commit id ", env!("GIT_SHA"), ".\n\
+                                    This flag allows you to use something other than the default, for example for development on Modus itself."))
+                        .default_value(buildkit::FRONTEND_IMAGE),
+                )
         )
         .subcommand(
             App::new("proof")
@@ -152,6 +168,16 @@ fn main() {
                 )
                 .arg_from_usage("-e --explain 'Prints out an explanation of the steps taken in resolution.'")
                 .arg_from_usage("-g --graph 'Outputs a (DOT) graph that of the SLD tree traversed in resolution.'"),
+        )
+        .subcommand(
+            App::new("check")
+                .about("Analyses a Modusfile and checks the predicate kinds.")
+                .arg(
+                    Arg::with_name("FILE")
+                        .required(true)
+                        .help("Sets the input Modusfile")
+                        .index(1),
+                )
         )
         .get_matches();
 
@@ -224,7 +250,12 @@ fn main() {
                 std::process::exit(1)
             }
             let verbose = sub.is_present("VERBOSE");
-            match buildkit::build(&build_plan, context_dir, verbose) {
+            match buildkit::build(
+                &build_plan,
+                context_dir,
+                verbose,
+                sub.value_of("CUSTOM_FRONTEND").unwrap(),
+            ) {
                 Err(e) => {
                     print_build_error_and_exit(&e.to_string(), &err_writer);
                 }
@@ -285,6 +316,16 @@ fn main() {
                     modus_f.0.len()
                 ),
                 (Ok(modus_f), Some(l)) => {
+                    // we don't attempt SLD if there are any kind errors
+                    let kind_res = modus_f.kinds();
+                    if !kind_res.errs.is_empty() {
+                        for err in kind_res.errs {
+                            term::emit(&mut err_writer.lock(), &config, &file, &err)
+                                .expect("Error writing to stderr.")
+                        }
+                        return;
+                    }
+
                     let max_depth = 20;
                     let clauses: Vec<Clause> = modus_f
                         .0
@@ -300,7 +341,9 @@ fn main() {
                     if should_output_graph {
                         render_tree(&clauses, sld_result, &mut out_writer.lock());
                     } else if should_explain {
-                        println!("{}", sld_result.full_tree.explain(&clauses));
+                        let tree_item = sld_result.full_tree.explain(&clauses);
+                        write_tree(&tree_item, &mut out_writer.lock())
+                            .expect("Error when printing tree to stdout.");
                     } else {
                         let proof_result = Result::from(sld::sld(&clauses, goal, max_depth))
                             .map(|t| sld::proofs(&t, &clauses, goal));
@@ -329,6 +372,24 @@ fn main() {
                         error
                     )
                 }
+            }
+        }
+        ("check", Some(sub)) => {
+            let input_file = sub.value_of("FILE").unwrap();
+            let file = get_file(Path::new(input_file));
+            match file.source().parse::<Modusfile>() {
+                Ok(mf) => {
+                    let kind_res = mf.kinds();
+                    for msg in kind_res.messages {
+                        term::emit(&mut out_writer.lock(), &config, &file, &msg)
+                            .expect("Error when printing to stdout");
+                    }
+                    for err in kind_res.errs {
+                        term::emit(&mut err_writer.lock(), &config, &file, &err)
+                            .expect("Error when printing to stderr.")
+                    }
+                }
+                Err(e) => eprintln!("{}", e),
             }
         }
         _ => (),
