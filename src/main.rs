@@ -348,7 +348,7 @@ fn main() {
                         })
                         .collect();
                     let goal = &vec![l.clone()];
-                    let sld_result = sld::sld(&clauses, goal, max_depth);
+                    let sld_result = sld::sld(&clauses, goal, max_depth, true);
 
                     if should_output_graph {
                         render_tree(&clauses, sld_result, &mut out_writer.lock());
@@ -357,8 +357,7 @@ fn main() {
                         write_tree(&tree_item, &mut out_writer.lock())
                             .expect("Error when printing tree to stdout.");
                     } else {
-                        let proof_result = Result::from(sld::sld(&clauses, goal, max_depth))
-                            .map(|t| sld::proofs(&t, &clauses, goal));
+                        let proof_result = Result::from(sld_result).map(|t| sld::proofs(&t, &clauses, goal));
                         match proof_result {
                             Ok(proofs) => {
                                 println!(

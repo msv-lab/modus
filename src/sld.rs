@@ -437,8 +437,8 @@ impl From<SLDResult> for Result<Tree, Vec<Diagnostic<()>>> {
     }
 }
 
-/// Returns both the SLD tree of only valid paths and the full tree.
-pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel) -> SLDResult {
+/// Returns a tree that contains both successful and failed paths, also, any resolution errors.
+pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel, store_full_tree: bool) -> SLDResult {
     /// select leftmost literal with compatible groundness
     fn select(
         goal: &GoalWithHistory,
@@ -516,6 +516,7 @@ pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel) -> SLDRes
         maxdepth: TreeLevel,
         level: TreeLevel,
         grounded: &HashMap<Signature, Vec<bool>>,
+        store_full_tree: bool,
     ) -> SLDResult {
         if goal.is_empty() {
             let t = Tree {
@@ -643,10 +644,10 @@ pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel) -> SLDRes
                 let SLDResult {
                     tree,
                     errors,
-                } = inner(rules, &resolvent, maxdepth, level + 1, grounded);
+                } = inner(rules, &resolvent, maxdepth, level + 1, grounded, store_full_tree);
                 if tree.is_success() {
                     success_resolvents.insert((lid, rid), (mgu, renaming, tree));
-                } else {
+                } else if store_full_tree {
                     fail_resolvents.insert((lid, rid), (mgu, renaming, tree));
                 }
                 errs.extend(errors);
@@ -684,7 +685,7 @@ pub fn sld(rules: &[Clause<IRTerm>], goal: &Goal, maxdepth: TreeLevel) -> SLDRes
         })
         .collect();
     match grounded_result {
-        Ok(grounded) => inner(rules, &goal_with_history, maxdepth, 0, &grounded),
+        Ok(grounded) => inner(rules, &goal_with_history, maxdepth, 0, &grounded, store_full_tree),
         Err(e) => SLDResult {
             tree: Tree {
                 goal: goal_with_history,
@@ -899,7 +900,7 @@ mod tests {
                 body: vec![],
             },
         ];
-        let tree = sld(&clauses, &goal, 10).tree;
+        let tree = sld(&clauses, &goal, 10, true).tree;
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 2);
 
@@ -921,7 +922,7 @@ mod tests {
             head: "a(X)".parse().unwrap(),
             body: vec![],
         }];
-        let tree = sld(&clauses, &goal, 10).tree;
+        let tree = sld(&clauses, &goal, 10, true).tree;
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 1);
         assert!(contains_ignoring_position(
@@ -938,7 +939,7 @@ mod tests {
             head: "a(X)".parse().unwrap(),
             body: vec![],
         }];
-        let result = sld(&clauses, &goal, 10);
+        let result = sld(&clauses, &goal, 10, true);
         assert_eq!(
             vec![ResolutionError::InsufficientGroundness(goal)],
             result.errors.into_iter().collect::<Vec<_>>()
@@ -967,7 +968,7 @@ mod tests {
                 body: vec![],
             },
         ];
-        let tree = sld(&clauses, &goal, 10).tree;
+        let tree = sld(&clauses, &goal, 10, true).tree;
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 1);
         assert!(contains_ignoring_position(
@@ -999,7 +1000,7 @@ mod tests {
                 body: vec![],
             },
         ];
-        let tree = sld(&clauses, &goal, 10).tree;
+        let tree = sld(&clauses, &goal, 10, true).tree;
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 2);
         assert!(contains_ignoring_position(
@@ -1048,7 +1049,7 @@ mod tests {
                 body: vec![],
             },
         ];
-        let tree = sld(&clauses, &goal, 15).tree;
+        let tree = sld(&clauses, &goal, 15, true).tree;
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 4);
         assert!(contains_ignoring_position(
@@ -1075,7 +1076,7 @@ mod tests {
         let goal: Goal<logic::IRTerm> =
             vec!["string_concat(\"hello\", \"world\", X)".parse().unwrap()];
         let clauses: Vec<logic::Clause> = vec![];
-        let tree = sld(&clauses, &goal, 10).tree;
+        let tree = sld(&clauses, &goal, 10, true).tree;
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 1);
         assert!(contains_ignoring_position(
@@ -1107,7 +1108,7 @@ mod tests {
                     .parse()
                     .unwrap(),
             ];
-            let tree_res = sld(&clauses, &goal, 50);
+            let tree_res = sld(&clauses, &goal, 50, true);
             if is_good {
                 let solutions = solutions(&tree_res.tree);
                 assert_eq!(solutions.len(), 1);

@@ -398,7 +398,7 @@ mod test {
             predicate: Predicate("a".to_owned()),
             args: vec![],
         }];
-        let tree = crate::sld::sld(&rules, &goals, 100).tree;
+        let tree = crate::sld::sld(&rules, &goals, 100, true).tree;
         let solutions = crate::sld::solutions(&tree);
         assert_eq!(solutions.len(), 1);
         assert!(solutions.contains(&goals));

@@ -627,7 +627,9 @@ pub fn plan_from_modusfile(
             })
             .collect();
 
-    let success_tree = Result::from(sld::sld(&clauses, &goal, max_depth))?;
+    // don't store full tree as this takes a lot of memory, and is probably not needed
+    // when building/transpiling
+    let success_tree = Result::from(sld::sld(&clauses, &goal, max_depth, false))?;
     // TODO: sld::proofs should return the ground query corresponding to each proof.
     let proofs = sld::proofs(&success_tree, &clauses, &goal);
     let query_and_proofs = proofs
