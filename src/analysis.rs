@@ -71,6 +71,20 @@ impl ModusSemantics for Modusfile {
             }
         }
 
+        fn problematic_pred_diagnostic(c1: &ModusClause) -> Diagnostic<()> {
+            let message = "Couldn't determine kind of `Predicate` due to a cyclic dependency.";
+            let mut labels = Vec::new();
+            if let Some(span) = &c1.head.position {
+                labels.push(
+                    Label::primary((), Range::from(span))
+                        .with_message(format!("Couldn't determine kind of {}", c1.head)),
+                )
+            }
+            Diagnostic::warning()
+                .with_message(message)
+                .with_labels(labels)
+        }
+
         fn generate_err_diagnostic(
             span: &Option<SpannedPosition>,
             e1: &Expression,
@@ -195,7 +209,12 @@ impl ModusSemantics for Modusfile {
         // computing reachibility through DFS, etc.?
         let mut problem_nodes = sccs
             .into_iter()
-            .filter(|ids| ids.len() > 1)
+            .filter(|ids| {
+                ids.len() > 1
+                    || (ids.len() == 1
+                        // Handles the case of a trivial cycle (a cycle with one node)
+                        && pred_graph.contains_edge(*ids.first().unwrap(), *ids.first().unwrap()))
+            })
             .flatten()
             .collect::<HashSet<_>>();
         for node in pred_graph.node_indices() {
@@ -228,11 +247,13 @@ impl ModusSemantics for Modusfile {
         let mut messages = Vec::new();
         let mut errs = Vec::new();
 
-        for c in self
-            .0
-            .iter()
-            .filter(|c| !problem_preds.contains(c.head.predicate.0.as_str()) && c.body.is_some())
-        {
+        for c in self.0.iter().filter(|c| c.body.is_some()) {
+            if problem_preds.contains(c.head.predicate.0.as_str()) {
+                let diag = problematic_pred_diagnostic(c);
+                errs.push(diag);
+                continue;
+            }
+
             let res = evaluate_kind(
                 c.body.as_ref().unwrap(),
                 &self.0,
@@ -295,6 +316,9 @@ impl ModusSemantics for Modusfile {
     }
 }
 
+// TODO: change approach to computing signature dependency instead, so each node would be
+// a (predicate, num_args) pair instead of just predicate.
+// Also, should compare approach with how imagegen does it to ensure we are consistent.
 trait PredicateDependency {
     /// Returns a graph where an edge, (n1, n2), means that the predicate
     /// n1 depends on n2 to compute it's type.
@@ -459,10 +483,22 @@ mod tests {
     }
 
     #[test]
-    fn ignores_recursion() {
+    fn ignores_indirect_recursion() {
         let clauses = vec![
             "foo(X) :- bar(X).",
             "bar(X) :- foo(X).",
+            "a(X) :- from(X), run(\"apt-get update\").",
+        ];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+
+        let kind_res = mf.kinds();
+        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get("a"));
+    }
+
+    #[test]
+    fn ignores_recursion() {
+        let clauses = vec![
+            "recurse :- recurse.",
             "a(X) :- from(X), run(\"apt-get update\").",
         ];
         let mf: Modusfile = clauses.join("\n").parse().unwrap();

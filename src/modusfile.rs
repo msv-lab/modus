@@ -463,10 +463,20 @@ pub mod parser {
         processed
     }
 
+    const STRING_ESCAPE_CHARS: &str = "\"\\nrt0\n";
+    const FORMAT_STRING_ESCAPE_CHARS: &str = "$\"\\nrt0\n";
+
     /// Parses a string that possibly contains escaped characters, but doesn't actually
     /// convert the escape characters.
     fn string_content(i: Span) -> IResult<Span, String> {
-        let escape_parser = escaped(none_of("\\\""), '\\', one_of("\"\\nrt0\n"));
+        let escape_parser = escaped(none_of("\\\""), '\\', one_of(STRING_ESCAPE_CHARS));
+        let (i, o) = opt(escape_parser)(i)?;
+        let parsed_str: &str = o.map(|span| *span.fragment()).unwrap_or("");
+        Ok((i, parsed_str.to_owned()))
+    }
+
+    fn format_string_content(i: Span) -> IResult<Span, String> {
+        let escape_parser = escaped(none_of("\\\""), '\\', one_of(FORMAT_STRING_ESCAPE_CHARS));
         let (i, o) = opt(escape_parser)(i)?;
         let parsed_str: &str = o.map(|span| *span.fragment()).unwrap_or("");
         Ok((i, parsed_str.to_owned()))
@@ -482,7 +492,7 @@ pub mod parser {
     /// Parses a substring outside of the expansion part of a format string's content.
     pub fn outside_format_expansion(i: Span) -> IResult<Span, Span> {
         // We want to parse until we see '$', except if it was preceded with escape char.
-        recognize(opt(escaped(none_of("\\$"), '\\', one_of("$"))))(i)
+        recognize(opt(escaped(none_of("\\$"), '\\', one_of("$\"\\nrt0\n"))))(i)
     }
 
     fn modus_format_string(i: Span) -> IResult<Span, (SpannedPosition, String)> {
@@ -490,7 +500,7 @@ pub mod parser {
             stringify!(modus_format_string),
             // TODO: check that the token(s) inside "${...}" conform to the variable syntax.
             // Note that if it's escaped, "\${...}", it does not need to conform to the variable syntax.
-            recognized_span(delimited(tag("f\""), string_content, cut(tag("\"")))),
+            recognized_span(delimited(tag("f\""), format_string_content, cut(tag("\"")))),
         )(i)
     }
 

@@ -152,6 +152,14 @@ fn main() {
                                     This flag allows you to use something other than the default, for example for development on Modus itself."))
                         .default_value(buildkit::FRONTEND_IMAGE),
                 )
+                .arg(
+                    Arg::with_name("IMPORT")
+                        .long("import")
+                        .short("i")
+                        .value_name("FILE")
+                        .takes_value(true)
+                        .help("Imports the given CSV file and includes the rows as ground facts.")
+                )
         )
         .subcommand(
             App::new("proof")
@@ -224,6 +232,11 @@ fn main() {
                     std::process::exit(1);
                 }
             };
+            if let Some(import_file) = sub.value_of("IMPORT") {
+                // TODO
+                unimplemented!()
+            }
+
             let build_plan = match imagegen::plan_from_modusfile(mf, query) {
                 Ok(plan) => plan,
                 Err(e) => {
@@ -316,16 +329,16 @@ fn main() {
                     modus_f.0.len()
                 ),
                 (Ok(modus_f), Some(l)) => {
-                    // we don't attempt SLD if there are any kind errors
                     let kind_res = modus_f.kinds();
-                    if !kind_res.errs.is_empty()  {
+                    if !kind_res.errs.is_empty() {
                         for err in kind_res.errs {
-                            term::emit(&mut err_writer.lock(), &config, &file, &err).expect("Error writing to stderr.")
+                            term::emit(&mut err_writer.lock(), &config, &file, &err)
+                                .expect("Error writing to stderr.")
                         }
-                        return;
+                        // The checks are quite strict, so we don't quit.
                     }
 
-                    let max_depth = 20;
+                    let max_depth = 175;
                     let clauses: Vec<Clause> = modus_f
                         .0
                         .iter()
@@ -335,17 +348,17 @@ fn main() {
                         })
                         .collect();
                     let goal = &vec![l.clone()];
-                    let sld_result = sld::sld(&clauses, goal, max_depth);
+                    let sld_result = sld::sld(&clauses, goal, max_depth, true);
 
                     if should_output_graph {
                         render_tree(&clauses, sld_result, &mut out_writer.lock());
                     } else if should_explain {
-                        let tree_item = sld_result.full_tree.explain(&clauses);
+                        let tree_item = sld_result.tree.explain(&clauses);
                         write_tree(&tree_item, &mut out_writer.lock())
                             .expect("Error when printing tree to stdout.");
                     } else {
-                        let proof_result = Result::from(sld::sld(&clauses, goal, max_depth))
-                            .map(|t| sld::proofs(&t, &clauses, goal));
+                        let proof_result =
+                            Result::from(sld_result).map(|t| sld::proofs(&t, &clauses, goal));
                         match proof_result {
                             Ok(proofs) => {
                                 println!(
