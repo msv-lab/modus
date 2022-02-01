@@ -1,25 +1,29 @@
 from modustest import ModusTestCase, Fact
-from textdrap import dedent
+from textwrap import dedent
 
 
-class Test(modustest.TestCase):
-    def test_1(self):
-        file_content = dedent('''\
+class TestSolver(ModusTestCase):
+
+    def test_mutiple_images(self):
+        self.context.add_file("foo.txt", dedent("""\
             aaa
-            bbb
-        ''')
-        context = [ ("foo.txt", file_content) ]
-        modusfile = dedent('''\
-            a(X) :-
+        """))
+        modusfile = dedent("""\
+            f(X) :-
+                g(X),
                 from("alpine"),
-                copy("foo.txt", "/tmp/foo.txt")
-                run(f"echo ${X} >> /tmp/foo.txt")
-        ''')
-        images = self.build(modusfile, context, 'a("ccc")')
-        self.assert(images[Fact("a", ["ccc"])].contains_file("/foo.txt"))
-        expected_content = dedent('''\
+                copy("foo.txt", "/tmp/foo.txt"),
+                run(f"echo ${X} >> /tmp/foo.txt").
+            g("bbb").
+            g("ccc").
+        """)
+
+        images = self.build(modusfile, 'f(X)')
+
+        self.assertEqual(len(images), 2)
+        ccc_image = images[Fact("f", ("ccc",))]
+        self.assertTrue(ccc_image.contains_file("/tmp/foo.txt"))
+        self.assertEqual(ccc_image.read_file("/tmp/foo.txt"), dedent("""\
             aaa
-            bbb
             ccc
-        ''')
-        self.assertEqual(images['a("ccc")'].read_file("/tmp/foo.txt"), expected_content)
+        """))
