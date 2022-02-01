@@ -289,7 +289,11 @@ pub struct Proof {
 impl Proof {
     /// Returns the height of this proof tree, where a leaf node has height 0.
     fn height(&self) -> usize {
-        self.children.iter().map(|child| child.height() + 1).max().unwrap_or(0)
+        self.children
+            .iter()
+            .map(|child| child.height() + 1)
+            .max()
+            .unwrap_or(0)
     }
 }
 
