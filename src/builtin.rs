@@ -264,6 +264,12 @@ intrinsic_predicate!(_operator_set_workdir_begin, false, false);
 intrinsic_predicate!(_operator_set_workdir_end, false, false);
 intrinsic_predicate!(_operator_set_entrypoint_begin, false, false);
 intrinsic_predicate!(_operator_set_entrypoint_end, false, false);
+intrinsic_predicate!(_operator_set_env_begin, false, false, false);
+intrinsic_predicate!(_operator_set_env_end, false, false, false);
+intrinsic_predicate!(_operator_in_env_begin, false, false, false);
+intrinsic_predicate!(_operator_in_env_end, false, false, false);
+intrinsic_predicate!(_operator_append_path_begin, false, false);
+intrinsic_predicate!(_operator_append_path_end, false, false);
 intrinsic_predicate!(copy, false, false);
 intrinsic_predicate!(_operator_merge_begin, false);
 intrinsic_predicate!(_operator_merge_end, false);
@@ -307,6 +313,12 @@ pub fn select_builtin<'a>(
         _operator_set_workdir_end,
         _operator_set_entrypoint_begin,
         _operator_set_entrypoint_end,
+        _operator_set_env_begin,
+        _operator_set_env_end,
+        _operator_in_env_begin,
+        _operator_in_env_end,
+        _operator_append_path_begin,
+        _operator_append_path_end,
         copy,
         equality::StringEq1,
         equality::StringEq2,

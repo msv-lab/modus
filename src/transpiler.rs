@@ -62,17 +62,22 @@ fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
                     parent,
                     command,
                     cwd,
-                } => vec![
-                    Instruction::From(From {
+                    additional_envs,
+                } => {
+                    let mut instructions = vec![Instruction::From(From {
                         parent: ResolvedParent::Stage(format!("n_{}", parent)),
                         alias: Some(str_id),
-                    }),
-                    Instruction::Run(Run(if cwd.is_empty() {
+                    })];
+                    for (k, v) in additional_envs.iter() {
+                        instructions.push(Instruction::Env(Env(format!("{}={}", k, v))));
+                    }
+                    instructions.push(Instruction::Run(Run(if cwd.is_empty() {
                         command.to_owned()
                     } else {
                         format!("cd {:?} || exit 1; {}", cwd, command)
-                    })),
-                ],
+                    })));
+                    instructions
+                }
                 BuildNode::CopyFromImage {
                     parent,
                     src_image,
@@ -139,7 +144,14 @@ fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
                     for op in operations {
                         use imagegen::MergeOperation;
                         match op {
-                            MergeOperation::Run { command, cwd } => {
+                            MergeOperation::Run {
+                                command,
+                                cwd,
+                                additional_envs,
+                            } => {
+                                for (k, v) in additional_envs.iter() {
+                                    insts.push(Instruction::Env(Env(format!("{}={}", k, v))));
+                                }
                                 insts.push(Instruction::Run(Run(if cwd.is_empty() {
                                     command.to_owned()
                                 } else {
@@ -165,6 +177,16 @@ fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
                         }
                     }
                     insts
+                }
+                BuildNode::SetEnv { parent, key, value } => vec![
+                    Instruction::From(From {
+                        parent: ResolvedParent::Stage(format!("n_{}", parent)),
+                        alias: Some(str_id),
+                    }),
+                    Instruction::Env(Env(format!("{}={}", key, value))),
+                ],
+                BuildNode::AppendEnvValue { parent, key, value } => {
+                    todo!()
                 }
             }
         })
