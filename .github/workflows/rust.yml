@@ -35,6 +35,8 @@ jobs:
         SHORT_SHA=$(echo $GITHUB_SHA | head -c 10) &&
         IMAGE_BASE=ghcr.io/$GITHUB_REPOSITORY-buildkit-frontend &&
         IMAGE_REF=$IMAGE_BASE:$SHORT_SHA &&
+        export MODUS_EXECUTABLE=$PWD/target/debug/modus MODUS_BUILDKIT_FRONTEND=$IMAGE_REF &&
+        cd test && python -m unittest discover && cd .. &&
         docker build -t $IMAGE_REF -f /tmp/modus-frontend.Dockerfile . &&
         docker tag $IMAGE_REF $IMAGE_BASE:latest &&
         docker push $IMAGE_REF &&
