@@ -215,6 +215,8 @@ impl Literal<IRTerm> {
 
 #[cfg(test)]
 mod tests {
+    use serial_test::serial;
+
     use super::*;
 
     #[test]
@@ -270,6 +272,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn simple_renaming() {
         let l: logic::Literal = "a(X, X, Y)".parse().unwrap();
         let (m, _) = l.rename_with_sub();
