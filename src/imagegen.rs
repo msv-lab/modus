@@ -73,6 +73,7 @@ struct State {
     current_node: Option<NodeId>,
     cwd: String,
     current_merge: Option<MergeNode>,
+    additional_envs: HashMap<String, String>,
 }
 
 impl State {
@@ -96,6 +97,17 @@ impl State {
     fn set_node(&mut self, node: NodeId) {
         debug_assert!(self.current_merge.is_none());
         self.current_node = Some(node);
+    }
+
+    fn with_additional_envs<E: IntoIterator<Item = (String, String)>, F: FnOnce(&mut Self)>(
+        &mut self,
+        envs: E,
+        f: F,
+    ) {
+        let old_envs = self.additional_envs.clone();
+        self.additional_envs.extend(envs);
+        f(self);
+        self.additional_envs = old_envs;
     }
 }
 
@@ -126,6 +138,7 @@ pub enum BuildNode {
         parent: NodeId,
         command: String,
         cwd: String,
+        additional_envs: HashMap<String, String>,
     },
     CopyFromImage {
         parent: NodeId,
@@ -152,6 +165,16 @@ pub enum BuildNode {
         value: String,
     },
     Merge(MergeNode),
+    SetEnv {
+        parent: NodeId,
+        key: String,
+        value: String,
+    },
+    AppendEnvValue {
+        parent: NodeId,
+        key: String,
+        value: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,6 +188,7 @@ pub enum MergeOperation {
     Run {
         command: String,
         cwd: String,
+        additional_envs: HashMap<String, String>,
     },
     CopyFromImage {
         src_image: NodeId,
@@ -213,6 +237,7 @@ pub fn build_dag_from_proofs(
             current_node: None,
             cwd: "".to_string(),
             current_merge: None,
+            additional_envs: HashMap::new(),
         };
 
         /* We go through the proof tree in depth-first order, since this is
@@ -328,6 +353,7 @@ pub fn build_dag_from_proofs(
                         curr_merge.operations.push(MergeOperation::Run {
                             command,
                             cwd: curr_state.cwd.clone(),
+                            additional_envs: curr_state.additional_envs.clone(),
                         });
                     } else {
                         if !curr_state.has_base() {
@@ -339,6 +365,7 @@ pub fn build_dag_from_proofs(
                                 parent: parent,
                                 command: command,
                                 cwd: curr_state.cwd.clone(),
+                                additional_envs: curr_state.additional_envs.clone(),
                             },
                             vec![parent],
                         ));
@@ -492,6 +519,56 @@ pub fn build_dag_from_proofs(
                     deps.push(parent);
                     curr_state.set_node(res.new_node(BuildNode::Merge(merge_node), deps));
                 }
+                "set_env" => {
+                    if curr_state.current_merge.is_some() {
+                        panic!("You can not generate a new image inside a merge.");
+                    }
+                    let img = process_image(subtree_in_op, rules, res, image_literals, None)
+                        .expect("set_env should be applied to an image.");
+                    if curr_state.has_base() {
+                        panic!(
+                            "set_env generates a new image, so it should be the first instruction."
+                        );
+                    }
+                    let env_k = lit.args[1].as_constant().unwrap().to_owned();
+                    let env_v = lit.args[2].as_constant().unwrap().to_owned();
+                    curr_state.set_node(res.new_node(
+                        BuildNode::SetEnv {
+                            parent: img,
+                            key: env_k,
+                            value: env_v,
+                        },
+                        vec![img],
+                    ));
+                }
+                "append_path" => {
+                    if curr_state.current_merge.is_some() {
+                        panic!("You can not generate a new image inside a merge.");
+                    }
+                    let img = process_image(subtree_in_op, rules, res, image_literals, None)
+                        .expect("append_path should be applied to an image.");
+                    if curr_state.has_base() {
+                        panic!(
+                            "append_path generates a new image, so it should be the first instruction."
+                        );
+                    }
+                    let append = format!(":{}", lit.args[1].as_constant().unwrap());
+                    curr_state.set_node(res.new_node(
+                        BuildNode::AppendEnvValue {
+                            parent: img,
+                            key: "PATH".to_owned(),
+                            value: append,
+                        },
+                        vec![img],
+                    ));
+                }
+                "in_env" => {
+                    let env_k = lit.args[1].as_constant().unwrap().to_owned();
+                    let env_v = lit.args[2].as_constant().unwrap().to_owned();
+                    curr_state.with_additional_envs([(env_k, env_v)], |new_state| {
+                        process_children(subtree_in_op, rules, res, image_literals, new_state);
+                    });
+                }
                 _ => {
                     panic!("Unkown operator: {}", op_name);
                 }
@@ -532,7 +609,15 @@ pub fn build_dag_from_proofs(
                         // at this point j points to the end predicate.
 
                         let subtree_in_op = &children[i + 1..j];
-                        process_operator(subtree_in_op, op_name, lit, rules, res, image_literals, curr_state);
+                        process_operator(
+                            subtree_in_op,
+                            op_name,
+                            lit,
+                            rules,
+                            res,
+                            image_literals,
+                            curr_state,
+                        );
                         i = j + 1;
                         continue;
                     }

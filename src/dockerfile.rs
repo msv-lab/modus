@@ -48,7 +48,7 @@ pub struct Copy(pub String);
 pub struct Run(pub String);
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Env(String);
+pub struct Env(pub String);
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Arg(pub String);

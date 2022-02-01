@@ -241,6 +241,7 @@ async fn handle_build_plan(
                 parent,
                 command,
                 cwd,
+                additional_envs,
             } => {
                 let parent = translated_nodes[*parent]
                     .as_ref()
@@ -249,6 +250,9 @@ async fn handle_build_plan(
                 let mut cmd = new_cmd(&*parent_config, &cwd[..], &parent.0)
                     .args(&["-c", &command[..]])
                     .custom_name(format!("run({:?})", command));
+                for (k, v) in additional_envs.iter() {
+                    cmd = cmd.env(k, v);
+                }
                 let o = OwnedOutput::from_command(cmd.ref_counted(), 0);
                 (o, parent_config)
             }
@@ -347,13 +351,24 @@ async fn handle_build_plan(
                 use shell_escape::escape;
                 for op in operations {
                     match op {
-                        MergeOperation::Run { command, cwd } => {
+                        MergeOperation::Run {
+                            command,
+                            cwd,
+                            additional_envs,
+                        } => {
                             let resolved_cwd = image_cwd.join(cwd);
                             let resolved_cwd = resolved_cwd.to_str().unwrap(); // TODO: report error if image cwd is not valid utf8.
                             script.push(format!(
                                 "(mkdir -p {cd} && cd {cd})",
                                 cd = escape(resolved_cwd.into())
                             ));
+                            for (k, v) in additional_envs.iter() {
+                                script.push(format!(
+                                    "export {}={}",
+                                    escape(k.into()),
+                                    escape(v.into())
+                                ));
+                            }
                             script.push(format!(
                                 "echo {cmd} && sh -c {cmd}",
                                 cmd = escape(command.into())
@@ -398,6 +413,30 @@ async fn handle_build_plan(
                 cmd = cmd.custom_name(format!("merge: {}", name.join(" + ")));
 
                 (OwnedOutput::from_command(cmd.ref_counted(), 0), p_conf)
+            }
+            SetEnv { parent, key, value } => {
+                let (p_out, p_conf) = translated_nodes[*parent].clone().unwrap();
+                let mut p_conf = (*p_conf).clone();
+                p_conf
+                    .config
+                    .get_or_insert_with(empty_image_config)
+                    .env
+                    .get_or_insert_with(BTreeMap::new)
+                    .insert(key.to_owned(), value.to_owned());
+                (p_out, Arc::new(p_conf))
+            }
+            AppendEnvValue { parent, key, value } => {
+                let (p_out, p_conf) = translated_nodes[*parent].clone().unwrap();
+                let mut p_conf = (*p_conf).clone();
+                p_conf
+                    .config
+                    .get_or_insert_with(empty_image_config)
+                    .env
+                    .get_or_insert_with(BTreeMap::new)
+                    .entry(key.to_owned())
+                    .or_insert_with(String::new)
+                    .push_str(&value);
+                (p_out, Arc::new(p_conf))
             }
         };
         translated_nodes[node_id] = Some(new_node);
