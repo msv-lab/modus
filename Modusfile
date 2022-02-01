@@ -1,11 +1,11 @@
 build_env :-
-  from("rust:alpine")::set_workdir("/usr/src/app"),
-  # musl-dev required for tokio (https://github.com/hound-search/hound/issues/238#issuecomment-336915272),
-  # protobuf-dev required for buildkit-proto -> tonic-build
-  # git required for our build.rs
-  run("apk add --no-cache musl-dev protobuf-dev git")
-      ::set_env("PROTOC", "/usr/bin/protoc")
-      ::set_env("PROTOC_INCLUDE", "/usr/include/google/protobuf").
+  (from("rust:alpine")::set_workdir("/usr/src/app"),
+   # musl-dev required for tokio (https://github.com/hound-search/hound/issues/238#issuecomment-336915272),
+   # protobuf-dev required for buildkit-proto -> tonic-build
+   # git required for our build.rs
+   run("apk add --no-cache musl-dev protobuf-dev git"))
+       ::set_env("PROTOC", "/usr/bin/protoc")
+       ::set_env("PROTOC_INCLUDE", "/usr/include/google/protobuf").
 
 run_env :- from("alpine")::set_workdir("/usr/src/app").
 
