@@ -37,7 +37,6 @@ jobs:
         docker build -t $IMAGE_REF -f /tmp/modus-frontend.Dockerfile . &&
         docker tag $IMAGE_REF $IMAGE_BASE:latest &&
         export MODUS_EXECUTABLE=$PWD/target/debug/modus MODUS_BUILDKIT_FRONTEND=$IMAGE_REF &&
-        $MODUS_EXECUTABLE build . 'all("frontend", "release")' --custom-frontend $MODUS_BUILDKIT_FRONTEND &&
         cd test && python -m unittest discover && cd .. &&
-        if [ $GITHUB_EVENT_NAME = pull_request ]; then docker push $IMAGE_REF &&
+        if [ $GITHUB_EVENT_NAME != pull_request ]; then docker push $IMAGE_REF &&
         docker push $IMAGE_BASE:latest; fi
