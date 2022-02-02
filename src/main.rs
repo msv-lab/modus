@@ -147,7 +147,7 @@ fn main() {
                 )
                 .arg(
                     Arg::with_name("ADDITIONAL_OPTS")
-                        .short("C")
+                        .long("docker-flags")
                         .takes_value(true)
                         .multiple(true)
                         .required(false)
