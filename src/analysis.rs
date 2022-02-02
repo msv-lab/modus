@@ -170,7 +170,9 @@ impl ModusSemantics for Modusfile {
 
                     let is_image_expr = (sem1.is_image() && !sem2.is_image())
                         || (sem1.is_logic() && sem2.is_image());
-                    let is_layer_expr = sem1.is_layer() && sem2.is_layer();
+                    let is_layer_expr = (sem1.is_layer() && sem2.is_layer())
+                        || (sem1.is_logic() && sem2.is_layer())
+                        || (sem1.is_layer() && sem2.is_logic());
                     let is_logic_expr = sem1.is_logic() && sem2.is_logic();
 
                     if is_image_expr {
