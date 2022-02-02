@@ -155,7 +155,7 @@ fn main() {
                 )
                 .arg(
                     Arg::with_name("CUSTOM_FRONTEND")
-                        .long("custom-frontend")
+                        .long("custom-buildkit-frontend")
                         .value_name("IMAGE_REF")
                         .takes_value(true)
                         .required(true)
