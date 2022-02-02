@@ -94,7 +94,7 @@ pub fn check_grounded_variables(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logic::Predicate;
+    use crate::{logic::Predicate, modusfile};
     #[test]
     fn consistently_grounded() {
         let clauses: Vec<Clause> = vec![
@@ -136,5 +136,16 @@ mod tests {
         let a_grounded = result.unwrap().get(&a_sig).unwrap().clone();
         assert!(!a_grounded[0]);
         assert!(!a_grounded[1]);
+    }
+
+    #[test]
+    fn groundness_after_translation() {
+        let modus_clause: modusfile::ModusClause = "foo(X) :- bar(X) ; baz.".parse().unwrap();
+        let clauses: Vec<Clause> = (&modus_clause).into();
+        let result = check_grounded_variables(&clauses);
+        assert!(result.is_ok());
+        let foo_sig = Signature(Predicate("foo".into()), 1);
+        let foo_grounded = result.unwrap().get(&foo_sig).unwrap().clone();
+        assert!(!foo_grounded[0]);
     }
 }
