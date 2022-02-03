@@ -54,6 +54,7 @@ struct FrontendOptions {
     filename: String,
     target: Option<String>,
     has_dockerignore: bool,
+    no_cache: bool,
     #[serde(flatten)]
     others: HashMap<String, serde_json::Value>,
 }
@@ -207,6 +208,7 @@ async fn handle_build_plan(
             imgspec: &ImageSpecification,
             this_cwd: &str,
             parent: &OwnedOutput,
+            frontend_options: &FrontendOptions,
         ) -> Command<'static> {
             let mut cmd = Command::run("sh"); // TDDO: use image shell config
             let user = imgspec
@@ -224,6 +226,9 @@ async fn handle_build_plan(
                 }
             }
             cmd = cmd.mount(Mount::Layer(OutputIdx(0), parent.output(), "/"));
+            if frontend_options.no_cache {
+                cmd = cmd.ignore_cache(true);
+            }
             cmd
         }
 
@@ -247,7 +252,7 @@ async fn handle_build_plan(
                     .as_ref()
                     .expect("Expected dependencies to already be built");
                 let parent_config = parent.1.clone();
-                let mut cmd = new_cmd(&*parent_config, &cwd[..], &parent.0)
+                let mut cmd = new_cmd(&*parent_config, &cwd[..], &parent.0, &options)
                     .args(&["-c", &command[..]])
                     .custom_name(format!("run({:?})", command));
                 for (k, v) in additional_envs.iter() {
@@ -343,7 +348,7 @@ async fn handle_build_plan(
             }
             Merge(MergeNode { parent, operations }) => {
                 let (p_out, p_conf) = translated_nodes[*parent].clone().unwrap();
-                let mut cmd = new_cmd(&*p_conf, "", &p_out);
+                let mut cmd = new_cmd(&*p_conf, "", &p_out, &options);
                 let mut name = Vec::new();
                 let mut script = Vec::new();
                 let image_cwd = get_cwd_from_image_spec(&*p_conf);
