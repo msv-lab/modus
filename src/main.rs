@@ -186,6 +186,7 @@ fn main() {
                         .help("Sets the input Modusfile")
                         .index(1),
                 )
+                .arg_from_usage("-v --verbose 'Displays the evaluated kinds for all the clauses.")
         )
         .get_matches();
 
@@ -389,16 +390,24 @@ fn main() {
         ("check", Some(sub)) => {
             let input_file = sub.value_of("FILE").unwrap();
             let file = get_file(Path::new(input_file));
+
+            let is_verbose = sub.is_present("verbose");
+
             match file.source().parse::<Modusfile>() {
                 Ok(mf) => {
                     let kind_res = mf.kinds();
-                    for msg in kind_res.messages {
-                        term::emit(&mut out_writer.lock(), &config, &file, &msg)
-                            .expect("Error when printing to stdout");
+                    if is_verbose {
+                        for msg in kind_res.messages {
+                            term::emit(&mut out_writer.lock(), &config, &file, &msg)
+                                .expect("Error when printing to stdout");
+                        }
                     }
-                    for err in kind_res.errs {
+                    for err in &kind_res.errs {
                         term::emit(&mut err_writer.lock(), &config, &file, &err)
                             .expect("Error when printing to stderr.")
+                    }
+                    if !kind_res.errs.is_empty() {
+                        std::process::exit(1)
                     }
                 }
                 Err(e) => eprintln!("{}", e),
