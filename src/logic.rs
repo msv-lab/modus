@@ -20,6 +20,7 @@
 //! Currently, these structures are generic, parameterized over the types they may use for constants
 //! or variables.
 
+use nom::character::complete::multispace0;
 use nom_locate::LocatedSpan;
 
 use crate::logic::parser::Span;
@@ -294,7 +295,7 @@ impl str::FromStr for Literal {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let span = Span::new(s);
-        match parser::literal(parser::term)(span) {
+        match parser::literal(parser::term, multispace0)(span) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
@@ -309,7 +310,7 @@ pub mod parser {
     use nom::{
         branch::alt,
         bytes::complete::{tag, take_until},
-        character::complete::{alpha1, alphanumeric1, space0, multispace0},
+        character::complete::{alpha1, alphanumeric1, multispace0, space0},
         combinator::{cut, map, opt, recognize},
         error::VerboseError,
         multi::{many0, separated_list0, separated_list1},
@@ -374,17 +375,21 @@ pub mod parser {
     }
 
     /// Parses a literal with a generic term type.
-    pub fn literal<'a, FT: 'a, T>(term: FT) -> impl FnMut(Span<'a>) -> IResult<Span<'a>, Literal<T>>
+    pub fn literal<'a, FT: 'a, T, S, Any>(
+        term: FT,
+        space0: S,
+    ) -> impl FnMut(Span<'a>) -> IResult<Span<'a>, Literal<T>>
     where
         FT: FnMut(Span<'a>) -> IResult<Span<'a>, T> + Clone,
+        S: FnMut(Span<'a>) -> IResult<Span<'a>, Any> + Clone,
     {
         move |i| {
             let (i, (spanned_pos, (name, args))) = recognized_span(pair(
-                literal_identifier,
+                terminated(literal_identifier, space0.clone()),
                 opt(delimited(
-                    terminated(tag("("), space0),
-                    separated_list1(ws(tag(",")), term.clone()),
-                    cut(preceded(space0, tag(")"))),
+                    terminated(tag("("), space0.clone()),
+                    separated_list1(terminated(tag(","), space0.clone()), terminated(term.clone(), space0.clone())),
+                    cut(terminated(tag(")"), space0.clone())),
                 )),
             ))(i)?;
 
@@ -412,9 +417,9 @@ pub mod parser {
     {
         map(
             separated_pair(
-                literal(term.clone()),
+                literal(term.clone(), multispace0),
                 ws(tag(":-")),
-                separated_list0(ws(tag(",")), literal(term)),
+                separated_list0(ws(tag(",")), literal(term, multispace0)),
             ),
             |(head, body)| Clause { head, body },
         )

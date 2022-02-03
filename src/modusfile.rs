@@ -19,6 +19,7 @@ use nom::character::complete::line_ending;
 use nom::character::complete::not_line_ending;
 use nom::error::convert_error;
 use nom::error::VerboseError;
+use rand::Rng;
 use std::fmt;
 use std::str;
 
@@ -255,7 +256,7 @@ impl str::FromStr for Literal {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let span = Span::new(s);
-        match logic::parser::literal(parser::modus_term)(span) {
+        match logic::parser::literal(parser::modus_term, parser::token_sep0)(span) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(e) => Result::Err(format!("{}", e)),
         }
@@ -284,26 +285,75 @@ pub mod parser {
     };
 
     fn comment(s: Span) -> IResult<Span, Span> {
-        delimited(tag("#"), not_line_ending, line_ending)(s)
+        recognize(
+            delimited(tag("#"), opt(not_line_ending), alt((line_ending, eof)))
+        )(s)
+    }
+
+    #[test]
+    fn test_comment_oneline() {
+        let input = Span::new("# comment");
+        let (rest, _) = comment(input).unwrap();
+        assert!(rest.is_empty());
     }
 
     fn comments(s: Span) -> IResult<Span, Vec<Span>> {
         delimited(
             multispace0,
-            separated_list0(multispace0, comment),
+            many0(terminated(comment, multispace0)),
             multispace0,
         )(s)
     }
 
+    #[test]
+    fn test_comments() {
+        let s = Span::new("# comment\n# comment\n");
+        let (rest, _) = comments(s).unwrap();
+        assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn test_comments_oneline() {
+        let s = Span::new("# comment");
+        let (rest, _) = comments(s).unwrap();
+        assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn test_comments_empty() {
+        let s = Span::new("");
+        comments(s).unwrap();
+    }
+
+    /// Parse either nothing, or anything that can separate tokens, including
+    /// spaces, comments, etc.
+    pub fn token_sep0(s: Span) -> IResult<Span, ()> {
+        map(comments, |_| ())(s)
+    }
+
+    #[test]
+    fn test_token_sep0_empty() {
+        let s = Span::new("");
+        token_sep0(s).unwrap();
+    }
+
+    #[test]
+    fn test_token_sep0() {
+        token_sep0(Span::new(" ")).unwrap();
+        token_sep0(Span::new(" \n#")).unwrap();
+        token_sep0(Span::new("#\n\n")).unwrap();
+        token_sep0(Span::new("   ")).unwrap();
+    }
+
     fn head(i: Span) -> IResult<Span, Literal> {
-        context(stringify!(head), literal(modus_term))(i)
+        context(stringify!(head), literal(modus_term, token_sep0))(i)
     }
 
     /// Parses `<term1> = <term2>` into a builtin call, `string_eq(term1, term2)`.
     fn unification_sugar(i: Span) -> IResult<Span, Literal> {
         let (i, (spanned_pos, (t1, t2))) = recognized_span(separated_pair(
             modus_term,
-            delimited(multispace0, tag("="), multispace0),
+            delimited(token_sep0, tag("="), token_sep0),
             cut(modus_term),
         ))(i)?;
 
@@ -318,7 +368,7 @@ pub mod parser {
     }
 
     fn modus_literal(i: Span) -> IResult<Span, Expression> {
-        map(literal(modus_term), Expression::Literal)(i)
+        map(literal(modus_term, token_sep0), Expression::Literal)(i)
     }
 
     fn expression_inner(i: Span) -> IResult<Span, Expression> {
@@ -335,8 +385,8 @@ pub mod parser {
                 )),
                 // :: separated list of operators
                 many1(recognized_span(preceded(
-                    delimited(multispace0, tag("::"), multispace0),
-                    cut(literal(modus_term)),
+                    delimited(token_sep0, tag("::"), token_sep0),
+                    cut(literal(modus_term, token_sep0)),
                 ))),
             ),
             |(expr, ops_with_span)| {
@@ -404,9 +454,11 @@ pub mod parser {
         // defines it as "head."
         context(
             stringify!(fact),
-            map(terminated(head, tag(".")), |h| ModusClause {
-                head: h,
-                body: None,
+            map(terminated(head, terminated(tag("."), token_sep0)), |h| {
+                ModusClause {
+                    head: h,
+                    body: None,
+                }
             }),
         )(i)
     }
@@ -417,8 +469,11 @@ pub mod parser {
             map(
                 separated_pair(
                     head,
-                    delimited(space0, tag(":-"), multispace0),
-                    context("rule_body", cut(terminated(body, tag(".")))),
+                    delimited(token_sep0, tag(":-"), token_sep0),
+                    context(
+                        "rule_body",
+                        cut(terminated(body, terminated(tag("."), token_sep0))),
+                    ),
                 ),
                 |(head, body)| ModusClause {
                     head,
@@ -540,11 +595,8 @@ pub mod parser {
     pub fn modusfile(i: Span) -> IResult<Span, Modusfile> {
         map(
             terminated(
-                many0(preceded(
-                    many0(dockerfile::parser::ignored_line_for_span),
-                    modus_clause,
-                )),
-                terminated(many0(dockerfile::parser::ignored_line_for_span), eof),
+                many0(preceded(token_sep0, modus_clause)),
+                terminated(token_sep0, eof),
             ),
             Modusfile,
         )(i)
@@ -553,6 +605,8 @@ pub mod parser {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use serial_test::serial;
 
     use super::*;
@@ -928,5 +982,115 @@ mod tests {
         assert!(expected.eq_ignoring_position(&r1));
         assert!(expected.eq_ignoring_position(&r2));
         assert!(expected.eq_ignoring_position(&r3));
+    }
+
+    #[test]
+    fn test_spaces() {
+        fn add_spaces(tokens: &[&str], spaces: &[&str]) -> String {
+            let mut s = String::new();
+            let mut rng = rand::thread_rng();
+            for token in tokens {
+                if token.is_empty() {
+                    continue;
+                }
+                if spaces.len() == 1 {
+                    s.push_str(spaces[0]);
+                } else {
+                    s.push_str(spaces[rng.gen_range(0..spaces.len())]);
+                }
+                s.push_str(token.trim());
+            }
+            s
+        }
+
+        fn do_test(lines: &str) {
+            let tokens = lines.lines().collect::<Vec<_>>();
+            fn should_parse(s: &str) {
+                if let Err(e) = s.parse::<Modusfile>() {
+                    panic!(
+                        "Failed to parse: Error:\n{e}\nModusfile:\n{s}",
+                        e = e,
+                        s = s
+                    );
+                }
+            }
+            should_parse(&add_spaces(&tokens, &[""]));
+            should_parse(&add_spaces(&tokens, &[" "]));
+            should_parse(&add_spaces(&tokens, &["\n"]));
+            should_parse(&add_spaces(&tokens, &["# Comment\n"]));
+            should_parse(&add_spaces(&tokens, &["\n# Comment\n"]));
+            should_parse(&add_spaces(&tokens, &["", " ", "\n", "\n# Comment\n"]));
+        }
+
+        do_test(
+            r#"
+            final
+            :-
+            from
+            (
+            "alpine"
+            )
+            .
+        "#,
+        );
+
+        do_test(
+            r#"
+            final
+            :-
+            from
+            (
+            "alpine"
+            )
+            ::
+            set_workdir
+            (
+            "/tmp"
+            )
+            ,
+            run
+            (
+            "pwd"
+            )
+            .
+        "#,
+        );
+
+        do_test(
+            r#"
+            final
+            :-
+            a
+            ,
+            b
+            ,
+            c
+            ;
+            d
+            ,
+            (
+            e
+            ,
+            f
+            (
+            V1
+            ,
+            V2
+            )
+            ,
+            V1
+            =
+            V2
+            )
+            ;
+            g
+            ,
+            h
+            ::i
+            ,
+            j
+            .
+        "#,
+        )
     }
 }
