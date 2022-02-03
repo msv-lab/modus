@@ -268,7 +268,9 @@ fn main() {
                     w.set_color(&ColorSpec::new())?;
                     write!(w, ": ")?;
                     w.set_color(ColorSpec::new().set_bold(true))?;
-                    write!(w, "{}\n", e_str)?;
+                    write!(w, "{}", e_str)?;
+                    w.set_color(&ColorSpec::new())?;
+                    write!(w, "\n")?;
                     w.flush()?;
                     Ok(())
                 })()
