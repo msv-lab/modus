@@ -78,7 +78,7 @@ class ModusTestCase(unittest.TestCase):
             with cd(self.context.name):
                 cmd = [MODUS_EXECUTABLE, "build", self.context.name, "-f", mf.name, query, "--json"]
                 if MODUS_BUILDKIT_FRONTEND:
-                    cmd.extend(["--custom-frontend", MODUS_BUILDKIT_FRONTEND])
+                    cmd.extend(["--custom-buildkit-frontend", MODUS_BUILDKIT_FRONTEND])
                 result = run(cmd, check=True, text=True, stdout=PIPE, stderr=DEVNULL)
                 objects = json.load(StringIO(result.stdout))
                 images = { fact:img
