@@ -43,12 +43,12 @@ class Image:
         return result.stdout
 
 class Context(TemporaryDirectory):
-    
+
     def add_file(self, path, content):
         dirname = Path(self.name) / Path(path).parent
-        dirname.mkdir(parents=True, exist_ok=True) 
+        dirname.mkdir(parents=True, exist_ok=True)
         (dirname / Path(path).name).write_text(content)
-       
+
 
 class ModusTestCase(unittest.TestCase):
 
@@ -79,7 +79,9 @@ class ModusTestCase(unittest.TestCase):
                 cmd = [MODUS_EXECUTABLE, "build", self.context.name, "-f", mf.name, query, "--json"]
                 if MODUS_BUILDKIT_FRONTEND:
                     cmd.extend(["--custom-buildkit-frontend", MODUS_BUILDKIT_FRONTEND])
-                result = run(cmd, check=True, text=True, stdout=PIPE, stderr=DEVNULL)
+                result = run(cmd, check=False, text=True, stdout=PIPE, stderr=PIPE)
+                if result.returncode != 0:
+                    raise Exception(f"Build failed:\n{result.stderr}")
                 objects = json.load(StringIO(result.stdout))
                 images = { fact:img
                            for (fact, img)
