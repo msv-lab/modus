@@ -17,6 +17,20 @@ class TestSimple(ModusTestCase):
         first_img = imgs[Fact("a", ())]
         self.assertFalse(first_img.contains_file("/tmp/a"))
 
+    def test_1_indented(self):
+        mf = """\
+          a :- from("alpine").
+          b :- a, run("echo aaa > /tmp/a")."""
+        imgs = self.build(mf, "b")
+        self.assertEqual(len(imgs), 1)
+        first_img = imgs[Fact("b", ())]
+        self.assertEqual(first_img.read_file("/tmp/a"), "aaa\n")
+
+        imgs = self.build(mf, "a")
+        self.assertEqual(len(imgs), 1)
+        first_img = imgs[Fact("a", ())]
+        self.assertFalse(first_img.contains_file("/tmp/a"))
+
     def test_2(self):
         mf = dedent("""\
         a :- from("alpine")::set_workdir("/tmp/new_dir"),
