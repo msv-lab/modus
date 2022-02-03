@@ -309,7 +309,7 @@ pub mod parser {
     use nom::{
         branch::alt,
         bytes::complete::{tag, take_until},
-        character::complete::{alpha1, alphanumeric1, space0},
+        character::complete::{alpha1, alphanumeric1, space0, multispace0},
         combinator::{cut, map, opt, recognize},
         error::VerboseError,
         multi::{many0, separated_list0, separated_list1},
@@ -347,7 +347,7 @@ pub mod parser {
     where
         F: FnMut(Span<'a>) -> IResult<Span<'a>, O>,
     {
-        delimited(space0, inner, space0)
+        delimited(multispace0, inner, multispace0)
     }
 
     fn constant(i: Span) -> IResult<Span, Span> {
@@ -440,13 +440,15 @@ mod tests {
         let l1 = Literal {
             position: None,
             predicate: Predicate("l1".into()),
-            args: vec![IRTerm::Constant("c".into())],
+            args: vec![IRTerm::Constant("c".into()), IRTerm::Constant("d".into())],
         };
 
-        assert_eq!("l1(\"c\")", l1.to_string());
+        assert_eq!("l1(\"c\", \"d\")", l1.to_string());
 
-        let actual: Literal = "l1(\"c\")".parse().unwrap();
-        assert!(l1.eq_ignoring_position(&actual));
+        let actual1: Literal = "l1(\"c\", \"d\")".parse().unwrap();
+        let actual2: Literal = "l1(\"c\",\n\t\"d\")".parse().unwrap();
+        assert!(l1.eq_ignoring_position(&actual1));
+        assert!(l1.eq_ignoring_position(&actual2));
     }
 
     #[test]

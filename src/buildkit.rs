@@ -95,14 +95,20 @@ pub enum BuildError {
 
 use BuildError::*;
 
+pub struct DockerBuildOptions {
+    pub verbose: bool,
+    pub no_cache: bool,
+    pub additional_args: Vec<String>,
+}
+
 fn invoke_buildkit(
     dockerfile: &AutoDeleteTmpFilename,
     tag: Option<String>,
     target: Option<String>,
     has_dockerignore: bool,
     iidfile: Option<&str>,
-    verbose: bool,
     signals: &mut SignalsInfo<SignalOnly>,
+    options: &DockerBuildOptions,
 ) -> Result<(), BuildError> {
     let mut args = Vec::new();
     args.push("build".to_string());
@@ -131,9 +137,20 @@ fn invoke_buildkit(
         args.push("--iidfile".to_string());
         args.push(iidfile.to_string());
     }
-    if verbose {
+    if options.verbose {
         args.push("--progress=plain".to_string());
     }
+    if options.no_cache {
+        args.push("--no-cache".to_string());
+        // Sometimes it isn't enough to just use --no-cache, so we also tell our frontend
+        // to issue ignore_cache.
+        args.push("--build-arg".to_string());
+        args.push("no_cache=true".to_string());
+    } else {
+        args.push("--build-arg".to_string());
+        args.push("no_cache=false".to_string());
+    }
+    args.extend_from_slice(&options.additional_args);
     let mut cmd = Command::new("docker")
         .args(args)
         .stdin(Stdio::null())
@@ -249,7 +266,7 @@ impl Drop for RestoreCwd {
 pub fn build<P: AsRef<Path>>(
     build_plan: &BuildPlan,
     context: P,
-    verbose: bool,
+    docker_build_options: &DockerBuildOptions,
     frontend_image: &str,
 ) -> Result<Vec<String>, BuildError> {
     let mut signals = SignalsInfo::with_exfiltrator(&[SIGINT, SIGTERM, SIGCHLD], SignalOnly)
@@ -285,8 +302,8 @@ pub fn build<P: AsRef<Path>>(
                 None,
                 has_dockerignore,
                 Some(iidfile.name()),
-                verbose,
                 &mut signals,
+                &docker_build_options,
             )?;
             if check_terminate(&mut signals) {
                 return Err(Interrupted);
@@ -305,8 +322,8 @@ pub fn build<P: AsRef<Path>>(
                 None,
                 has_dockerignore,
                 None,
-                verbose,
                 &mut signals,
+                docker_build_options,
             )?;
             let mut res = Vec::with_capacity(nb_outputs);
             let stderr = std::io::stderr();
@@ -341,8 +358,8 @@ pub fn build<P: AsRef<Path>>(
                     Some(target_str),
                     has_dockerignore,
                     Some(iidfile.name()),
-                    verbose,
                     &mut signals,
+                    &docker_build_options,
                 )?;
                 let iid = std::fs::read_to_string(iidfile.name())?;
                 write!(stderr, "{}", format!(" -> {}\n", &iid).blue())?;

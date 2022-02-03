@@ -1,9 +1,11 @@
 build_env :-
-  ((from("rust:alpine")::set_workdir("/usr/src/app"),
-  # musl-dev required for tokio (https://github.com/hound-search/hound/issues/238#issuecomment-336915272),
-  # protobuf-dev required for buildkit-proto -> tonic-build
-  # git required for our build.rs
-  run("apk add --no-cache musl-dev protobuf-dev git"))::set_env("PROTOC", "/usr/bin/protoc"))::set_env("PROTOC_INCLUDE", "/usr/include/google/protobuf").
+  (from("rust:alpine")::set_workdir("/usr/src/app"),
+   # musl-dev required for tokio (https://github.com/hound-search/hound/issues/238#issuecomment-336915272),
+   # protobuf-dev required for buildkit-proto -> tonic-build
+   # git required for our build.rs
+   run("apk add --no-cache musl-dev protobuf-dev git"))
+       ::set_env("PROTOC", "/usr/bin/protoc")
+       ::set_env("PROTOC_INCLUDE", "/usr/include/google/protobuf").
 
 run_env :- from("alpine")::set_workdir("/usr/src/app").
 
@@ -32,13 +34,13 @@ frontend_img(profile) :-
     # Work-around for https://github.com/modus-continens/modus/issues/98
     # We need to transpile this to Dockerfile to bootstrap the frontend.
     # Normally just saying f"${target_folder}/..." is good enough.
-    (build(profile))::copy(f"/usr/src/app/${target_folder}/buildkit-frontend", "./buildkit-frontend")
+    build(profile)::copy(f"/usr/src/app/${target_folder}/buildkit-frontend", "./buildkit-frontend")
   )::set_entrypoint("./buildkit-frontend").
 
 modus(profile) :-
   (run_env,
     profile_to_target_folder(profile, target_folder),
-    (build(profile))::copy(f"${target_folder}/modus", "./modus")
+    build(profile)::copy(f"${target_folder}/modus", "./modus")
   )::set_entrypoint("./modus").
 
 profile_to_target_folder("debug", "target/debug").

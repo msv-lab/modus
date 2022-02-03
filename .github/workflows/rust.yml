@@ -30,12 +30,13 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     - name: Docker build frontend
-      if: github.event_name != 'pull_request'
       run: >
         SHORT_SHA=$(echo $GITHUB_SHA | head -c 10) &&
         IMAGE_BASE=ghcr.io/$GITHUB_REPOSITORY-buildkit-frontend &&
         IMAGE_REF=$IMAGE_BASE:$SHORT_SHA &&
         docker build -t $IMAGE_REF -f /tmp/modus-frontend.Dockerfile . &&
         docker tag $IMAGE_REF $IMAGE_BASE:latest &&
-        docker push $IMAGE_REF &&
-        docker push $IMAGE_BASE:latest
+        export MODUS_EXECUTABLE=$PWD/target/debug/modus MODUS_BUILDKIT_FRONTEND=$IMAGE_REF &&
+        cd test && python -m unittest discover && cd .. &&
+        if [ $GITHUB_EVENT_NAME != pull_request ]; then docker push $IMAGE_REF &&
+        docker push $IMAGE_BASE:latest; fi

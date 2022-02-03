@@ -50,7 +50,7 @@ use transpiler::render_tree;
 
 use modusfile::Modusfile;
 
-use crate::logic::Clause;
+use crate::{buildkit::DockerBuildOptions, logic::Clause};
 
 use analysis::ModusSemantics;
 
@@ -141,8 +141,21 @@ fn main() {
                         .help("Tell docker to print all the output"),
                 )
                 .arg(
+                    Arg::with_name("NO_CACHE")
+                        .long("--no-cache")
+                        .help("Ignore all existing build cache"),
+                )
+                .arg(
+                    Arg::with_name("ADDITIONAL_OPTS")
+                        .long("docker-flags")
+                        .takes_value(true)
+                        .multiple(true)
+                        .required(false)
+                        .help("Pass additional options to docker build")
+                )
+                .arg(
                     Arg::with_name("CUSTOM_FRONTEND")
-                        .long("custom-frontend")
+                        .long("custom-buildkit-frontend")
                         .value_name("IMAGE_REF")
                         .takes_value(true)
                         .required(true)
@@ -256,18 +269,27 @@ fn main() {
                     w.set_color(&ColorSpec::new())?;
                     write!(w, ": ")?;
                     w.set_color(ColorSpec::new().set_bold(true))?;
-                    write!(w, "{}\n", e_str)?;
+                    write!(w, "{}", e_str)?;
+                    w.set_color(&ColorSpec::new())?;
+                    write!(w, "\n")?;
                     w.flush()?;
                     Ok(())
                 })()
                 .expect("Unable to write to stderr.");
                 std::process::exit(1)
             }
-            let verbose = sub.is_present("VERBOSE");
+            let options = DockerBuildOptions {
+                verbose: sub.is_present("VERBOSE"),
+                no_cache: sub.is_present("NO_CACHE"),
+                additional_args: sub
+                    .values_of("ADDITIONAL_OPTS")
+                    .map(|x| x.map(ToOwned::to_owned).collect())
+                    .unwrap_or_default(),
+            };
             match buildkit::build(
                 &build_plan,
                 context_dir,
-                verbose,
+                &options,
                 sub.value_of("CUSTOM_FRONTEND").unwrap(),
             ) {
                 Err(e) => {

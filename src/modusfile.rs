@@ -272,7 +272,8 @@ pub mod parser {
     use nom::character::complete::{multispace0, none_of, one_of};
     use nom::combinator::{cut, opt, recognize};
     use nom::error::context;
-    use nom::multi::separated_list1;
+    use nom::multi::{many1, separated_list1};
+    use nom::sequence::pair;
     use nom::{
         branch::alt,
         bytes::complete::tag,
@@ -327,16 +328,21 @@ pub mod parser {
         let unification_expr_parser = map(unification_sugar, Expression::Literal);
         // These inner expression parsers can fully recurse.
         let op_application_parser = map(
-            recognized_span(separated_pair(
+            pair(
                 alt((
                     modus_literal,
                     delimited(l_paren_with_comments, body, r_paren_with_comments),
                 )),
-                tag("::"),
-                cut(literal(modus_term)),
-            )),
-            |(span, (expr, operator))| {
-                Expression::OperatorApplication(Some(span), Box::new(expr), operator)
+                // :: separated list of operators
+                many1(recognized_span(preceded(
+                    delimited(multispace0, tag("::"), multispace0),
+                    cut(literal(modus_term)),
+                ))),
+            ),
+            |(expr, ops_with_span)| {
+                ops_with_span.into_iter().fold(expr, |acc, (span, op)| {
+                    Expression::OperatorApplication(Some(span), Box::new(acc), op)
+                })
             },
         );
         let parenthesized_expr = delimited(l_paren_with_comments, body, r_paren_with_comments);
@@ -882,5 +888,45 @@ mod tests {
             .parse()
             .unwrap();
         assert!(a.eq_ignoring_position(&actual));
+    }
+
+    #[test]
+    fn op_application_chained_with_spaces() {
+        let r1: Rule = "a :- foo::set_env::in_env.".parse().unwrap();
+        let r2: Rule = "a :- foo :: set_env :: in_env.".parse().unwrap();
+        let r3: Rule = "a :- foo\n::\nset_env\n::\nin_env.".parse().unwrap();
+
+        let expected = Rule {
+            head: logic::Literal {
+                position: None,
+                predicate: logic::Predicate("a".to_owned()),
+                args: vec![],
+            },
+            body: Some(Expression::OperatorApplication(
+                None,
+                Box::new(Expression::OperatorApplication(
+                    None,
+                    Box::new(Expression::Literal(logic::Literal {
+                        position: None,
+                        predicate: logic::Predicate("foo".into()),
+                        args: Vec::new(),
+                    })),
+                    Operator {
+                        position: None,
+                        predicate: logic::Predicate("set_env".into()),
+                        args: Vec::new(),
+                    },
+                )),
+                Operator {
+                    position: None,
+                    predicate: logic::Predicate("in_env".into()),
+                    args: Vec::new(),
+                },
+            )),
+        };
+
+        assert!(expected.eq_ignoring_position(&r1));
+        assert!(expected.eq_ignoring_position(&r2));
+        assert!(expected.eq_ignoring_position(&r3));
     }
 }

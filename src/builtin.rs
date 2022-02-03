@@ -232,6 +232,28 @@ mod number {
             }
         }
     }
+
+    pub struct NumberGeq0;
+    impl BuiltinPredicate for NumberGeq0 {
+        fn name(&self) -> &'static str {
+            "number_geq"
+        }
+
+        fn arg_groundness(&self) -> &'static [bool] {
+            &[false, false]
+        }
+
+        /// Parses and checks that arg1 >= arg2.
+        fn apply(&self, lit: &crate::logic::Literal) -> Option<crate::logic::Literal> {
+            let a: f64 = lit.args[0].as_constant().and_then(|s| s.parse().ok())?;
+            let b: f64 = lit.args[1].as_constant().and_then(|s| s.parse().ok())?;
+            if a >= b {
+                Some(lit.clone())
+            } else {
+                None
+            }
+        }
+    }
 }
 
 macro_rules! intrinsic_predicate {
@@ -324,7 +346,8 @@ pub fn select_builtin<'a>(
         equality::StringEq2,
         _operator_merge_begin,
         _operator_merge_end,
-        number::NumberGt0
+        number::NumberGt0,
+        number::NumberGeq0
     )
 }
 
@@ -420,7 +443,7 @@ mod test {
     }
 
     #[test]
-    pub fn test_number() {
+    pub fn test_number_gt() {
         use crate::logic::{Literal, Predicate};
 
         let lit = Literal {
@@ -435,6 +458,25 @@ mod test {
         assert!(b.0.is_match());
         let b = b.1.unwrap();
         assert_eq!(b.name(), "number_gt");
+        assert_eq!(b.apply(&lit), Some(lit));
+    }
+
+    #[test]
+    pub fn test_number_geq() {
+        use crate::logic::{Literal, Predicate};
+
+        let lit = Literal {
+            position: None,
+            predicate: Predicate("number_geq".to_owned()),
+            args: vec![
+                IRTerm::Constant("42".to_owned()),
+                IRTerm::Constant("42.0".to_owned()),
+            ],
+        };
+        let b = super::select_builtin(&lit);
+        assert!(b.0.is_match());
+        let b = b.1.unwrap();
+        assert_eq!(b.name(), "number_geq");
         assert_eq!(b.apply(&lit), Some(lit));
     }
 }
