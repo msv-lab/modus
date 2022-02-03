@@ -125,20 +125,6 @@ mod tests {
     }
 
     #[test]
-    fn inconsistently_grounded() {
-        let clauses: Vec<Clause> = vec![
-            "a(X, Y) :- b(X), c(X, Z).".parse().unwrap(),
-            "a(X, Y) :- d(Y).".parse().unwrap(),
-        ];
-        let result = check_grounded_variables(&clauses);
-        assert!(result.is_ok());
-        let a_sig = Signature(Predicate("a".into()), 2);
-        let a_grounded = result.unwrap().get(&a_sig).unwrap().clone();
-        assert!(!a_grounded[0]);
-        assert!(!a_grounded[1]);
-    }
-
-    #[test]
     fn groundness_after_translation() {
         let modus_clause: modusfile::ModusClause = "foo(X) :- bar(X) ; baz.".parse().unwrap();
         let clauses: Vec<Clause> = (&modus_clause).into();
