@@ -6,9 +6,12 @@
 //! Note that this does not necessarily mean that it is not solvable, but that it would require a different approach.
 
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 use std::ops::Range;
 
-use codespan_reporting::diagnostic::{Diagnostic, Label};
+use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
+use codespan_reporting::files::Files;
+use codespan_reporting::term::{self, Config};
 use petgraph::algo::has_path_connecting;
 
 use crate::logic::{Literal, Predicate, SpannedPosition};
@@ -94,7 +97,7 @@ impl ModusSemantics for Modusfile {
         ) -> Diagnostic<()> {
             let message = "Couldn't determine kind of `Expression`.";
             let mut labels = Vec::new();
-            if let Some(_) = span {
+            if span.is_some() {
                 labels.push(
                     Label::secondary((), Range::from(e1.get_spanned_position().as_ref().unwrap()))
                         .with_message(format!("this is found to be a `{:?}` expression", sem1)),
@@ -393,6 +396,34 @@ impl PredicateDependency for Modusfile {
 
         g
     }
+}
+
+/// Returns true if the results of the check were satisfactory; we don't need to terminate.
+pub fn check_and_output_analysis<
+    'files,
+    W: Write + codespan_reporting::term::termcolor::WriteColor,
+    F: Files<'files, FileId = ()>,
+>(
+    mf: &Modusfile,
+    verbose: bool,
+    out: &mut W,
+    config: &Config,
+    file: &'files F,
+) -> bool {
+    let kind_res = mf.kinds();
+    if verbose {
+        for msg in kind_res.messages {
+            term::emit(out, config, file, &msg).expect("Error when writing to stderr.");
+        }
+    }
+    for err in &kind_res.errs {
+        term::emit(out, config, file, err).expect("Error when writing to stderr.");
+    }
+
+    kind_res
+        .errs
+        .iter()
+        .all(|err| err.severity != Severity::Error)
 }
 
 #[cfg(test)]

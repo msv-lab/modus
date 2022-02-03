@@ -309,7 +309,7 @@ pub mod parser {
     use nom::{
         branch::alt,
         bytes::complete::{tag, take_until},
-        character::complete::{alpha1, alphanumeric1, space0, multispace0},
+        character::complete::{alpha1, alphanumeric1, multispace0, space0},
         combinator::{cut, map, opt, recognize},
         error::VerboseError,
         multi::{many0, separated_list0, separated_list1},
