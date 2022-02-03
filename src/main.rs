@@ -52,7 +52,7 @@ use modusfile::Modusfile;
 
 use crate::{buildkit::DockerBuildOptions, logic::Clause};
 
-use analysis::ModusSemantics;
+use analysis::check_and_output_analysis;
 
 fn get_file(path: &Path) -> SimpleFile<&str, String> {
     let file_name: &str = path
@@ -199,6 +199,7 @@ fn main() {
                         .help("Sets the input Modusfile")
                         .index(1),
                 )
+                .arg_from_usage("-v --verbose 'Displays the evaluated kinds for all the clauses.")
         )
         .get_matches();
 
@@ -213,7 +214,22 @@ fn main() {
             let query: logic::Literal = sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
             let query = query.with_position(None);
 
-            let mf: Modusfile = file.source().parse().unwrap();
+            let mf: Modusfile = match file.source().parse() {
+                Ok(mf) => mf,
+                Err(e) => {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
+                }
+            };
+            if !check_and_output_analysis(
+                &mf,
+                false,
+                &mut err_writer.lock(),
+                &config,
+                &file,
+            ) {
+                std::process::exit(1)
+            }
 
             let df_res = transpiler::transpile(mf, query);
 
@@ -245,6 +261,16 @@ fn main() {
                     std::process::exit(1);
                 }
             };
+            if !check_and_output_analysis(
+                &mf,
+                false,
+                &mut err_writer.lock(),
+                &config,
+                &file,
+            ) {
+                std::process::exit(1)
+            }
+
             if let Some(import_file) = sub.value_of("IMPORT") {
                 // TODO
                 unimplemented!()
@@ -351,13 +377,14 @@ fn main() {
                     modus_f.0.len()
                 ),
                 (Ok(modus_f), Some(l)) => {
-                    let kind_res = modus_f.kinds();
-                    if !kind_res.errs.is_empty() {
-                        for err in kind_res.errs {
-                            term::emit(&mut err_writer.lock(), &config, &file, &err)
-                                .expect("Error writing to stderr.")
-                        }
-                        // The checks are quite strict, so we don't quit.
+                    if !check_and_output_analysis(
+                        &modus_f,
+                        false,
+                        &mut err_writer.lock(),
+                        &config,
+                        &file,
+                    ) {
+                        std::process::exit(1)
                     }
 
                     let max_depth = 175;
@@ -411,16 +438,19 @@ fn main() {
         ("check", Some(sub)) => {
             let input_file = sub.value_of("FILE").unwrap();
             let file = get_file(Path::new(input_file));
+
+            let is_verbose = sub.is_present("verbose");
+
             match file.source().parse::<Modusfile>() {
                 Ok(mf) => {
-                    let kind_res = mf.kinds();
-                    for msg in kind_res.messages {
-                        term::emit(&mut out_writer.lock(), &config, &file, &msg)
-                            .expect("Error when printing to stdout");
-                    }
-                    for err in kind_res.errs {
-                        term::emit(&mut err_writer.lock(), &config, &file, &err)
-                            .expect("Error when printing to stderr.")
+                    if !check_and_output_analysis(
+                        &mf,
+                        is_verbose,
+                        &mut err_writer.lock(),
+                        &config,
+                        &file,
+                    ) {
+                        std::process::exit(1)
                     }
                 }
                 Err(e) => eprintln!("{}", e),

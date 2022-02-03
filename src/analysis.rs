@@ -6,13 +6,16 @@
 //! Note that this does not necessarily mean that it is not solvable, but that it would require a different approach.
 
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 use std::ops::Range;
 
-use codespan_reporting::diagnostic::{Diagnostic, Label};
+use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
+use codespan_reporting::files::Files;
+use codespan_reporting::term::{self, Config};
 use petgraph::algo::has_path_connecting;
 
-use crate::logic::{Predicate, SpannedPosition};
-use crate::modusfile::{Expression, ModusClause};
+use crate::logic::{Literal, Predicate, SpannedPosition};
+use crate::modusfile::{Expression, ModusClause, ModusTerm};
 use crate::Modusfile;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -71,13 +74,13 @@ impl ModusSemantics for Modusfile {
             }
         }
 
-        fn problematic_pred_diagnostic(c1: &ModusClause) -> Diagnostic<()> {
-            let message = "Couldn't determine kind of `Predicate` due to a cyclic dependency.";
+        fn problematic_pred_diagnostic(lit: &Literal<ModusTerm>) -> Diagnostic<()> {
+            let message = "Couldn't evaluate expression due to a possible cyclic dependency.";
             let mut labels = Vec::new();
-            if let Some(span) = &c1.head.position {
+            if let Some(span) = &lit.position {
                 labels.push(
                     Label::primary((), Range::from(span))
-                        .with_message(format!("Couldn't determine kind of {}", c1.head)),
+                        .with_message(format!("{} may lead to a cyclic dependency.", lit)),
                 )
             }
             Diagnostic::warning()
@@ -94,11 +97,7 @@ impl ModusSemantics for Modusfile {
         ) -> Diagnostic<()> {
             let message = "Couldn't determine kind of `Expression`.";
             let mut labels = Vec::new();
-            if let Some(span) = span {
-                labels.push(
-                    Label::primary((), Range::from(span))
-                        .with_message("This `Expression` kind couldn't be determined."),
-                );
+            if span.is_some() {
                 labels.push(
                     Label::secondary((), Range::from(e1.get_spanned_position().as_ref().unwrap()))
                         .with_message(format!("this is found to be a `{:?}` expression", sem1)),
@@ -130,14 +129,16 @@ impl ModusSemantics for Modusfile {
             clauses: &[ModusClause],
             pred_rid_map: &HashMap<&str, Vec<RuleId>>,
             pred_kind: &mut HashMap<String, Kind>,
+            problem_preds: &HashSet<&str>,
         ) -> Result<Kind, Diagnostic<()>> {
             match expr {
                 Expression::Literal(lit) => {
-                    // If we haven't seen this predicate kind before, evaluate it and cache it.
-                    // Note that we should be able to recursively compute predicate kind because we would've
-                    // already computed which predicates are problematic.
                     if let Some(kind) = pred_kind.get(lit.predicate.0.as_str()) {
                         return Ok(kind.clone());
+                    }
+
+                    if problem_preds.contains(lit.predicate.0.as_str()) {
+                        return Err(problematic_pred_diagnostic(lit));
                     }
 
                     // NOTE: there may be multiple expression bodies related to some predicate name.
@@ -148,7 +149,13 @@ impl ModusSemantics for Modusfile {
                         rids.iter().find_map(|rid| clauses[*rid].body.as_ref())
                     });
                     if let Some(expr_body) = maybe_expr {
-                        let k = evaluate_kind(expr_body, clauses, pred_rid_map, pred_kind)?;
+                        let k = evaluate_kind(
+                            expr_body,
+                            clauses,
+                            pred_rid_map,
+                            pred_kind,
+                            problem_preds,
+                        )?;
                         pred_kind.insert(lit.predicate.0.clone(), k.clone());
                         Ok(k)
                     } else {
@@ -156,7 +163,8 @@ impl ModusSemantics for Modusfile {
                     }
                 }
                 Expression::OperatorApplication(_, expr, op) => {
-                    let expr_kind = evaluate_kind(expr, clauses, pred_rid_map, pred_kind)?;
+                    let expr_kind =
+                        evaluate_kind(expr, clauses, pred_rid_map, pred_kind, problem_preds)?;
                     if expr_kind.is_image() && op.predicate.0 == "copy" {
                         Ok(Kind::Layer)
                     } else {
@@ -165,12 +173,14 @@ impl ModusSemantics for Modusfile {
                 }
                 Expression::And(span, e1, e2) => {
                     // Could propogate multiple errors up instead of terminating early with '?'
-                    let sem1 = evaluate_kind(e1, clauses, pred_rid_map, pred_kind)?;
-                    let sem2 = evaluate_kind(e2, clauses, pred_rid_map, pred_kind)?;
+                    let sem1 = evaluate_kind(e1, clauses, pred_rid_map, pred_kind, problem_preds)?;
+                    let sem2 = evaluate_kind(e2, clauses, pred_rid_map, pred_kind, problem_preds)?;
 
                     let is_image_expr = (sem1.is_image() && !sem2.is_image())
                         || (sem1.is_logic() && sem2.is_image());
-                    let is_layer_expr = sem1.is_layer() && sem2.is_layer();
+                    let is_layer_expr = (sem1.is_layer() && sem2.is_layer())
+                        || (sem1.is_logic() && sem2.is_layer())
+                        || (sem1.is_layer() && sem2.is_logic());
                     let is_logic_expr = sem1.is_logic() && sem2.is_logic();
 
                     if is_image_expr {
@@ -184,8 +194,8 @@ impl ModusSemantics for Modusfile {
                     }
                 }
                 Expression::Or(span, e1, e2) => {
-                    let sem1 = evaluate_kind(e1, clauses, pred_rid_map, pred_kind)?;
-                    let sem2 = evaluate_kind(e2, clauses, pred_rid_map, pred_kind)?;
+                    let sem1 = evaluate_kind(e1, clauses, pred_rid_map, pred_kind, problem_preds)?;
+                    let sem2 = evaluate_kind(e2, clauses, pred_rid_map, pred_kind, problem_preds)?;
 
                     let matching_expr = sem1 == sem2;
                     if matching_expr {
@@ -248,17 +258,12 @@ impl ModusSemantics for Modusfile {
         let mut errs = Vec::new();
 
         for c in self.0.iter().filter(|c| c.body.is_some()) {
-            if problem_preds.contains(c.head.predicate.0.as_str()) {
-                let diag = problematic_pred_diagnostic(c);
-                errs.push(diag);
-                continue;
-            }
-
             let res = evaluate_kind(
                 c.body.as_ref().unwrap(),
                 &self.0,
                 &pred_to_rid,
                 &mut pred_kind,
+                &problem_preds,
             );
 
             match res {
@@ -268,6 +273,7 @@ impl ModusSemantics for Modusfile {
                         if k != &kind {
                             // display a warning if the predicate kind is different using
                             // a different expr body
+                            // TODO: maybe make it an error?
                             let maybe_curr_span =
                                 c.body.as_ref().unwrap().get_spanned_position().as_ref();
                             let maybe_prev_span = pred_to_rid[pred_name].iter().find_map(|rid| {
@@ -304,7 +310,10 @@ impl ModusSemantics for Modusfile {
                     messages.push(generate_msg_diagnostic(c, &kind));
                     pred_kind.insert(pred_name.to_owned(), kind);
                 }
-                Err(e) => errs.push(e),
+                Err(e) => errs.push(e.with_notes(vec![format!(
+                    "Therefore, couldn't evaluate clause with head {}.",
+                    c.head,
+                )])),
             }
         }
 
@@ -387,6 +396,34 @@ impl PredicateDependency for Modusfile {
 
         g
     }
+}
+
+/// Returns true if the results of the check were satisfactory; we don't need to terminate.
+pub fn check_and_output_analysis<
+    'files,
+    W: Write + codespan_reporting::term::termcolor::WriteColor,
+    F: Files<'files, FileId = ()>,
+>(
+    mf: &Modusfile,
+    verbose: bool,
+    out: &mut W,
+    config: &Config,
+    file: &'files F,
+) -> bool {
+    let kind_res = mf.kinds();
+    if verbose {
+        for msg in kind_res.messages {
+            term::emit(out, config, file, &msg).expect("Error when writing to stderr.");
+        }
+    }
+    for err in &kind_res.errs {
+        term::emit(out, config, file, err).expect("Error when writing to stderr.");
+    }
+
+    kind_res
+        .errs
+        .iter()
+        .all(|err| err.severity != Severity::Error)
 }
 
 #[cfg(test)]
