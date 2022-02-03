@@ -53,3 +53,12 @@ class TestSimple(ModusTestCase):
         first_img = imgs[Fact("a", ())]
         # shell escape: \n is $'\n'
         self.assertEqual(first_img.read_file("$'/tmp/\\n/a'"), "aaa\n")
+
+    def test_6(self):
+        mf = dedent("""\
+            a :- from("alpine")::set_workdir("/tmp/"),
+                run("echo \\"# comment\\" > a").""")
+        imgs = self.build(mf, "a")
+        self.assertEqual(len(imgs), 1)
+        first_img = imgs[Fact("a", ())]
+        self.assertEqual(first_img.read_file("/tmp/a"), "# comment\n")
