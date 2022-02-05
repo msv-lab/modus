@@ -696,9 +696,9 @@ pub fn plan_from_modusfile(
             predicate: goal_pred.clone(),
             args: Vec::new(),
         },
-        body: Some(query),
+        body: Some(query.clone()),
     };
-    let clauses: Vec<Clause> =
+    let mut clauses: Vec<Clause> =
         mf.0.iter()
             .chain(iter::once(&user_clause))
             .flat_map(|mc| {
@@ -707,11 +707,38 @@ pub fn plan_from_modusfile(
             })
             .collect();
 
+    let query_preds = query.literals();
+
     let q_clause = clauses
-        .iter()
+        .iter_mut()
         .find(|c| c.head.predicate == goal_pred)
         .expect("should find same predicate name after translation");
-    let goal = &q_clause.body;
+    q_clause.head = Literal {
+        position: None,
+        predicate: goal_pred.clone(),
+        // expose the corresponding args that were exposed in the original query
+        args: q_clause
+            .body
+            .iter()
+            .flat_map(|lit| {
+                // REVIEW: check if this works with operators
+                if let Some(query_lit) = query_preds
+                    .iter()
+                    .find(|query_lit| lit.predicate == query_lit.predicate)
+                {
+                    query_lit
+                        .args
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, v)| if v.is_variable() { Some(lit.args[i].clone()) } else { None })
+                        .collect()
+                } else {
+                    vec![]
+                }
+            })
+            .collect(),
+    };
+    let goal = vec![q_clause.head.clone()];
 
     // don't store full tree as this takes a lot of memory, and is probably not needed
     // when building/transpiling
@@ -719,8 +746,7 @@ pub fn plan_from_modusfile(
     let proofs = sld::proofs(&success_tree, &clauses, &goal);
     let query_and_proofs = proofs
         .into_iter()
-        // FIXME
-        .map(|(lits, p)| (lits[0].clone(), p))
+        .map(|(lits, p)| (lits.last().unwrap().clone(), p))
         .collect::<Vec<_>>();
     Ok(build_dag_from_proofs(&query_and_proofs[..], &clauses))
 }

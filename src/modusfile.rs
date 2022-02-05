@@ -20,6 +20,7 @@ use nom::character::complete::not_line_ending;
 use nom::error::convert_error;
 use nom::error::VerboseError;
 use rand::Rng;
+use std::collections::HashSet;
 use std::fmt;
 use std::str;
 
@@ -91,6 +92,18 @@ impl Expression {
             ),
         }
     }
+
+    pub fn literals(&self) -> HashSet<Literal> {
+        match self {
+            Expression::Literal(lit) => vec![lit.clone()].into_iter().collect(),
+            Expression::OperatorApplication(_, e, _) => e.literals(),
+            Expression::And(_, e1, e2) | Expression::Or(_, e1, e2) => e1
+                .literals()
+                .into_iter()
+                .chain(e2.literals().into_iter())
+                .collect(),
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -124,6 +137,15 @@ pub enum ModusTerm {
         format_string_literal: String,
     },
     UserVariable(String),
+}
+
+impl ModusTerm {
+    pub fn is_variable(&self) -> bool {
+        match self {
+            ModusTerm::FormatString { .. } | ModusTerm::UserVariable(_) => true,
+            _ => false,
+        }
+    }
 }
 
 impl fmt::Display for ModusTerm {

@@ -20,7 +20,7 @@ class TestSolver(ModusTestCase):
         images = self.build(modusfile, 'f(X)')
 
         self.assertEqual(len(images), 2)
-        ccc_image = images[Fact("f", ("ccc",))]
+        ccc_image = images[Fact("_query", ("ccc",))]
         self.assertTrue(ccc_image.contains_file("/tmp/foo.txt"))
         self.assertEqual(ccc_image.read_file("/tmp/foo.txt"), dedent("""\
             aaa
@@ -44,9 +44,17 @@ class TestSolver(ModusTestCase):
         images = self.build(modusfile, 'f(f"alpine:${version}")')
 
         self.assertEqual(len(images), 2, images)
-        ccc_image = images[Fact("f", ("alpine:3.14",))]
+
+        ccc_image = images[Fact("_query", ("alpine:3.14",))]
         self.assertTrue(ccc_image.contains_file("/tmp/foo.txt"))
         self.assertEqual(ccc_image.read_file("/tmp/foo.txt"), dedent("""\
             aaa
-            alpine3.14
+            alpine:3.14
+        """))
+
+        ccc_image = images[Fact("_query", ("alpine:3.15",))]
+        self.assertTrue(ccc_image.contains_file("/tmp/foo.txt"))
+        self.assertEqual(ccc_image.read_file("/tmp/foo.txt"), dedent("""\
+            aaa
+            alpine:3.15
         """))
