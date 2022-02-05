@@ -959,6 +959,8 @@ pub fn tree_from_modusfile(
 
 #[cfg(test)]
 mod tests {
+    use crate::modusfile::{Expression, ModusTerm};
+
     use super::*;
     use serial_test::serial;
 
@@ -1249,5 +1251,27 @@ mod tests {
             "{:?}",
             sld_proofs[&goal]
         );
+    }
+
+    #[test]
+    #[serial]
+    fn tree_from_expression_query() {
+        let mf: Modusfile = "base_image(\"alpine3.14\"). base_image(\"alpine3.15\")."
+            .parse()
+            .unwrap();
+        let query = Expression::Literal(Literal {
+            position: None,
+            predicate: Predicate("base_image".into()),
+            args: vec![ModusTerm::FormatString {
+                position: logic::SpannedPosition {
+                    offset: 11,
+                    length: 13,
+                },
+                format_string_literal: "alpine${X}".to_owned(),
+            }],
+        });
+
+        let (_, _, sld_res) = tree_from_modusfile(mf, query, 20, true);
+        assert!(sld_res.tree.is_success());
     }
 }
