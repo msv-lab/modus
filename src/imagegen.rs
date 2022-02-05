@@ -719,6 +719,7 @@ pub fn plan_from_modusfile(
     let proofs = sld::proofs(&success_tree, &clauses, &goal);
     let query_and_proofs = proofs
         .into_iter()
+        // FIXME
         .map(|(lits, p)| (lits[0].clone(), p))
         .collect::<Vec<_>>();
     Ok(build_dag_from_proofs(&query_and_proofs[..], &clauses))
