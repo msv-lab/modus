@@ -67,6 +67,30 @@ impl Expression {
             Expression::Or(s, _, _) => &s,
         }
     }
+
+    pub fn without_position(&self) -> Self {
+        match self {
+            Expression::Literal(lit) => Expression::Literal(Literal {
+                position: None,
+                ..lit.clone()
+            }),
+            Expression::OperatorApplication(_, e, op) => Expression::OperatorApplication(
+                None,
+                Box::new(e.without_position()),
+                op.clone().with_position(None),
+            ),
+            Expression::And(_, e1, e2) => Expression::And(
+                None,
+                Box::new(e1.without_position()),
+                Box::new(e2.without_position()),
+            ),
+            Expression::Or(_, e1, e2) => Expression::Or(
+                None,
+                Box::new(e1.without_position()),
+                Box::new(e2.without_position()),
+            ),
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -203,6 +227,27 @@ impl str::FromStr for Modusfile {
     }
 }
 
+impl str::FromStr for Expression {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let span = Span::new(s);
+        match parser::body(span) {
+            Ok((_, o)) => Ok(o),
+            Err(nom::Err::Error(e) | nom::Err::Failure(e)) => {
+                let errors = e
+                    .errors
+                    .into_iter()
+                    .map(|(span, err)| (span.fragment().to_owned(), err))
+                    .collect();
+                let str_verbose_error = VerboseError { errors };
+                Result::Err(convert_error(s, str_verbose_error))
+            }
+            _ => unimplemented!(),
+        }
+    }
+}
+
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -285,9 +330,11 @@ pub mod parser {
     };
 
     fn comment(s: Span) -> IResult<Span, Span> {
-        recognize(
-            delimited(tag("#"), opt(not_line_ending), alt((line_ending, eof)))
-        )(s)
+        recognize(delimited(
+            tag("#"),
+            opt(not_line_ending),
+            alt((line_ending, eof)),
+        ))(s)
     }
 
     #[test]
@@ -404,7 +451,7 @@ pub mod parser {
         ))(i)
     }
 
-    fn body(i: Span) -> IResult<Span, Expression> {
+    pub fn body(i: Span) -> IResult<Span, Expression> {
         let comma_separated_exprs = map(
             separated_list1(delimited(comments, tag(","), comments), expression_inner),
             |es| {

@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
-use std::iter::FromIterator;
+use std::iter::{once, FromIterator};
 use std::path::{Path, PathBuf};
 
 use crate::logic::{Clause, IRTerm, Literal, Predicate};
-use crate::modusfile::Modusfile;
+use crate::modusfile::{self, Modusfile};
 use crate::sld::{self, ClauseId, Proof, ResolutionError};
 use crate::unification::Substitute;
 
@@ -685,26 +685,41 @@ fn join_path(base: &str, path: &str) -> String {
 
 pub fn plan_from_modusfile(
     mf: Modusfile,
-    query: Literal,
+    query: modusfile::Expression,
 ) -> Result<BuildPlan, Vec<Diagnostic<()>>> {
-    let goal = vec![query.clone()];
     let max_depth = 175;
+
+    let goal_pred = Predicate("_query".to_owned());
+    let user_clause = modusfile::ModusClause {
+        head: Literal {
+            position: None,
+            predicate: goal_pred.clone(),
+            args: Vec::new(),
+        },
+        body: Some(query),
+    };
     let clauses: Vec<Clause> =
         mf.0.iter()
+            .chain(once(&user_clause))
             .flat_map(|mc| {
                 let clauses: Vec<Clause> = mc.into();
                 clauses
             })
             .collect();
 
+    let goal = vec![Literal {
+        position: None,
+        predicate: goal_pred,
+        args: Vec::new(),
+    }];
+
     // don't store full tree as this takes a lot of memory, and is probably not needed
     // when building/transpiling
     let success_tree = Result::from(sld::sld(&clauses, &goal, max_depth, false))?;
-    // TODO: sld::proofs should return the ground query corresponding to each proof.
     let proofs = sld::proofs(&success_tree, &clauses, &goal);
     let query_and_proofs = proofs
         .into_iter()
-        .map(|p| (query.substitute(&p.valuation), p))
+        .map(|(lits, p)| (lits[0].clone(), p))
         .collect::<Vec<_>>();
     Ok(build_dag_from_proofs(&query_and_proofs[..], &clauses))
 }

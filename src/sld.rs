@@ -790,7 +790,7 @@ struct PathNode {
 // sequence of nodes and global mgu
 type Path = (Vec<PathNode>, Substitution);
 
-pub fn proofs(tree: &Tree, rules: &[Clause], goal: &Goal) -> Vec<Proof> {
+pub fn proofs(tree: &Tree, rules: &[Clause], goal: &Goal) -> HashMap<Goal, Proof> {
     fn flatten_compose(
         lid: &LiteralGoalId,
         cid: &ClauseId,
@@ -903,7 +903,7 @@ pub fn proofs(tree: &Tree, rules: &[Clause], goal: &Goal) -> Vec<Proof> {
         }
         solution_to_proof_tree.insert(solution, p);
     }
-    solution_to_proof_tree.into_values().collect()
+    solution_to_proof_tree
 }
 
 #[cfg(test)]
@@ -1192,6 +1192,6 @@ mod tests {
         let tree = sld(&clauses, &goal, 15, true).tree;
         let sld_proofs = proofs(&tree, &clauses, &goal);
         assert_eq!(sld_proofs.len(), 1);
-        assert_eq!(sld_proofs[0].height(), 1, "{:?}", sld_proofs[0]);
+        assert_eq!(sld_proofs.values().next().unwrap().height(), 1, "{:?}", sld_proofs[&goal]);
     }
 }

@@ -211,8 +211,9 @@ fn main() {
         ("transpile", Some(sub)) => {
             let input_file = sub.value_of("FILE").unwrap();
             let file = get_file(Path::new(input_file));
-            let query: logic::Literal = sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
-            let query = query.with_position(None);
+            let query: modusfile::Expression =
+                sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
+            let query = query.without_position();
 
             let mf: Modusfile = match file.source().parse() {
                 Ok(mf) => mf,
@@ -221,13 +222,7 @@ fn main() {
                     std::process::exit(1);
                 }
             };
-            if !check_and_output_analysis(
-                &mf,
-                false,
-                &mut err_writer.lock(),
-                &config,
-                &file,
-            ) {
+            if !check_and_output_analysis(&mf, false, &mut err_writer.lock(), &config, &file) {
                 std::process::exit(1)
             }
 
@@ -251,8 +246,9 @@ fn main() {
                 .map(|x| PathBuf::from(x))
                 .unwrap_or_else(|| Path::new(context_dir).join("Modusfile"));
             let file = get_file(input_file.as_path());
-            let query: logic::Literal = sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
-            let query = query.with_position(None);
+            let query: modusfile::Expression =
+                sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
+            let query = query.without_position();
 
             let mf: Modusfile = match file.source().parse() {
                 Ok(mf) => mf,
@@ -261,13 +257,7 @@ fn main() {
                     std::process::exit(1);
                 }
             };
-            if !check_and_output_analysis(
-                &mf,
-                false,
-                &mut err_writer.lock(),
-                &config,
-                &file,
-            ) {
+            if !check_and_output_analysis(&mf, false, &mut err_writer.lock(), &config, &file) {
                 std::process::exit(1)
             }
 
