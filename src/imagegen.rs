@@ -730,7 +730,13 @@ pub fn plan_from_modusfile(
                         .args
                         .iter()
                         .enumerate()
-                        .filter_map(|(i, v)| if v.is_variable() { Some(lit.args[i].clone()) } else { None })
+                        .filter_map(|(i, v)| {
+                            if v.is_variable() {
+                                Some(lit.args[i].clone())
+                            } else {
+                                None
+                            }
+                        })
                         .collect()
                 } else {
                     vec![]
