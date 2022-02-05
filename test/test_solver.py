@@ -3,6 +3,7 @@ from textwrap import dedent
 
 
 class TestSolver(ModusTestCase):
+    # TODO: more tests with arbitrary query
 
     def test_mutiple_images(self):
         self.context.add_file("foo.txt", dedent("""\

@@ -698,7 +698,7 @@ pub fn plan_from_modusfile(
         },
         body: Some(query),
     };
-    let mut clauses: Vec<Clause> =
+    let clauses: Vec<Clause> =
         mf.0.iter()
             .chain(iter::once(&user_clause))
             .flat_map(|mc| {
@@ -708,16 +708,10 @@ pub fn plan_from_modusfile(
             .collect();
 
     let q_clause = clauses
-        .iter_mut()
+        .iter()
         .find(|c| c.head.predicate == goal_pred)
         .expect("should find same predicate name after translation");
-    q_clause.head = Literal {
-        position: None,
-        predicate: goal_pred.clone(),
-        args: q_clause.variables().into_iter().collect(),
-    };
-
-    let goal = vec![q_clause.head.clone()];
+    let goal = &q_clause.body;
 
     // don't store full tree as this takes a lot of memory, and is probably not needed
     // when building/transpiling

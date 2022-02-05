@@ -917,8 +917,7 @@ pub fn tree_from_modusfile(
 ) -> (Goal, Vec<Clause>, SLDResult) {
     // 1. Create a new clause with a nullary goal '_query', with a body of the user's query.
     // 2. Translate this and other clauses.
-    // 3. Replace the IR clause which has the head '_query' with a head that exposes the variables, '_query(X, Y, ...)'.
-    // 4. Use this '_query(X, Y, ...)' as the goal.
+    // 3. Use the body of the IR clause with the '_query' head predicate as the goal.
 
     let goal_pred = Predicate("_query".to_owned());
     let user_clause = modusfile::ModusClause {
@@ -929,7 +928,7 @@ pub fn tree_from_modusfile(
         },
         body: Some(query),
     };
-    let mut clauses: Vec<Clause> =
+    let clauses: Vec<Clause> =
         mf.0.iter()
             .chain(iter::once(&user_clause))
             .flat_map(|mc| {
@@ -939,16 +938,10 @@ pub fn tree_from_modusfile(
             .collect();
 
     let q_clause = clauses
-        .iter_mut()
+        .iter()
         .find(|c| c.head.predicate == goal_pred)
         .expect("should find same predicate name after translation");
-    q_clause.head = Literal {
-        position: None,
-        predicate: goal_pred.clone(),
-        args: q_clause.variables().into_iter().collect(),
-    };
-
-    let goal = vec![q_clause.head.clone()];
+    let goal = &q_clause.body;
 
     (
         goal.clone(),
