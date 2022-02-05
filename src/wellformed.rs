@@ -27,6 +27,21 @@ pub fn check_image_predicates(
     todo!()
 }
 
+fn combine_groundness(g1: &[bool], g2: &[bool]) -> Vec<bool> {
+    debug_assert_eq!(g1.len(), g2.len());
+
+    // NOTE: this'll never fail since the lengths match, i.e. we'll always
+    // be able to combine then. The extreme case is when we enforce that
+    // all arguments have to be ground.
+    let mut new_g = Vec::with_capacity(g1.len());
+    for (&allowed1, &allowed2) in g1.iter().zip(g2) {
+        // This argument is only allowed to be ungrounded if both are allowed
+        // to be ungrounded.
+        new_g.push(allowed1 && allowed2);
+    }
+    new_g
+}
+
 // infer grounded variables, check if grounded variables are grounded in each rule
 //TODO: not sure what to do if there are variables inside compound terms
 pub fn check_grounded_variables(
@@ -60,13 +75,13 @@ pub fn check_grounded_variables(
     for c in clauses {
         let sig = c.head.signature();
         let grounded = infer(c);
-        if result.contains_key(&sig) {
-            if result.get(&sig).unwrap() != &grounded {
-                errors.insert(sig);
-            }
+
+        let new_groundness = if let Some(prev_groundness) = result.get(&sig) {
+            combine_groundness(&prev_groundness, &grounded)
         } else {
-            result.insert(sig, grounded);
-        }
+            grounded
+        };
+        result.insert(sig, new_groundness);
     }
 
     if errors.is_empty() {
@@ -79,7 +94,7 @@ pub fn check_grounded_variables(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logic::Predicate;
+    use crate::{logic::Predicate, modusfile};
     #[test]
     fn consistently_grounded() {
         let clauses: Vec<Clause> = vec![
@@ -96,14 +111,27 @@ mod tests {
     }
 
     #[test]
-    fn inconsistently_grounded() {
+    fn correctly_combined_grounded() {
         let clauses: Vec<Clause> = vec![
             "a(X, Y) :- b(X), c(X, Z).".parse().unwrap(),
             "a(X, Y) :- d(Y).".parse().unwrap(),
         ];
         let result = check_grounded_variables(&clauses);
-        assert!(result.is_err());
+        assert!(result.is_ok());
         let a_sig = Signature(Predicate("a".into()), 2);
-        assert!(result.unwrap_err().contains(&a_sig));
+        let a_grounded = result.unwrap().get(&a_sig).unwrap().clone();
+        assert!(!a_grounded[0]);
+        assert!(!a_grounded[1]);
+    }
+
+    #[test]
+    fn groundness_after_translation() {
+        let modus_clause: modusfile::ModusClause = "foo(X) :- bar(X) ; baz.".parse().unwrap();
+        let clauses: Vec<Clause> = (&modus_clause).into();
+        let result = check_grounded_variables(&clauses);
+        assert!(result.is_ok());
+        let foo_sig = Signature(Predicate("foo".into()), 1);
+        let foo_grounded = result.unwrap().get(&foo_sig).unwrap().clone();
+        assert!(!foo_grounded[0]);
     }
 }
