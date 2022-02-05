@@ -439,7 +439,6 @@ mod test {
         assert!(solutions.contains(&goals));
         let proof = crate::sld::proofs(&tree, &rules, &goals);
         assert_eq!(proof.len(), 1);
-        println!("{:?}", proof[&goals]);
     }
 
     #[test]

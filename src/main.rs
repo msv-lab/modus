@@ -399,6 +399,10 @@ fn main() {
                                     proofs.len(),
                                     e.to_string().blue()
                                 );
+
+                                for ground_goal in proofs.keys() {
+                                    println!("{:?}", ground_goal);
+                                }
                                 // TODO: pretty print proof, we could use the 'colored' library for terminal colors
                             }
                             Err(e) => {
