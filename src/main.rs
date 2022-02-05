@@ -44,13 +44,14 @@ use codespan_reporting::{
 };
 use colored::Colorize;
 use ptree::write_tree;
+use sld::tree_from_modusfile;
 use std::{ffi::OsStr, fs, path::Path};
 use std::{io::Write, path::PathBuf};
 use transpiler::render_tree;
 
 use modusfile::Modusfile;
 
-use crate::{buildkit::DockerBuildOptions, logic::Clause};
+use crate::buildkit::DockerBuildOptions;
 
 use analysis::check_and_output_analysis;
 
@@ -357,8 +358,9 @@ fn main() {
 
             let input_file = sub.value_of("FILE").unwrap();
             let file = get_file(Path::new(input_file));
-            let query: Option<logic::Literal> = sub.value_of("QUERY").map(|l| l.parse().unwrap());
-            let query = query.map(|lit| lit.with_position(None));
+            let query: Option<modusfile::Expression> =
+                sub.value_of("QUERY").map(|s| s.parse().unwrap());
+            let query = query.map(|q| q.without_position());
 
             match (file.source().parse::<Modusfile>(), query) {
                 (Ok(modus_f), None) => println!(
@@ -366,7 +368,7 @@ fn main() {
                     input_file,
                     modus_f.0.len()
                 ),
-                (Ok(modus_f), Some(l)) => {
+                (Ok(modus_f), Some(e)) => {
                     if !check_and_output_analysis(
                         &modus_f,
                         false,
@@ -378,16 +380,8 @@ fn main() {
                     }
 
                     let max_depth = 175;
-                    let clauses: Vec<Clause> = modus_f
-                        .0
-                        .iter()
-                        .flat_map(|mc| {
-                            let clauses: Vec<Clause> = mc.into();
-                            clauses
-                        })
-                        .collect();
-                    let goal = &vec![l.clone()];
-                    let sld_result = sld::sld(&clauses, goal, max_depth, true);
+                    let (goal, clauses, sld_result) =
+                        tree_from_modusfile(modus_f, e.clone(), max_depth, true);
 
                     if should_output_graph {
                         render_tree(&clauses, sld_result, &mut out_writer.lock());
@@ -397,13 +391,13 @@ fn main() {
                             .expect("Error when printing tree to stdout.");
                     } else {
                         let proof_result =
-                            Result::from(sld_result).map(|t| sld::proofs(&t, &clauses, goal));
+                            Result::from(sld_result).map(|t| sld::proofs(&t, &clauses, &goal));
                         match proof_result {
                             Ok(proofs) => {
                                 println!(
                                     "{} proof(s) found for query {}",
                                     proofs.len(),
-                                    l.to_string().blue()
+                                    e.to_string().blue()
                                 );
                                 // TODO: pretty print proof, we could use the 'colored' library for terminal colors
                             }

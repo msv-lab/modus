@@ -19,10 +19,13 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::{self, Debug},
     hash::Hash,
+    iter,
 };
 
 use crate::{
     builtin,
+    logic::Predicate,
+    modusfile::{self, Modusfile},
     unification::{compose_extend, compose_no_extend, Rename, Substitution},
 };
 use crate::{builtin::SelectBuiltinResult, unification::RenameWithSubstitution};
@@ -906,6 +909,54 @@ pub fn proofs(tree: &Tree, rules: &[Clause], goal: &Goal) -> HashMap<Goal, Proof
     solution_to_proof_tree
 }
 
+pub fn tree_from_modusfile(
+    mf: Modusfile,
+    query: modusfile::Expression,
+    max_depth: usize,
+    full_tree: bool,
+) -> (Goal, Vec<Clause>, SLDResult) {
+    // 1. Create a new clause with a nullary goal '_query', with a body of the user's query.
+    // 2. Translate this and other clauses.
+    // 3. Replace the IR clause which has the head '_query' with a head that exposes the variables, '_query(X, Y, ...)'.
+    // 4. Use this '_query(X, Y, ...)' as the goal.
+
+    let goal_pred = Predicate("_query".to_owned());
+    let user_clause = modusfile::ModusClause {
+        head: Literal {
+            position: None,
+            predicate: goal_pred.clone(),
+            args: Vec::new(),
+        },
+        body: Some(query),
+    };
+    let mut clauses: Vec<Clause> =
+        mf.0.iter()
+            .chain(iter::once(&user_clause))
+            .flat_map(|mc| {
+                let clauses: Vec<Clause> = mc.into();
+                clauses
+            })
+            .collect();
+
+    let q_clause = clauses
+        .iter_mut()
+        .find(|c| c.head.predicate == goal_pred)
+        .expect("should find same predicate name after translation");
+    q_clause.head = Literal {
+        position: None,
+        predicate: goal_pred.clone(),
+        args: q_clause.variables().into_iter().collect(),
+    };
+
+    let goal = vec![q_clause.head.clone()];
+
+    (
+        goal.clone(),
+        clauses.clone(),
+        sld(&clauses, &goal, max_depth, full_tree),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1192,6 +1243,11 @@ mod tests {
         let tree = sld(&clauses, &goal, 15, true).tree;
         let sld_proofs = proofs(&tree, &clauses, &goal);
         assert_eq!(sld_proofs.len(), 1);
-        assert_eq!(sld_proofs.values().next().unwrap().height(), 1, "{:?}", sld_proofs[&goal]);
+        assert_eq!(
+            sld_proofs.values().next().unwrap().height(),
+            1,
+            "{:?}",
+            sld_proofs[&goal]
+        );
     }
 }

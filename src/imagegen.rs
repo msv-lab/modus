@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::iter::{once, FromIterator};
+use std::iter::{self, FromIterator};
 use std::path::{Path, PathBuf};
 
 use crate::logic::{Clause, IRTerm, Literal, Predicate};
@@ -698,20 +698,26 @@ pub fn plan_from_modusfile(
         },
         body: Some(query),
     };
-    let clauses: Vec<Clause> =
+    let mut clauses: Vec<Clause> =
         mf.0.iter()
-            .chain(once(&user_clause))
+            .chain(iter::once(&user_clause))
             .flat_map(|mc| {
                 let clauses: Vec<Clause> = mc.into();
                 clauses
             })
             .collect();
 
-    let goal = vec![Literal {
+    let q_clause = clauses
+        .iter_mut()
+        .find(|c| c.head.predicate == goal_pred)
+        .expect("should find same predicate name after translation");
+    q_clause.head = Literal {
         position: None,
-        predicate: goal_pred,
-        args: Vec::new(),
-    }];
+        predicate: goal_pred.clone(),
+        args: q_clause.variables().into_iter().collect(),
+    };
+
+    let goal = vec![q_clause.head.clone()];
 
     // don't store full tree as this takes a lot of memory, and is probably not needed
     // when building/transpiling
