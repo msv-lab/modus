@@ -119,6 +119,16 @@ fn invoke_buildkit(
         args.push("-t".to_string());
         args.push(tag);
     }
+    if options.no_cache && target.is_none() {
+        args.push("--no-cache".to_string());
+        // Sometimes it isn't enough to just use --no-cache, so we also tell our frontend
+        // to issue ignore_cache.
+        args.push("--build-arg".to_string());
+        args.push("no_cache=true".to_string());
+    } else {
+        args.push("--build-arg".to_string());
+        args.push("no_cache=false".to_string());
+    }
     let quiet = target.is_some();
     if let Some(target) = target {
         args.push("--target".to_string());
@@ -139,16 +149,6 @@ fn invoke_buildkit(
     }
     if options.verbose {
         args.push("--progress=plain".to_string());
-    }
-    if options.no_cache {
-        args.push("--no-cache".to_string());
-        // Sometimes it isn't enough to just use --no-cache, so we also tell our frontend
-        // to issue ignore_cache.
-        args.push("--build-arg".to_string());
-        args.push("no_cache=true".to_string());
-    } else {
-        args.push("--build-arg".to_string());
-        args.push("no_cache=false".to_string());
     }
     args.extend_from_slice(&options.additional_args);
     let mut cmd = Command::new("docker")
