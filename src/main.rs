@@ -313,7 +313,7 @@ fn main() {
                     .unwrap_or_default(),
             };
             match buildkit::build(
-                &build_plan,
+                build_plan.clone(),
                 context_dir,
                 &options,
                 sub.value_of("CUSTOM_FRONTEND").unwrap(),

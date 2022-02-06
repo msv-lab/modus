@@ -233,9 +233,13 @@ async fn handle_build_plan(
         }
 
         let new_node: (OwnedOutput, Arc<ImageSpecification>) = match node {
-            From { image_ref } => {
-                let img_s = Source::image(image_ref).custom_name(format!("from({:?})", image_ref));
-                let log_name = format!("from({:?}) :: resolve image config", image_ref);
+            From {
+                image_ref,
+                display_name,
+            } => {
+                let img_s =
+                    Source::image(image_ref).custom_name(format!("from({:?})", display_name));
+                let log_name = format!("from({:?}) :: resolve image config", display_name);
                 let (_, resolved_config) = bridge
                     .resolve_image_config(&img_s, Some(&log_name))
                     .await

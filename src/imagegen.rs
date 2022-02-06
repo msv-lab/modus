@@ -132,7 +132,10 @@ pub type NodeId = usize;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BuildNode {
     From {
+        /// The actual image reference to use. Probably a resolved hash.
         image_ref: String,
+        /// What user specified initially, such as "alpine".
+        display_name: String,
     },
     Run {
         parent: NodeId,
@@ -337,9 +340,11 @@ pub fn build_dag_from_proofs(
                     if let Some(&existing_node) = image_literals.get(&intrinsic) {
                         curr_state.set_node(existing_node);
                     } else {
+                        let image_ref = intrinsic.args[0].as_constant().unwrap().to_owned();
                         let new_node = res.new_node(
                             BuildNode::From {
-                                image_ref: intrinsic.args[0].as_constant().unwrap().to_owned(),
+                                display_name: image_ref.clone(),
+                                image_ref,
                             },
                             vec![],
                         );
