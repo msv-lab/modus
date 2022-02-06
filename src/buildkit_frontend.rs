@@ -354,6 +354,7 @@ async fn handle_build_plan(
                 let image_cwd = get_cwd_from_image_spec(&*p_conf);
                 debug_assert!(image_cwd.is_absolute());
                 use shell_escape::escape;
+                let mut mount_id = 0usize;
                 for op in operations {
                     match op {
                         MergeOperation::Run {
@@ -390,9 +391,9 @@ async fn handle_build_plan(
                             let src_path = src_cwd.join(src_path);
                             let dst_path = image_cwd.join(dst_path);
 
-                            let mut mount_dir = OsString::from("/");
-                            mount_dir.push(&buildkit::gen_tmp_filename());
-                            mount_dir.push(".merge-mount");
+                            let mut mount_dir = OsString::from("/__buildkit_merge_mount_");
+                            mount_dir.push(OsStr::new(&mount_id.to_string()));
+                            mount_id += 1;
                             debug_assert!(src_path.is_absolute());
                             mount_dir.push(&src_path);
                             let mount_dir = PathBuf::from(mount_dir);

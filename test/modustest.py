@@ -70,7 +70,7 @@ class ModusTestCase(unittest.TestCase):
             self.context.cleanup()
             self._cleanup_images()
 
-    def build(self, modusfile, query):
+    def build(self, modusfile, query, should_succeed=True):
         '''returns a mapping from facts to images'''
         with NamedTemporaryFile(mode="w+") as mf:
             mf.write(modusfile)
@@ -80,13 +80,18 @@ class ModusTestCase(unittest.TestCase):
                 if MODUS_BUILDKIT_FRONTEND:
                     cmd.extend(["--custom-buildkit-frontend", MODUS_BUILDKIT_FRONTEND])
                 result = run(cmd, check=False, text=True, stdout=PIPE, stderr=PIPE)
-                if result.returncode != 0:
-                    raise Exception(f"Build failed:\n{result.stderr}")
-                objects = json.load(StringIO(result.stdout))
-                images = { fact:img
-                           for (fact, img)
-                           in [(Fact(obj["predicate"], tuple(obj["args"])), Image(obj["digest"]))
-                               for obj
-                               in objects] }
-                self._images.update([img.digest for img in images.values()])
-                return images
+                if should_succeed:
+                    if result.returncode != 0:
+                        raise Exception(f"Build failed:\n{result.stderr}\n\nModusfile:\n{modusfile}")
+                    objects = json.load(StringIO(result.stdout))
+                    images = { fact:img
+                            for (fact, img)
+                            in [(Fact(obj["predicate"], tuple(obj["args"])), Image(obj["digest"]))
+                                for obj
+                                in objects] }
+                    self._images.update([img.digest for img in images.values()])
+                    return images
+                else:
+                    if result.returncode == 0:
+                        raise Exception(f"Expected build to fail.")
+                    return None
