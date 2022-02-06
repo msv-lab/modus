@@ -95,8 +95,10 @@ pub enum BuildError {
 
 use BuildError::*;
 
+#[derive(Debug, Clone)]
 pub struct DockerBuildOptions {
     pub verbose: bool,
+    pub quiet: bool,
     pub no_cache: bool,
     pub additional_args: Vec<String>,
 }
@@ -119,7 +121,7 @@ fn invoke_buildkit(
         args.push("-t".to_string());
         args.push(tag);
     }
-    if options.no_cache && target.is_none() {
+    if options.no_cache {
         args.push("--no-cache".to_string());
         // Sometimes it isn't enough to just use --no-cache, so we also tell our frontend
         // to issue ignore_cache.
@@ -129,12 +131,11 @@ fn invoke_buildkit(
         args.push("--build-arg".to_string());
         args.push("no_cache=false".to_string());
     }
-    let quiet = target.is_some();
     if let Some(target) = target {
         args.push("--target".to_string());
         args.push(target);
     }
-    if quiet {
+    if options.quiet {
         args.push("--quiet".to_string());
     }
     args.push("--build-arg".to_string());
@@ -154,7 +155,7 @@ fn invoke_buildkit(
     let mut cmd = Command::new("docker")
         .args(args)
         .stdin(Stdio::null())
-        .stdout(if quiet {
+        .stdout(if options.quiet {
             Stdio::null()
         } else {
             Stdio::inherit()
@@ -359,7 +360,12 @@ pub fn build<P: AsRef<Path>>(
                     has_dockerignore,
                     Some(iidfile.name()),
                     &mut signals,
-                    &docker_build_options,
+                    &DockerBuildOptions {
+                        no_cache: false,
+                        verbose: false,
+                        quiet: true,
+                        ..docker_build_options.clone()
+                    },
                 )?;
                 let iid = std::fs::read_to_string(iidfile.name())?;
                 write!(stderr, "{}", format!(" -> {}\n", &iid).blue())?;

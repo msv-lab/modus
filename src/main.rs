@@ -306,6 +306,7 @@ fn main() {
             let options = DockerBuildOptions {
                 verbose: sub.is_present("VERBOSE"),
                 no_cache: sub.is_present("NO_CACHE"),
+                quiet: false,
                 additional_args: sub
                     .values_of("ADDITIONAL_OPTS")
                     .map(|x| x.map(ToOwned::to_owned).collect())
