@@ -68,6 +68,19 @@ class TestCopyWithin(ModusTestCase):
         img_b = self.build(md, "b")[Fact("b", ())]
         self.assertEqual(img_b.read_file("/tmp/bbb"), "content\n")
 
+    def test_multiple_copies(self):
+        md = dedent("""\
+            a :- from("alpine"), run("echo content > /tmp/file"), run("echo content2 > /tmp/file2").
+            b :- from("alpine"), run("echo content3 > /tmp/file3").
+            c :- from("alpine"),
+                 a::copy("/tmp/file", "/tmp/copied"),
+                 a::copy("/tmp/file2", "/tmp/copied2"),
+                 b::copy("/tmp/file3", "/tmp/copied3").""")
+        img_c = self.build(md, "c")[Fact("c", ())]
+        self.assertEqual(img_c.read_file("/tmp/copied"), "content\n")
+        self.assertEqual(img_c.read_file("/tmp/copied2"), "content2\n")
+        self.assertEqual(img_c.read_file("/tmp/copied3"), "content3\n")
+
 class TestCopyFromContext(ModusTestCase):
     def init_files(self):
         self.context.add_file("file", "content\n")
