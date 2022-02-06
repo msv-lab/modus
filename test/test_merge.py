@@ -7,7 +7,7 @@ class TestMerge(ModusTestCase):
         self.context.add_file("file", "content\n")
         self.context.add_file("dir/file", "content\n")
 
-    def simple_merge(self):
+    def test_simple_merge(self):
         mf = dedent("""\
             a :-
                 from("alpine")::set_workdir("/tmp"),
@@ -21,7 +21,7 @@ class TestMerge(ModusTestCase):
         self.assertEqual(img.read_file("/tmp/file"), "bbb\n")
         self.assertEqual(img.read_file("/tmp/file2"), "ccc\n")
 
-    def merge_local_copy(self):
+    def test_merge_local_copy(self):
         self.init_files()
         mf = dedent("""\
             a :-

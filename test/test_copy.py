@@ -73,7 +73,7 @@ class TestCopyFromContext(ModusTestCase):
         self.context.add_file("file", "content\n")
         self.context.add_file("dir/file", "content\n")
 
-    def single_file(self):
+    def test_single_file(self):
         self.init_files()
         md = dedent("""\
             a :- from("alpine"), copy("file", "/tmp/file").
@@ -83,7 +83,7 @@ class TestCopyFromContext(ModusTestCase):
         self.assertEqual(img_a.read_file("/tmp/file"), "content\n")
         self.assertEqual(img_b.read_file("/tmp/file"), "content\n")
 
-    def recursive(self):
+    def test_recursive(self):
         self.init_files()
         md = dedent("""\
             a :- from("alpine"), copy("dir", "/tmp/dir").
@@ -93,7 +93,7 @@ class TestCopyFromContext(ModusTestCase):
         self.assertEqual(img_a.read_file("/tmp/dir/file"), "content\n")
         self.assertEqual(img_b.read_file("/tmp/dir/file"), "content\n")
 
-    def test_inworkdir(self):
+    def test_test_inworkdir(self):
         self.init_files()
         md = dedent("""\
             a :-
