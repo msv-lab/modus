@@ -17,7 +17,7 @@ class TestMerge(ModusTestCase):
                     run("echo ccc > file2")
                 )::merge.""")
         imgs = self.build(mf, "a")
-        img = imgs[Fact("a", ())]
+        img = imgs[Fact("_query", ())]
         self.assertEqual(img.read_file("/tmp/file"), "bbb\n")
         self.assertEqual(img.read_file("/tmp/file2"), "ccc\n")
 
@@ -33,7 +33,7 @@ class TestMerge(ModusTestCase):
                     run("echo newline >> /tmp/file")
                 )::merge.""")
         imgs = self.build(mf, "a")
-        img = imgs[Fact("a", ())]
+        img = imgs[Fact("_query", ())]
         self.assertEqual(img.read_file("/tmp/file"), "content\nnewline\n")
 
     def test_merge_multi_copy(self):
@@ -52,6 +52,6 @@ class TestMerge(ModusTestCase):
                     )::copy("/tmp/file", "/tmp/file2")
                 )::merge.""")
         imgs = self.build(mf, "a")
-        img = imgs[Fact("a", ())]
+        img = imgs[Fact("_query", ())]
         self.assertEqual(img.read_file("/tmp/file1"), "aaa\n")
         self.assertEqual(img.read_file("/tmp/file2"), "bbb\n")

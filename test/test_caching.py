@@ -12,8 +12,8 @@ class TestCaching(ModusTestCase):
             b("1") :- a.""")
         imgs = self.build(mf, "b(X)")
         self.assertEqual(len(imgs), 2)
-        b0 = imgs[Fact("b", ("0",))]
-        b1 = imgs[Fact("b", ("1",))]
+        b0 = imgs[Fact("_query", ("0",))]
+        b1 = imgs[Fact("_query", ("1",))]
         self.assertEqual(b0.read_file("/tmp/file"), b1.read_file("/tmp/file"))
 
     def test_merge_noredo(self):
@@ -28,8 +28,8 @@ class TestCaching(ModusTestCase):
             b("1") :- a.""")
         imgs = self.build(mf, "b(X)")
         self.assertEqual(len(imgs), 2)
-        b0 = imgs[Fact("b", ("0",))]
-        b1 = imgs[Fact("b", ("1",))]
+        b0 = imgs[Fact("_query", ("0",))]
+        b1 = imgs[Fact("_query", ("1",))]
         self.assertEqual(b0.read_file("/tmp/file"), b1.read_file("/tmp/file"))
 
     def test_merge_noredo_with_copy(self):
@@ -47,8 +47,8 @@ class TestCaching(ModusTestCase):
             b("1") :- a.""")
         imgs = self.build(mf, "b(X)")
         self.assertEqual(len(imgs), 2)
-        b0 = imgs[Fact("b", ("0",))]
-        b1 = imgs[Fact("b", ("1",))]
+        b0 = imgs[Fact("_query", ("0",))]
+        b1 = imgs[Fact("_query", ("1",))]
         self.assertEqual(b0.read_file("/tmp/file"), b1.read_file("/tmp/file"))
         self.assertEqual(b0.read_file("/tmp/aaa"), "aaaa\n")
         self.assertEqual(b1.read_file("/tmp/aaa"), "aaaa\n")
