@@ -99,3 +99,7 @@ class TestSimple(ModusTestCase):
             /tmp/b/c
             /
         """))
+
+    def test_run_failure(self):
+        mf = """a :- from("alpine"), run("exit 1")."""
+        self.build(mf, "a", should_succeed=False)

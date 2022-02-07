@@ -112,3 +112,65 @@ class TestMerge(ModusTestCase):
             /tmp/b/c
             /
         """))
+
+    def test_run_failure(self):
+        mf = """a :- from("alpine"), run("exit 1")::merge."""
+        self.build(mf, "a", should_succeed=False)
+
+    def test_run_failure_2(self):
+        mf = """a :- from("alpine"), (run("true"), run("exit 1"), run("true"))::merge."""
+        self.build(mf, "a", should_succeed=False)
+
+    def test_logic_preds_inside_merge(self):
+        mf = dedent("""\
+            a :- from("alpine"), (
+                run("true"),
+                "a" = "a",
+                string_concat("a", "b", "ab")
+            )::merge.""")
+        self.build(mf, "a")
+
+
+    def test_nested_merge(self):
+        mf = dedent("""\
+            a :-
+                from("alpine")::set_workdir("/tmp"),
+                (
+                    run("echo aaa > file"),
+                    (
+                        run("echo bbb > file"),
+                        run("echo ccc > file2")
+                    )::merge,
+                    run("echo ddd > file")
+                )::merge.""")
+        imgs = self.build(mf, "a")
+        img = imgs[Fact("a", ())]
+        self.assertEqual(img.read_file("/tmp/file"), "ddd\n")
+        self.assertEqual(img.read_file("/tmp/file2"), "ccc\n")
+
+    def test_nop_merge(self):
+        mf = dedent("""\
+            a :-
+                from("alpine"),
+                (
+                    "1" = "1"
+                )::merge.""")
+        self.build(mf, "a")
+
+    def test_copy_should_mkdir(self):
+        self.init_files()
+        mf = dedent("""\
+            a :- from("alpine"), run("echo aaa > /tmp/aaa").
+            b :-
+                from("alpine"),
+                (
+                    a::copy("/tmp/aaa", "bbb/ccc"),
+                    copy("file", "ddd/eee"),
+                    copy("dir", "ddd")
+                )::in_workdir("/tmp")::merge.
+            """)
+        imgs = self.build(mf, "b")
+        img = imgs[Fact("b", ())]
+        self.assertEqual(img.read_file("/tmp/bbb/ccc"), "aaa\n")
+        self.assertEqual(img.read_file("/tmp/ddd/eee"), "content\n")
+        self.assertEqual(img.read_file("/tmp/ddd/dir/file"), "content\n")
