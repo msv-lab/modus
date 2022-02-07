@@ -233,9 +233,13 @@ async fn handle_build_plan(
         }
 
         let new_node: (OwnedOutput, Arc<ImageSpecification>) = match node {
-            From { image_ref } => {
-                let img_s = Source::image(image_ref).custom_name(format!("from({:?})", image_ref));
-                let log_name = format!("from({:?}) :: resolve image config", image_ref);
+            From {
+                image_ref,
+                display_name,
+            } => {
+                let img_s =
+                    Source::image(image_ref).custom_name(format!("from({:?})", display_name));
+                let log_name = format!("from({:?}) :: resolve image config", display_name);
                 let (_, resolved_config) = bridge
                     .resolve_image_config(&img_s, Some(&log_name))
                     .await
@@ -354,6 +358,7 @@ async fn handle_build_plan(
                 let image_cwd = get_cwd_from_image_spec(&*p_conf);
                 debug_assert!(image_cwd.is_absolute());
                 use shell_escape::escape;
+                let mut mount_id = 0usize;
                 for op in operations {
                     match op {
                         MergeOperation::Run {
@@ -390,9 +395,9 @@ async fn handle_build_plan(
                             let src_path = src_cwd.join(src_path);
                             let dst_path = image_cwd.join(dst_path);
 
-                            let mut mount_dir = OsString::from("/");
-                            mount_dir.push(&buildkit::gen_tmp_filename());
-                            mount_dir.push(".merge-mount");
+                            let mut mount_dir = OsString::from("/__buildkit_merge_mount_");
+                            mount_dir.push(OsStr::new(&mount_id.to_string()));
+                            mount_id += 1;
                             debug_assert!(src_path.is_absolute());
                             mount_dir.push(&src_path);
                             let mount_dir = PathBuf::from(mount_dir);
