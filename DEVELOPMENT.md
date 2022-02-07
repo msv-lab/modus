@@ -1,10 +1,10 @@
 # Developer Guide
 
-This document how to develop and test Modus.
+This document explains how to develop and test Modus.
 
 ## Building Custom BuildKit Frontend
 
-To build a custom frontend, please first generate a Dockerfile for it, e.g.:
+To build a custom BuildKit frontend, please first generate a Dockerfile for it, e.g.:
 
     ./target/debug/modus transpile Modusfile 'all("frontend", "release")' > /tmp/modus-frontend.Dockerfile
 
