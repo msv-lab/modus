@@ -725,7 +725,8 @@ pub fn plan_from_modusfile(
             .body
             .iter()
             .flat_map(|lit| {
-                // REVIEW: check if this works with operators
+                // We don't have to expose operators for now, since they all must be grounded,
+                // i.e. they will be constrained from somewhere else.
                 if let Some(query_lit) = query_preds
                     .iter()
                     .find(|query_lit| lit.predicate == query_lit.predicate)
