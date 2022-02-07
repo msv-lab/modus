@@ -359,6 +359,13 @@ async fn handle_build_plan(
                 debug_assert!(image_cwd.is_absolute());
                 use shell_escape::escape;
                 let mut mount_id = 0usize;
+                fn mkdir_pf(path: &str, script: &mut Vec<String>) {
+                    script.push(format!("(mkdir -p {} || true)", escape(path.into())));
+                }
+                fn cd(path: &str, script: &mut Vec<String>) {
+                    mkdir_pf(path, script);
+                    script.push(format!("echo cd {cd} && cd {cd}", cd = escape(path.into())));
+                }
                 for op in operations {
                     match op {
                         MergeOperation::Run {
@@ -368,10 +375,7 @@ async fn handle_build_plan(
                         } => {
                             let resolved_cwd = image_cwd.join(cwd);
                             let resolved_cwd = resolved_cwd.to_str().unwrap(); // TODO: report error if image cwd is not valid utf8.
-                            script.push(format!(
-                                "(mkdir -p {cd} && cd {cd})",
-                                cd = escape(resolved_cwd.into())
-                            ));
+                            cd(resolved_cwd, &mut script);
                             for (k, v) in additional_envs.iter() {
                                 script.push(format!(
                                     "export {}={}",
@@ -399,6 +403,7 @@ async fn handle_build_plan(
                             mount_dir.push(OsStr::new(&mount_id.to_string()));
                             mount_id += 1;
                             debug_assert!(src_path.is_absolute());
+                            debug_assert!(dst_path.is_absolute());
                             mount_dir.push(&src_path);
                             let mount_dir = PathBuf::from(mount_dir);
                             cmd = cmd.mount(Mount::ReadOnlySelector(
@@ -407,15 +412,41 @@ async fn handle_build_plan(
                                 src_path.clone(),
                             ));
 
+                            if let Some(par) = dst_path.parent() {
+                                mkdir_pf(par.to_str().unwrap(), &mut script);
+                            }
                             script.push(format!(
-                                "echo COPY -> {dst} && cp -r {src} {dst}",
+                                "echo COPY '->' {dst} && cp -r {src} {dst}",
                                 dst = escape(dst_path.to_str().unwrap().into()),
                                 src = escape(mount_dir.to_str().unwrap().into())
                             ));
                             name.push(format!("...::copy({:?}, {:?})", src_path, dst_path));
                         }
                         MergeOperation::CopyFromLocal { src_path, dst_path } => {
-                            todo!()
+                            let mut mount_dir = OsString::from("/__buildkit_merge_mount_");
+                            mount_dir.push(OsStr::new(&mount_id.to_string()));
+                            mount_id += 1;
+                            mount_dir.push("/");
+                            debug_assert!(!src_path.starts_with("/"));
+                            mount_dir.push(src_path);
+                            let dst_path = image_cwd.join(dst_path);
+                            debug_assert!(dst_path.is_absolute());
+                            let mount_dir = PathBuf::from(mount_dir);
+                            cmd = cmd.mount(Mount::ReadOnlySelector(
+                                local_context.clone(),
+                                mount_dir.clone(),
+                                PathBuf::from(src_path),
+                            ));
+
+                            if let Some(par) = dst_path.parent() {
+                                mkdir_pf(par.to_str().unwrap(), &mut script);
+                            }
+                            script.push(format!(
+                                "echo COPY '->' {dst} && cp -r {src} {dst}",
+                                dst = escape(dst_path.to_str().unwrap().into()),
+                                src = escape(mount_dir.to_str().unwrap().into())
+                            ));
+                            name.push(format!("copy({:?}, {:?})", src_path, dst_path));
                         }
                     }
                 }

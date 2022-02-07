@@ -114,3 +114,12 @@ class TestCopyFromContext(ModusTestCase):
                 copy("file", "file")::in_workdir("/tmp").""")
         img_a = self.build(md, "a")[Fact("_query", ())]
         self.assertEqual(img_a.read_file("/tmp/file"), "content\n")
+
+    def test_test_setworkdir(self):
+        self.init_files()
+        md = dedent("""\
+            a :-
+                from("alpine")::set_workdir("/tmp"),
+                copy("file", "file").""")
+        img_a = self.build(md, "a")[Fact("a", ())]
+        self.assertEqual(img_a.read_file("/tmp/file"), "content\n")
