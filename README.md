@@ -1,8 +1,1 @@
-Modus is a [Datalog](https://en.wikipedia.org/wiki/Datalog)-based domain-specific language for building [container](https://en.wikipedia.org/wiki/OS-level_virtualization) images. Modus has the following goals:
-
-- _Maintainability_: make build definitions maintainable by enabling modularity, code reuse and dependency resolution.
-- _Efficiency_: make builds efficient by automatic parallelisation and fine-grained caching; provide tools for optimising the image size.
-- _Expressiveness_: enable the user to express complex build workflows.
-- _Simplicity_: provide minimalistic syntax, well-defined, non-Turing-complete semantics, and statically computed build graphs.
-
-For more information, please check [documentation](http://docs.modus-continens.com/) and [installation guide](https://github.com/modus-continens/modus/blob/main/INSTALL.md). Modus uses semantic versioning; until version 1.0 is declared, breaking changes are possible. We welcome bug reports and feature requests submitted through [issues](https://github.com/mechtaev/modus/issues).
+Modus is a language for building container images. Modus uses logic programming to solve key pain points of Dockerfiles — no way to express interaction among parameters, inability to specify complex build workflows, difficult and inefficient parallelisation, bloated images, and costly maintenance. For more information, please check [documentation](http://docs.modus-continens.com/). Modus uses semantic versioning; until version 1.0 is declared, breaking changes are possible. We welcome bug reports and feature requests submitted through [issues](https://github.com/mechtaev/modus/issues).

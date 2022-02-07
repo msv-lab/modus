@@ -1,4 +1,23 @@
-# Executing Integration Tests
+# Developer Guide
+
+This document explains how to develop and test Modus.
+
+## Building Custom BuildKit Frontend
+
+To build a custom BuildKit frontend, please first generate a Dockerfile for it, e.g.:
+
+    ./target/debug/modus transpile Modusfile 'all("frontend", "release")' > /tmp/modus-frontend.Dockerfile
+
+After that, build a frontend image:
+
+    docker build -f /tmp/modus-frontend.Dockerfile . -t my-buildkit-frontend
+    
+The frontend can be enabled by passing its name to `modus build` using the option `--custom-buildkit-frontend`:
+
+    modus build ... --custom-buildkit-frontend my-buildkit-frontend
+
+
+## Executing Integration Tests
 
 To run integration tests, use the following command:
 
