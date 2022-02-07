@@ -399,6 +399,7 @@ async fn handle_build_plan(
                             mount_dir.push(OsStr::new(&mount_id.to_string()));
                             mount_id += 1;
                             debug_assert!(src_path.is_absolute());
+                            debug_assert!(dst_path.is_absolute());
                             mount_dir.push(&src_path);
                             let mount_dir = PathBuf::from(mount_dir);
                             cmd = cmd.mount(Mount::ReadOnlySelector(
@@ -415,7 +416,27 @@ async fn handle_build_plan(
                             name.push(format!("...::copy({:?}, {:?})", src_path, dst_path));
                         }
                         MergeOperation::CopyFromLocal { src_path, dst_path } => {
-                            todo!()
+                            let mut mount_dir = OsString::from("/__buildkit_merge_mount_");
+                            mount_dir.push(OsStr::new(&mount_id.to_string()));
+                            mount_id += 1;
+                            mount_dir.push("/");
+                            debug_assert!(!src_path.starts_with("/"));
+                            mount_dir.push(src_path);
+                            let dst_path = image_cwd.join(dst_path);
+                            debug_assert!(dst_path.is_absolute());
+                            let mount_dir = PathBuf::from(mount_dir);
+                            cmd = cmd.mount(Mount::ReadOnlySelector(
+                                local_context.clone(),
+                                mount_dir.clone(),
+                                PathBuf::from(src_path),
+                            ));
+
+                            script.push(format!(
+                                "echo COPY -> {dst} && cp -r {src} {dst}",
+                                dst = escape(dst_path.to_str().unwrap().into()),
+                                src = escape(mount_dir.to_str().unwrap().into())
+                            ));
+                            name.push(format!("copy({:?}, {:?})", src_path, dst_path));
                         }
                     }
                 }
