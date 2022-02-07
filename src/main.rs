@@ -306,13 +306,14 @@ fn main() {
             let options = DockerBuildOptions {
                 verbose: sub.is_present("VERBOSE"),
                 no_cache: sub.is_present("NO_CACHE"),
+                quiet: false,
                 additional_args: sub
                     .values_of("ADDITIONAL_OPTS")
                     .map(|x| x.map(ToOwned::to_owned).collect())
                     .unwrap_or_default(),
             };
             match buildkit::build(
-                &build_plan,
+                build_plan.clone(),
                 context_dir,
                 &options,
                 sub.value_of("CUSTOM_FRONTEND").unwrap(),

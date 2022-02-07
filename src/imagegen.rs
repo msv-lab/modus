@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use crate::logic::{Clause, IRTerm, Literal, Predicate};
+use crate::logic::{Clause, IRTerm, Literal};
 use crate::modusfile::Modusfile;
-use crate::sld::{self, ClauseId, Proof, ResolutionError};
+use crate::sld::{self, ClauseId, Proof};
 use crate::unification::Substitute;
 
 use codespan_reporting::diagnostic::Diagnostic;
@@ -132,7 +132,10 @@ pub type NodeId = usize;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BuildNode {
     From {
+        /// The actual image reference to use. Probably a resolved hash.
         image_ref: String,
+        /// What user specified initially, such as "alpine".
+        display_name: String,
     },
     Run {
         parent: NodeId,
@@ -268,7 +271,7 @@ pub fn build_dag_from_proofs(
             match proof.clause {
                 ClauseId::Query => {}
                 ClauseId::Builtin(ref intrinsic) => {
-                    process_intrinsic(intrinsic, rules, res, image_literals, curr_state);
+                    process_intrinsic(intrinsic, res, image_literals, curr_state);
                     debug_assert!(proof.children.is_empty()); // Intrinsics should not have children.
                     return;
                 }
@@ -318,7 +321,6 @@ pub fn build_dag_from_proofs(
 
         fn process_intrinsic(
             intrinsic: &Literal,
-            rules: &Vec<Clause<IRTerm>>,
             res: &mut BuildPlan,
             image_literals: &mut HashMap<Literal, NodeId>,
             curr_state: &mut State,
@@ -337,9 +339,11 @@ pub fn build_dag_from_proofs(
                     if let Some(&existing_node) = image_literals.get(&intrinsic) {
                         curr_state.set_node(existing_node);
                     } else {
+                        let image_ref = intrinsic.args[0].as_constant().unwrap().to_owned();
                         let new_node = res.new_node(
                             BuildNode::From {
-                                image_ref: intrinsic.args[0].as_constant().unwrap().to_owned(),
+                                display_name: image_ref.clone(),
+                                image_ref,
                             },
                             vec![],
                         );
