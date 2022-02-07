@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use crate::logic::{Clause, IRTerm, Literal, Predicate};
+use crate::logic::{Clause, IRTerm, Literal};
 use crate::modusfile::Modusfile;
-use crate::sld::{self, ClauseId, Proof, ResolutionError};
+use crate::sld::{self, ClauseId, Proof};
 use crate::unification::Substitute;
 
 use codespan_reporting::diagnostic::Diagnostic;
@@ -271,7 +271,7 @@ pub fn build_dag_from_proofs(
             match proof.clause {
                 ClauseId::Query => {}
                 ClauseId::Builtin(ref intrinsic) => {
-                    process_intrinsic(intrinsic, rules, res, image_literals, curr_state);
+                    process_intrinsic(intrinsic, res, image_literals, curr_state);
                     debug_assert!(proof.children.is_empty()); // Intrinsics should not have children.
                     return;
                 }
@@ -321,7 +321,6 @@ pub fn build_dag_from_proofs(
 
         fn process_intrinsic(
             intrinsic: &Literal,
-            rules: &Vec<Clause<IRTerm>>,
             res: &mut BuildPlan,
             image_literals: &mut HashMap<Literal, NodeId>,
             curr_state: &mut State,

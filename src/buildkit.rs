@@ -37,23 +37,17 @@
 //! frontend.
 
 use std::{
-    fs::{File, OpenOptions},
+    fs::OpenOptions,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{atomic::AtomicBool, Arc},
 };
 
-use buildkit_llb::prelude::*;
 use signal_hook::{
     consts::{SIGCHLD, SIGINT, SIGTERM},
     iterator::{exfiltrator::SignalOnly, SignalsInfo},
 };
 
-use crate::{
-    imagegen::{self, BuildNode, BuildPlan, Output},
-    logic::Literal,
-    modusfile::Modusfile,
-};
+use crate::imagegen::{BuildNode, BuildPlan, Output};
 
 use colored::Colorize;
 use rand::{
@@ -357,7 +351,7 @@ fn check_terminate(signals: &mut SignalsInfo<SignalOnly>) -> bool {
     signals.pending().any(|s| s == SIGINT || s == SIGTERM)
 }
 
-pub fn resolve_FROMs(
+pub fn resolve_froms(
     build_plan: &mut BuildPlan,
     docker_build_options: &DockerBuildOptions,
     frontend_image: &str,
@@ -389,7 +383,7 @@ pub fn resolve_FROMs(
                     stderr,
                     "\x1b[2K\r{}\x1b[0m",
                     format!(
-                        "[{}/{}] Resolving from({})...",
+                        "[{}/{}] Resolving from({:?})...",
                         nb_done + 1,
                         total,
                         image_ref
@@ -478,7 +472,7 @@ pub fn resolve_FROMs(
         let _ = write!(
             stderr,
             "\x1b[2K\r{}\x1b[0m\n",
-            "[done] Resolving from(...) in advance...".blue()
+            "[done] Resolving from(...)".blue()
         );
         let _ = stderr.flush();
     }
@@ -515,7 +509,7 @@ pub fn build<P: AsRef<Path>>(
     let previous_cwd = PathBuf::from(".").canonicalize().map_err(CwdError)?;
     let _restore_cwd = RestoreCwd(previous_cwd);
     let mut tmp_tags = CleanupTmpTags(Vec::new());
-    resolve_FROMs(
+    resolve_froms(
         &mut build_plan,
         docker_build_options,
         frontend_image,
