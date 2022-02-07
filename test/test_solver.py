@@ -21,8 +21,9 @@ class TestSolver(ModusTestCase):
         images = self.build(modusfile, 'f(X)')
 
         self.assertEqual(len(images), 2)
+        bbb_image = images[Fact('f', ('bbb',))]
+        self.assertEqual(bbb_image.read_file('/tmp/foo.txt'), 'aaa\nbbb\n')
         ccc_image = images[Fact("f", ("ccc",))]
-        self.assertTrue(ccc_image.contains_file("/tmp/foo.txt"))
         self.assertEqual(ccc_image.read_file("/tmp/foo.txt"), dedent("""\
             aaa
             ccc

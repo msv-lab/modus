@@ -76,3 +76,30 @@ class TestSimple(ModusTestCase):
         self.assertEqual(len(imgs), 1)
         first_img = imgs[Fact("a", ())]
         self.assertEqual(first_img.read_file("/tmp/a"), "# comment\n")
+
+    def test_workdir_interaction(self):
+        md = dedent("""\
+            a :-
+                from("alpine")::set_workdir("/tmp"),
+                run("pwd >> /log"),
+                run("pwd >> /log")::in_workdir("a"),
+                (
+                    run("pwd >> /log"),
+                    run("pwd >> /log")::in_workdir("c"),
+                    run("pwd >> /log")::in_workdir("/")
+                )::in_workdir("b").
+        """)
+
+        imgs = self.build(md, "a")
+        img = imgs[Fact("a", ())]
+        self.assertEqual(img.read_file("/log"), dedent("""\
+            /tmp
+            /tmp/a
+            /tmp/b
+            /tmp/b/c
+            /
+        """))
+
+    def test_run_failure(self):
+        mf = """a :- from("alpine"), run("exit 1")."""
+        self.build(mf, "a", should_succeed=False)
