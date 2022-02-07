@@ -359,6 +359,13 @@ async fn handle_build_plan(
                 debug_assert!(image_cwd.is_absolute());
                 use shell_escape::escape;
                 let mut mount_id = 0usize;
+                fn mkdir_pf(path: &str, script: &mut Vec<String>) {
+                    script.push(format!("(mkdir -p {} || true)", escape(path.into())));
+                }
+                fn cd(path: &str, script: &mut Vec<String>) {
+                    mkdir_pf(path, script);
+                    script.push(format!("echo cd {cd} && cd {cd}", cd = escape(path.into())));
+                }
                 for op in operations {
                     match op {
                         MergeOperation::Run {
@@ -368,10 +375,7 @@ async fn handle_build_plan(
                         } => {
                             let resolved_cwd = image_cwd.join(cwd);
                             let resolved_cwd = resolved_cwd.to_str().unwrap(); // TODO: report error if image cwd is not valid utf8.
-                            script.push(format!(
-                                "(mkdir -p {cd} && cd {cd})",
-                                cd = escape(resolved_cwd.into())
-                            ));
+                            cd(resolved_cwd, &mut script);
                             for (k, v) in additional_envs.iter() {
                                 script.push(format!(
                                     "export {}={}",
@@ -408,6 +412,9 @@ async fn handle_build_plan(
                                 src_path.clone(),
                             ));
 
+                            if let Some(par) = dst_path.parent() {
+                                mkdir_pf(par.to_str().unwrap(), &mut script);
+                            }
                             script.push(format!(
                                 "echo COPY -> {dst} && cp -r {src} {dst}",
                                 dst = escape(dst_path.to_str().unwrap().into()),
@@ -431,6 +438,9 @@ async fn handle_build_plan(
                                 PathBuf::from(src_path),
                             ));
 
+                            if let Some(par) = dst_path.parent() {
+                                mkdir_pf(par.to_str().unwrap(), &mut script);
+                            }
                             script.push(format!(
                                 "echo COPY -> {dst} && cp -r {src} {dst}",
                                 dst = escape(dst_path.to_str().unwrap().into()),
