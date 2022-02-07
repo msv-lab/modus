@@ -416,7 +416,7 @@ async fn handle_build_plan(
                                 mkdir_pf(par.to_str().unwrap(), &mut script);
                             }
                             script.push(format!(
-                                "echo COPY -> {dst} && cp -r {src} {dst}",
+                                "echo COPY '->' {dst} && cp -r {src} {dst}",
                                 dst = escape(dst_path.to_str().unwrap().into()),
                                 src = escape(mount_dir.to_str().unwrap().into())
                             ));
@@ -442,7 +442,7 @@ async fn handle_build_plan(
                                 mkdir_pf(par.to_str().unwrap(), &mut script);
                             }
                             script.push(format!(
-                                "echo COPY -> {dst} && cp -r {src} {dst}",
+                                "echo COPY '->' {dst} && cp -r {src} {dst}",
                                 dst = escape(dst_path.to_str().unwrap().into()),
                                 src = escape(mount_dir.to_str().unwrap().into())
                             ));
