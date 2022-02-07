@@ -121,7 +121,6 @@ fn invoke_buildkit(
     iidfile: Option<&str>,
     signals: &mut SignalsInfo<SignalOnly>,
     options: &DockerBuildOptions,
-    no_stderr: bool,
 ) -> Result<(), BuildError> {
     let mut args = Vec::new();
     args.push("build".to_string());
@@ -171,11 +170,7 @@ fn invoke_buildkit(
         } else {
             Stdio::inherit()
         })
-        .stderr(if no_stderr {
-            Stdio::null()
-        } else {
-            Stdio::inherit()
-        })
+        .stderr(Stdio::inherit())
         .env("DOCKER_BUILDKIT", "1")
         .spawn()
         .map_err(|e| UnableToRunDockerBuild(e))?;
@@ -441,10 +436,9 @@ pub fn resolve_FROMs(
                     signals,
                     &DockerBuildOptions {
                         quiet: true,
-                        verbose: true,
+                        verbose: false,
                         ..docker_build_options.clone()
                     },
-                    true,
                 )
                 .err();
                 if err.is_none() {
@@ -552,7 +546,6 @@ pub fn build<P: AsRef<Path>>(
                 Some(iidfile.name()),
                 &mut signals,
                 &docker_build_options,
-                false,
             )?;
             if check_terminate(&mut signals) {
                 return Err(Interrupted);
@@ -574,7 +567,6 @@ pub fn build<P: AsRef<Path>>(
                 None,
                 &mut signals,
                 docker_build_options,
-                false,
             )?;
             let mut res = Vec::with_capacity(nb_outputs);
             let stderr = std::io::stderr();
@@ -616,7 +608,6 @@ pub fn build<P: AsRef<Path>>(
                         quiet: true,
                         ..docker_build_options.clone()
                     },
-                    false,
                 )?;
                 let iid = std::fs::read_to_string(iidfile.name())
                     .map_err(|e| UnableToReadTmpFile(iidfile.name().to_owned(), e))?;
