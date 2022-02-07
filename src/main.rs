@@ -244,7 +244,7 @@ fn main() {
             let context_dir = sub.value_of_os("CONTEXT").unwrap();
             let input_file = sub
                 .value_of_os("FILE")
-                .map(|x| PathBuf::from(x))
+                .map(PathBuf::from)
                 .unwrap_or_else(|| Path::new(context_dir).join("Modusfile"));
             let file = get_file(input_file.as_path());
             let query: modusfile::Expression =
