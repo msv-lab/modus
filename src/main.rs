@@ -53,8 +53,6 @@ use modusfile::Modusfile;
 
 use crate::buildkit::DockerBuildOptions;
 
-use analysis::check_and_output_analysis;
-
 fn get_file(path: &Path) -> SimpleFile<&str, String> {
     let file_name: &str = path
         .file_name()
@@ -223,7 +221,13 @@ fn main() {
                     std::process::exit(1);
                 }
             };
-            if !check_and_output_analysis(&mf, false, &mut err_writer.lock(), &config, &file) {
+            if !analysis::check_and_output_analysis(
+                &mf,
+                false,
+                &mut err_writer.lock(),
+                &config,
+                &file,
+            ) {
                 std::process::exit(1)
             }
 
@@ -258,7 +262,13 @@ fn main() {
                     std::process::exit(1);
                 }
             };
-            if !check_and_output_analysis(&mf, false, &mut err_writer.lock(), &config, &file) {
+            if !analysis::check_and_output_analysis(
+                &mf,
+                false,
+                &mut err_writer.lock(),
+                &config,
+                &file,
+            ) {
                 std::process::exit(1)
             }
 
@@ -370,7 +380,7 @@ fn main() {
                     modus_f.0.len()
                 ),
                 (Ok(modus_f), Some(e)) => {
-                    if !check_and_output_analysis(
+                    if !analysis::check_and_output_analysis(
                         &modus_f,
                         false,
                         &mut err_writer.lock(),
@@ -432,7 +442,7 @@ fn main() {
 
             match file.source().parse::<Modusfile>() {
                 Ok(mf) => {
-                    if !check_and_output_analysis(
+                    if !analysis::check_and_output_analysis(
                         &mf,
                         is_verbose,
                         &mut err_writer.lock(),

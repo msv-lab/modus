@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::iter::{self, FromIterator};
 use std::path::{Path, PathBuf};
 
+use crate::analysis::{Kind, ModusSemantics};
 use crate::logic::{Clause, IRTerm, Literal, Predicate};
 use crate::modusfile::{self, Modusfile};
 use crate::sld::{self, ClauseId, Proof, ResolutionError};
@@ -691,6 +692,35 @@ pub fn plan_from_modusfile(
     mf: Modusfile,
     query: modusfile::Expression,
 ) -> Result<BuildPlan, Vec<Diagnostic<()>>> {
+    // 1. Adds a new clause based on the user's expression query to the Modusfile, `_query :- ...`.
+    // 2. Translates the Modusfile to IR.
+    // 3. Find proof for `_query`. We need to do this, and not just find proof of the image literal due to any
+    //    possible logical constraints.
+    // 4. Modify proof to give proof for the single image literal. The other literals, if any, should
+    //    only be logic literals.
+    //
+    // Operators on image literals will not work.
+
+    /// TODO: also validate the given expression query.
+    fn get_image_literal(
+        query: &modusfile::Expression,
+        mf_with_query: &Modusfile,
+        ir_q_clause: &Clause,
+    ) -> Result<Literal<IRTerm>, Vec<Diagnostic<()>>> {
+        let kind_res = mf_with_query.kinds();
+        let query_lits = query.literals();
+        let expression_image_literal = query_lits
+            .iter()
+            .find(|lit| kind_res.pred_kind.get(lit.predicate.0.as_str()) == Some(&Kind::Image))
+            .unwrap();
+        let image_literal = ir_q_clause
+            .body
+            .iter()
+            .find(|lit| lit.predicate == expression_image_literal.predicate)
+            .expect("should find matching predicate name after translation");
+        Ok(image_literal.clone())
+    }
+
     let max_depth = 175;
 
     let goal_pred = Predicate("_query".to_owned());
@@ -702,62 +732,33 @@ pub fn plan_from_modusfile(
         },
         body: Some(query.clone()),
     };
-    let mut clauses: Vec<Clause> =
-        mf.0.iter()
-            .chain(iter::once(&user_clause))
-            .flat_map(|mc| {
-                let clauses: Vec<Clause> = mc.into();
-                clauses
-            })
-            .collect();
 
-    let query_preds = query.literals();
+    let mf_with_query = Modusfile(mf.0.into_iter().chain(iter::once(user_clause)).collect());
+    let ir_clauses: Vec<Clause> = mf_with_query
+        .0
+        .iter()
+        .flat_map(|mc| {
+            let clauses: Vec<Clause> = mc.into();
+            clauses
+        })
+        .collect();
 
-    let q_clause = clauses
-        .iter_mut()
+    let q_clause = ir_clauses
+        .iter()
         .find(|c| c.head.predicate == goal_pred)
         .expect("should find same predicate name after translation");
-    q_clause.head = Literal {
-        position: None,
-        predicate: goal_pred.clone(),
-        // expose the corresponding args that were exposed in the original query
-        args: q_clause
-            .body
-            .iter()
-            .flat_map(|lit| {
-                // We don't have to expose operators for now, since they all must be grounded,
-                // i.e. they will be constrained from somewhere else.
-                if let Some(query_lit) = query_preds
-                    .iter()
-                    .find(|query_lit| lit.predicate == query_lit.predicate)
-                {
-                    query_lit
-                        .args
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(i, v)| {
-                            if v.is_variable() {
-                                Some(lit.args[i].clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect()
-                } else {
-                    vec![]
-                }
-            })
-            .collect(),
-    };
-    let goal = vec![q_clause.head.clone()];
+    let query_goal = &q_clause.body;
+
+    let image_literal = get_image_literal(&query, &mf_with_query, q_clause)?;
 
     // don't store full tree as this takes a lot of memory, and is probably not needed
     // when building/transpiling
-    let success_tree = Result::from(sld::sld(&clauses, &goal, max_depth, false))?;
-    let proofs = sld::proofs(&success_tree, &clauses, &goal);
+    let success_tree = Result::from(sld::sld(&ir_clauses, &query_goal, max_depth, false))?;
+    let proofs = sld::proofs(&success_tree, &ir_clauses, &query_goal);
+
     let query_and_proofs = proofs
         .into_iter()
-        .map(|(lits, p)| (lits.last().unwrap().clone(), p))
+        .map(|(_, p)| (image_literal.substitute(&p.valuation), p))
         .collect::<Vec<_>>();
-    Ok(build_dag_from_proofs(&query_and_proofs[..], &clauses))
+    Ok(build_dag_from_proofs(&query_and_proofs[..], &ir_clauses))
 }

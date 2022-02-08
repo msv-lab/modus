@@ -523,12 +523,16 @@ pub mod parser {
         // defines it as "head."
         context(
             stringify!(fact),
-            map(terminated(head, terminated(nom::character::complete::char('.'), token_sep0)), |h| {
-                ModusClause {
+            map(
+                terminated(
+                    head,
+                    terminated(nom::character::complete::char('.'), token_sep0),
+                ),
+                |h| ModusClause {
                     head: h,
                     body: None,
-                }
-            }),
+                },
+            ),
         )(i)
     }
 
@@ -541,7 +545,10 @@ pub mod parser {
                     delimited(token_sep0, tag(":-"), token_sep0),
                     context(
                         "rule_body",
-                        cut(terminated(body, terminated(nom::character::complete::char('.'), token_sep0))),
+                        cut(terminated(
+                            body,
+                            terminated(nom::character::complete::char('.'), token_sep0),
+                        )),
                     ),
                 ),
                 |(head, body)| ModusClause {

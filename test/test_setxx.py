@@ -7,7 +7,7 @@ class TestSetXX(ModusTestCase):
         mf = dedent(mf)
         imgs = self.build(mf, "final")
         self.assertEqual(len(imgs), 1)
-        first_img = imgs[Fact("_query", ())]
+        first_img = imgs[Fact("final", ())]
         self.assertEqual(first_img.read_file("/result").strip(), expect_result)
 
     def test_set_env(self):
@@ -39,7 +39,7 @@ class TestSetXX(ModusTestCase):
                     run("echo $PATH > /result").""")
         imgs = self.build(mf, "final")
         self.assertEqual(len(imgs), 1)
-        first_img = imgs[Fact("_query", ())]
+        first_img = imgs[Fact("final", ())]
         self.assertTrue("/appended_path" in first_img.read_file("/result"))
 
     def test_append_path_2(self):
@@ -49,5 +49,5 @@ class TestSetXX(ModusTestCase):
                     run("echo $PATH > /result"))::append_path("/appended_path").""")
         imgs = self.build(mf, "final")
         self.assertEqual(len(imgs), 1)
-        first_img = imgs[Fact("_query", ())]
+        first_img = imgs[Fact("final", ())]
         self.assertTrue("/appended_path" not in first_img.read_file("/result"))

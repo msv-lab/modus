@@ -15,8 +15,8 @@ use codespan_reporting::term::{self, Config};
 use petgraph::algo::has_path_connecting;
 
 use crate::logic::{Literal, Predicate, SpannedPosition};
+use crate::modusfile::Modusfile;
 use crate::modusfile::{Expression, ModusClause, ModusTerm};
-use crate::Modusfile;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Kind {
@@ -50,7 +50,7 @@ impl Kind {
 
 #[derive(Debug, Clone)]
 pub struct KindResult {
-    pred_kind: HashMap<String, Kind>,
+    pub pred_kind: HashMap<String, Kind>,
 
     /// For convenience, informational diagnostic messages that describe the predicate
     /// kind using spans.
@@ -431,11 +431,6 @@ mod tests {
     use super::*;
 
     use petgraph::algo::{is_cyclic_directed, is_isomorphic};
-
-    use crate::{
-        analysis::{ModusSemantics, PredicateDependency},
-        modusfile::Modusfile,
-    };
 
     #[test]
     fn acyclic_dependency() {
