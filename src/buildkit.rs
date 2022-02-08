@@ -218,11 +218,11 @@ fn wait_on(
                 let wait_res = child.borrow_mut().try_wait().map_err(|e| IOError(e))?;
                 if let Some(wait_res) = wait_res {
                     child_returned[i] = true;
-                    progress(i);
                     if !wait_res.success() {
                         kill_all(children);
                         return Err(DockerBuildFailed(wait_res.code().unwrap_or(-1)));
                     }
+                    progress(i);
                 }
             }
             if child_returned.iter().all(|x| *x) {
