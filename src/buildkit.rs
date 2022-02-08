@@ -37,9 +37,12 @@
 //! frontend.
 
 use std::{
+    borrow::{Borrow, BorrowMut},
+    collections::HashMap,
+    convert::TryInto,
     fs::OpenOptions,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
 };
 
 use signal_hook::{
@@ -107,7 +110,7 @@ pub struct DockerBuildOptions {
     pub additional_args: Vec<String>,
 }
 
-fn invoke_buildkit(
+fn spawn_buildkit(
     dockerfile: &str,
     tag: Option<String>,
     target: Option<String>,
@@ -115,7 +118,8 @@ fn invoke_buildkit(
     iidfile: Option<&str>,
     signals: &mut SignalsInfo<SignalOnly>,
     options: &DockerBuildOptions,
-) -> Result<(), BuildError> {
+    cwd: Option<&Path>,
+) -> Result<Child, BuildError> {
     let mut args = Vec::new();
     args.push("build".to_string());
     args.push(".".to_string());
@@ -156,19 +160,29 @@ fn invoke_buildkit(
         args.push("--progress=plain".to_string());
     }
     args.extend_from_slice(&options.additional_args);
-    let mut cmd = Command::new("docker")
-        .args(args)
-        .stdin(Stdio::null())
+    let mut cmd = Command::new("docker");
+    cmd.args(args);
+    if let Some(cwd) = cwd {
+        cmd.current_dir(cwd);
+    }
+    cmd.stdin(Stdio::null())
         .stdout(if options.quiet {
             Stdio::null()
         } else {
             Stdio::inherit()
         })
         .stderr(Stdio::inherit())
-        .env("DOCKER_BUILDKIT", "1")
-        .spawn()
-        .map_err(|e| UnableToRunDockerBuild(e))?;
-    let exit_status = loop {
+        .env("DOCKER_BUILDKIT", "1");
+    Ok(cmd.spawn().map_err(|e| UnableToRunDockerBuild(e))?)
+}
+
+fn wait_on(
+    children: &mut [impl BorrowMut<Child>],
+    signals: &mut SignalsInfo<SignalOnly>,
+    mut progress: impl FnMut(usize),
+) -> Result<(), BuildError> {
+    let mut child_returned = vec![false; children.len()];
+    loop {
         let mut has_sigchild = false;
         let mut has_term = false;
         for sig in signals.wait() {
@@ -178,21 +192,67 @@ fn invoke_buildkit(
                 has_term = true;
             }
         }
+        fn kill_all(children: &mut [impl BorrowMut<Child>]) {
+            for child in children.iter_mut() {
+                let child = child.borrow_mut();
+                if matches!(child.try_wait(), Ok(None)) {
+                    let _ = nix::sys::signal::kill(
+                        nix::unistd::Pid::from_raw(child.id().try_into().unwrap()),
+                        nix::sys::signal::Signal::SIGINT,
+                    );
+                }
+            }
+            for child in children.iter_mut() {
+                let _ = child.borrow_mut().wait();
+            }
+        }
         if has_term {
-            std::thread::sleep(std::time::Duration::from_millis(200)); // Wait for child to terminate first. This gives better terminal output.
+            kill_all(children);
             return Err(Interrupted);
         }
         if has_sigchild {
-            let wait_res = cmd.try_wait().map_err(|e| IOError(e))?;
-            if let Some(wait_res) = wait_res {
-                break wait_res;
+            for (i, child) in children.iter_mut().enumerate() {
+                if child_returned[i] {
+                    continue;
+                }
+                let wait_res = child.borrow_mut().try_wait().map_err(|e| IOError(e))?;
+                if let Some(wait_res) = wait_res {
+                    child_returned[i] = true;
+                    progress(i);
+                    if !wait_res.success() {
+                        kill_all(children);
+                        return Err(DockerBuildFailed(wait_res.code().unwrap_or(-1)));
+                    }
+                }
+            }
+            if child_returned.iter().all(|x| *x) {
+                return Ok(());
             }
         }
-    };
-    if !exit_status.success() {
-        return Err(DockerBuildFailed(exit_status.code().unwrap_or(-1)));
     }
-    Ok(())
+}
+
+fn invoke_buildkit(
+    dockerfile: &str,
+    tag: Option<String>,
+    target: Option<String>,
+    has_dockerignore: bool,
+    iidfile: Option<&str>,
+    signals: &mut SignalsInfo<SignalOnly>,
+    options: &DockerBuildOptions,
+    cwd: Option<&Path>,
+) -> Result<(), BuildError> {
+    let cmd = spawn_buildkit(
+        dockerfile,
+        tag,
+        target,
+        has_dockerignore,
+        iidfile,
+        signals,
+        options,
+        cwd,
+    )?;
+    wait_on(&mut [cmd], signals, |_| {})
 }
 
 /// A holder for a file name that deletes the file when dropped.
@@ -358,124 +418,147 @@ pub fn resolve_froms(
     signals: &mut SignalsInfo,
     tmp_tags: &mut Vec<String>,
 ) -> Result<(), BuildError> {
-    let mut stderr = std::io::stderr();
-    let mut printed = false;
-    let total = build_plan
+    let queue = build_plan
         .nodes
         .iter()
-        .filter(|x| matches!(x, BuildNode::From { .. }))
-        .count();
-    let mut nb_done = 0usize;
+        .filter_map(|x| match x {
+            BuildNode::From { image_ref, .. } if !image_ref_is_hash(image_ref) => Some(image_ref),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if queue.is_empty() {
+        return Ok(());
+    }
+
+    let mut stderr = std::io::stderr();
     let _ctx = AutoRmTmpDir::new_empty().map_err(BuildError::UnableToCreateTempDir)?;
     let ctx = _ctx.path();
     std::env::set_current_dir(ctx).map_err(EnterContextDir)?; // CWD Restored outside
-    let dockerfile = ctx.join("Dockerfile");
-    let iidfile = ctx.join("iidfile");
-    for node in build_plan.nodes.iter_mut() {
-        match node {
-            BuildNode::From {
-                ref mut image_ref, ..
-            } => {
-                if image_ref_is_hash(&image_ref[..]) {
-                    continue;
-                }
-                let _ = write!(
-                    stderr,
-                    "\x1b[2K\r{}\x1b[0m",
-                    format!(
-                        "[{}/{}] Resolving from({:?})...",
-                        nb_done + 1,
-                        total,
-                        image_ref
-                    )
-                    .blue()
-                );
-                nb_done += 1;
-                printed = true;
-                let _ = stderr.flush();
-                let mut tmp_plan = BuildPlan::new();
-                let out = tmp_plan.new_node(
-                    BuildNode::From {
-                        image_ref: image_ref.clone(),
-                        display_name: String::new(),
-                    },
-                    Vec::new(),
-                );
-                tmp_plan.outputs.push(Output {
-                    node: out,
-                    source_literal: None,
-                });
 
-                let mut content = String::new();
-                content.push_str("#syntax=");
-                content.push_str(frontend_image);
-                content.push('\n');
-                content.push_str(
-                    &serde_json::to_string(&tmp_plan)
-                        .expect("Unable to serialize temporary build plan"),
-                );
-                if check_terminate(signals) {
-                    return Err(Interrupted);
-                }
-                std::fs::write(&dockerfile, content.as_bytes()).map_err(|e| {
-                    BuildError::UnableToWriteTmpFile(dockerfile.display().to_string(), e)
-                })?;
-                let _ = std::fs::remove_file(&iidfile);
-                let err = invoke_buildkit(
-                    "Dockerfile",
-                    None,
-                    None,
-                    false,
-                    Some("iidfile"),
-                    signals,
-                    &DockerBuildOptions {
-                        quiet: true,
-                        verbose: false,
-                        ..docker_build_options.clone()
-                    },
+    #[derive(Debug)]
+    struct Task {
+        child: Child,
+        iidfile: PathBuf,
+    }
+    let mut tasks = Vec::with_capacity(queue.len());
+    for (i, &image_ref) in queue.iter().enumerate() {
+        let ctx = ctx.join(i.to_string());
+        std::fs::create_dir(&ctx).map_err(|e| UnableToCreateTempDir(e))?;
+        let dockerfile = ctx.join(gen_tmp_filename());
+        let iidfile = ctx.join(gen_tmp_filename());
+        /* Note:
+           It is intention to use a random Dockerfile name here, even though we
+           are in a new empty directory. This is because of a weird race
+           condition when calling docker build with our frontend - if we run two
+           in parallel, starting at the exact same time, passing in two
+           different Dockerfiles that are just named the same, they will, for
+           some unknown reason, read the same Dockerfile (either the first one
+           or the second one), which means that one of them end up building the
+           wrong image (a duplicate of the other).
+        */
+
+        let mut tmp_plan = BuildPlan::new();
+        let out = tmp_plan.new_node(
+            BuildNode::From {
+                image_ref: image_ref.clone(),
+                display_name: image_ref.clone(),
+            },
+            Vec::new(),
+        );
+        tmp_plan.outputs.push(Output {
+            node: out,
+            source_literal: None,
+        });
+
+        let mut content = String::new();
+        content.push_str("#syntax=");
+        content.push_str(frontend_image);
+        content.push('\n');
+        content.push_str(
+            &serde_json::to_string(&tmp_plan).expect("Unable to serialize temporary build plan"),
+        );
+        if check_terminate(signals) {
+            return Err(Interrupted);
+        }
+        std::fs::write(&dockerfile, content.as_bytes())
+            .map_err(|e| BuildError::UnableToWriteTmpFile(dockerfile.display().to_string(), e))?;
+        let child = spawn_buildkit(
+            dockerfile.to_str().expect("path to be utf-8"),
+            None,
+            None,
+            false,
+            Some(iidfile.to_str().expect("path to be utf-8")),
+            signals,
+            &DockerBuildOptions {
+                quiet: true,
+                verbose: false,
+                ..docker_build_options.clone()
+            },
+            Some(&ctx),
+        )?;
+        tasks.push(Task {
+            child,
+            iidfile: iidfile.clone(),
+        });
+    }
+
+    let mut nb_done = 0usize;
+    wait_on(
+        &mut tasks.iter_mut().map(|x| &mut x.child).collect::<Vec<_>>(),
+        signals,
+        |task_id| {
+            let original_ref = queue[task_id];
+            let _ = write!(
+                stderr,
+                "\x1b[2K\r{}\x1b[0m",
+                format!(
+                    "[{}/{}] Resolved from({:?})...",
+                    nb_done + 1,
+                    queue.len(),
+                    original_ref
                 )
-                .err();
-                if err.is_none() {
-                    let iid = std::fs::read_to_string(&iidfile)
-                        .map_err(|e| UnableToReadTmpFile(iidfile.display().to_string(), e))?;
-                    // Buildkit currently does not support building from a sha ID.
-                    // https://github.com/moby/moby/issues/39769
-                    // Therefore we create temporary tags for them.
-                    if check_terminate(signals) {
-                        return Err(Interrupted);
-                    }
-                    let tmp_tag = format!("modus_tmp_tag_{}", &iid);
-                    // tmp_tag is going to be something like modus_tmp_tag_sha256:1234....
-                    // This is very much intentional.
-                    let st = Command::new("docker")
-                        .args(&["tag", &iid, &tmp_tag])
-                        .status()?;
-                    if !st.success() {
-                        return Err(BuildError::DockerTagFailed(
-                            iid,
-                            tmp_tag,
-                            st.code().unwrap(),
-                        ));
-                    }
-                    tmp_tags.push(tmp_tag.clone());
-                    *image_ref = tmp_tag;
-                } else {
-                    let _ = write!(stderr, " failed.\n");
-                    let _ = stderr.flush();
-                    return Err(CouldNotResolveImage(image_ref.clone()));
-                }
+                .blue()
+            );
+            nb_done += 1;
+            let _ = stderr.flush();
+        },
+    )?;
+    let _ = write!(stderr, "\n");
+    let _ = stderr.flush();
+
+    let mut hm = HashMap::with_capacity(queue.len());
+    for (i, t) in tasks.into_iter().enumerate() {
+        let original = queue[i];
+        let resolved = std::fs::read_to_string(&t.iidfile)
+            .map_err(|e| UnableToReadTmpFile(t.iidfile.display().to_string(), e))?;
+
+        let tmp_tag = format!("modus_tmp_tag_{}", &resolved);
+        // tmp_tag is going to be something like modus_tmp_tag_sha256:1234....
+        // This is very much intentional.
+        let st = Command::new("docker")
+            .args(&["tag", &resolved, &tmp_tag])
+            .status()?;
+        if !st.success() {
+            return Err(BuildError::DockerTagFailed(
+                resolved,
+                tmp_tag,
+                st.code().unwrap(),
+            ));
+        }
+        tmp_tags.push(tmp_tag.clone());
+
+        debug_assert!(!hm.contains_key(original));
+        hm.insert(original.clone(), tmp_tag);
+    }
+
+    for node in build_plan.nodes.iter_mut() {
+        if let BuildNode::From { image_ref, .. } = node {
+            if let Some(resolved) = hm.get(image_ref) {
+                *image_ref = resolved.clone();
             }
-            _ => {}
         }
     }
-    if printed {
-        let _ = write!(
-            stderr,
-            "\x1b[2K\r{}\x1b[0m\n",
-            "[done] Resolving from(...)".blue()
-        );
-        let _ = stderr.flush();
-    }
+
     Ok(())
 }
 
@@ -540,6 +623,7 @@ pub fn build<P: AsRef<Path>>(
                 Some(iidfile.name()),
                 &mut signals,
                 &docker_build_options,
+                None,
             )?;
             if check_terminate(&mut signals) {
                 return Err(Interrupted);
@@ -561,8 +645,9 @@ pub fn build<P: AsRef<Path>>(
                 None,
                 &mut signals,
                 docker_build_options,
+                None,
             )?;
-            let mut res = Vec::with_capacity(nb_outputs);
+            let mut res = vec![None; nb_outputs];
             let stderr = std::io::stderr();
             // TODO: check isatty
             let mut stderr = stderr.lock();
@@ -570,26 +655,12 @@ pub fn build<P: AsRef<Path>>(
                 stderr,
                 "\x1b[1A\x1b[2K\r=== Build success, exporting individual images ===\n"
             )?;
+            let mut children = Vec::with_capacity(nb_outputs);
+            let mut iidfiles = Vec::with_capacity(nb_outputs);
             for i in 0..nb_outputs {
                 let target_str = format!("{}", i);
-                write!(
-                    stderr,
-                    "{}",
-                    format!(
-                        "Exporting {}/{}: {}",
-                        i + 1,
-                        nb_outputs,
-                        build_plan.outputs[i]
-                            .source_literal
-                            .as_ref()
-                            .expect("Expected source_literal to present in build plan")
-                            .to_string()
-                    )
-                    .blue()
-                )?;
-                stderr.flush()?;
                 let iidfile = AutoDeleteTmpFilename::gen(".iid");
-                invoke_buildkit(
+                let child = spawn_buildkit(
                     dockerfile.name(),
                     None,
                     Some(target_str),
@@ -602,14 +673,38 @@ pub fn build<P: AsRef<Path>>(
                         quiet: true,
                         ..docker_build_options.clone()
                     },
+                    None,
                 )?;
-                let iid = std::fs::read_to_string(iidfile.name())
-                    .map_err(|e| UnableToReadTmpFile(iidfile.name().to_owned(), e))?;
-                write!(stderr, "{}", format!(" -> {}\n", &iid).blue())?;
-                stderr.flush()?;
-                res.push(iid);
+                children.push(child);
+                iidfiles.push(iidfile);
             }
-            Ok(res)
+            let mut nb_done = 0usize;
+            wait_on(&mut children, &mut signals, |i| {
+                nb_done += 1;
+                let iidfname = iidfiles[i].name();
+                let iid = std::fs::read_to_string(iidfname)
+                    .map_err(|e| UnableToReadTmpFile(iidfname.to_owned(), e))
+                    .unwrap(); // TODO
+                res[i] = Some(iid);
+                let _ = write!(
+                    stderr,
+                    "{}",
+                    format!(
+                        "Exported {}/{}: {} -> {}\n",
+                        nb_done,
+                        nb_outputs,
+                        build_plan.outputs[i]
+                            .source_literal
+                            .as_ref()
+                            .expect("Expected source_literal to present in build plan")
+                            .to_string(),
+                        res[i].as_ref().unwrap()
+                    )
+                    .blue()
+                );
+                let _ = stderr.flush();
+            })?;
+            Ok(res.into_iter().map(|x| x.unwrap()).collect())
         }
     }
 }
