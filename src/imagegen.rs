@@ -701,14 +701,63 @@ pub fn plan_from_modusfile(
     //
     // Operators on image literals will not work.
 
-    /// TODO: also validate the given expression query.
+    fn validate_query_expression(query: &modusfile::Expression) -> Result<(), Vec<Diagnostic<()>>> {
+        // ensures that no operators were used
+        match query {
+            modusfile::Expression::Literal(_) => Ok(()),
+            modusfile::Expression::OperatorApplication(_, _, _) => {
+                Err(vec![Diagnostic::error().with_message(
+                    "Operators in queries are currently unsupported.",
+                )])
+            }
+            modusfile::Expression::And(_, e1, e2) | modusfile::Expression::Or(_, e1, e2) => {
+                validate_query_expression(e1)?;
+                validate_query_expression(e2)
+            }
+        }
+    }
+
     fn get_image_literal(
         query: &modusfile::Expression,
         mf_with_query: &Modusfile,
         ir_q_clause: &Clause,
     ) -> Result<Literal<IRTerm>, Vec<Diagnostic<()>>> {
-        let kind_res = mf_with_query.kinds();
+        let mut errs = Vec::new();
+
+        if let Err(mut es) = validate_query_expression(query) {
+            errs.append(&mut es);
+        }
+
         let query_lits = query.literals();
+
+        let kind_res = mf_with_query.kinds();
+
+        let image_count = query_lits
+            .iter()
+            .filter(|query_lit| {
+                kind_res.pred_kind.get(query_lit.predicate.0.as_str()) == Some(&Kind::Image)
+            })
+            .count();
+        if image_count != 1 {
+            errs.push(Diagnostic::error().with_message(format!("There must be exactly one image predicate in the query, but {image_count} were found.")));
+        }
+
+        let layer_count = query_lits
+            .iter()
+            .filter(|query_lit| {
+                kind_res.pred_kind.get(query_lit.predicate.0.as_str()) == Some(&Kind::Layer)
+            })
+            .count();
+        if layer_count > 0 {
+            errs.push(Diagnostic::error().with_message(format!(
+                "Layer predicates in queries are currently unsupported, but we found {layer_count}"
+            )));
+        }
+
+        if !errs.is_empty() {
+            return Err(errs);
+        }
+
         let expression_image_literal = query_lits
             .iter()
             .find(|lit| kind_res.pred_kind.get(lit.predicate.0.as_str()) == Some(&Kind::Image))
