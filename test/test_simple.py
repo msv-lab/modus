@@ -91,7 +91,7 @@ class TestSimple(ModusTestCase):
         """)
 
         imgs = self.build(md, "a")
-        img = imgs[Fact("a", ())]
+        img = imgs[Fact("_query", ())]
         self.assertEqual(img.read_file("/log"), dedent("""\
             /tmp
             /tmp/a

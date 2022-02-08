@@ -44,7 +44,7 @@ class TestMerge(ModusTestCase):
                     run("echo newline >> file")
                 )::in_workdir("/tmp")::merge.""")
         imgs = self.build(mf, "a")
-        img = imgs[Fact("a", ())]
+        img = imgs[Fact("_query", ())]
         self.assertEqual(img.read_file("/tmp/file"), "content\nnewline\n")
 
     def test_merge_single_copy_inworkdir(self):
@@ -56,7 +56,7 @@ class TestMerge(ModusTestCase):
             )::in_workdir("/tmp")::merge.
         """)
         imgs = self.build(md, "b")
-        img = imgs[Fact("b", ())]
+        img = imgs[Fact("_query", ())]
         self.assertEqual(img.read_file("/tmp/aaa"), "aaaaa\nbbbbb\n")
 
     def test_merge_single_copy_setworkdir(self):
@@ -68,7 +68,7 @@ class TestMerge(ModusTestCase):
             )::merge.
         """)
         imgs = self.build(md, "b")
-        img = imgs[Fact("b", ())]
+        img = imgs[Fact("_query", ())]
         self.assertEqual(img.read_file("/tmp/aaa"), "aaaaa\nbbbbb\n")
 
     def test_merge_multi_copy(self):
@@ -104,7 +104,7 @@ class TestMerge(ModusTestCase):
             )::merge.""")
 
         imgs = self.build(md, "a")
-        img = imgs[Fact("a", ())]
+        img = imgs[Fact("_query", ())]
         self.assertEqual(img.read_file("/log"), dedent("""\
             /tmp
             /tmp/a
@@ -144,7 +144,7 @@ class TestMerge(ModusTestCase):
                     run("echo ddd > file")
                 )::merge.""")
         imgs = self.build(mf, "a")
-        img = imgs[Fact("a", ())]
+        img = imgs[Fact("_query", ())]
         self.assertEqual(img.read_file("/tmp/file"), "ddd\n")
         self.assertEqual(img.read_file("/tmp/file2"), "ccc\n")
 
@@ -170,7 +170,7 @@ class TestMerge(ModusTestCase):
                 )::in_workdir("/tmp")::merge.
             """)
         imgs = self.build(mf, "b")
-        img = imgs[Fact("b", ())]
+        img = imgs[Fact("_query", ())]
         self.assertEqual(img.read_file("/tmp/bbb/ccc"), "aaa\n")
         self.assertEqual(img.read_file("/tmp/ddd/eee"), "content\n")
         self.assertEqual(img.read_file("/tmp/ddd/dir/file"), "content\n")
