@@ -121,5 +121,5 @@ class TestCopyFromContext(ModusTestCase):
             a :-
                 from("alpine")::set_workdir("/tmp"),
                 copy("file", "file").""")
-        img_a = self.build(md, "a")[Fact("a", ())]
+        img_a = self.build(md, "a")[Fact("_query", ())]
         self.assertEqual(img_a.read_file("/tmp/file"), "content\n")
