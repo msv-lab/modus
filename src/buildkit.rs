@@ -38,7 +38,7 @@
 
 use std::{
     borrow::{Borrow, BorrowMut},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     convert::TryInto,
     fs::OpenOptions,
     path::{Path, PathBuf},
@@ -425,6 +425,8 @@ pub fn resolve_froms(
             BuildNode::From { image_ref, .. } if !image_ref_is_hash(image_ref) => Some(image_ref),
             _ => None,
         })
+        .collect::<HashSet<_>>()
+        .into_iter()
         .collect::<Vec<_>>();
     if queue.is_empty() {
         return Ok(());
