@@ -35,6 +35,7 @@ use crate::{
     wellformed,
 };
 use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
+use colored::Colorize;
 use logic::{Clause, IRTerm, Literal};
 use ptree::{item::StringItem, print_tree, TreeBuilder};
 
@@ -304,8 +305,14 @@ impl Proof {
             for child in &p.children {
                 match &child.clause {
                     ClauseId::Rule(rid) => {
-                        builder
-                            .begin_child(clauses[*rid].head.substitute(&p.valuation).to_string());
+                        builder.begin_child(format!(
+                            "{}",
+                            clauses[*rid]
+                                .head
+                                .substitute(&p.valuation)
+                                .to_string()
+                                .dimmed()
+                        ));
                         dfs(&child, clauses, builder);
                         builder.end_child();
                     }
@@ -313,8 +320,17 @@ impl Proof {
                         builder.add_empty_child("query".to_string());
                     }
                     ClauseId::Builtin(b) => match b.predicate.naive_predicate_kind() {
-                        crate::analysis::Kind::Image | crate::analysis::Kind::Layer => {
-                            builder.add_empty_child(b.substitute(&p.valuation).to_string());
+                        crate::analysis::Kind::Image => {
+                            builder.add_empty_child(format!(
+                                "{}",
+                                b.substitute(&p.valuation).to_string().bold()
+                            ));
+                        }
+                        crate::analysis::Kind::Layer => {
+                            builder.add_empty_child(format!(
+                                "{}",
+                                b.substitute(&p.valuation).to_string().italic()
+                            ));
                         }
                         crate::analysis::Kind::Logic => {
                             if b.predicate.is_operator() {
