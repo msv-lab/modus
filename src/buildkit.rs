@@ -36,19 +36,16 @@
 //! Check out `buildkit_frontend.rs` for the main function of this inner
 //! frontend.
 
+// TODO: check isatty before printing \x1b
+
 use std::{
-    borrow::{Borrow, BorrowMut},
     collections::{HashMap, HashSet},
-    convert::TryInto,
     fs::OpenOptions,
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Command, Stdio},
 };
 
-use signal_hook::{
-    consts::{SIGCHLD, SIGINT, SIGTERM},
-    iterator::{exfiltrator::SignalOnly, SignalsInfo},
-};
+use spawn_wait::{ProcessSet, SignalHandler};
 
 use crate::imagegen::{BuildNode, BuildPlan, Output};
 
@@ -74,8 +71,8 @@ pub enum BuildError {
     EnterContextDir(#[source] std::io::Error),
     #[error("Could not open a temporary file under the current directory: {0}. This is required to invoke docker build correctly.")]
     UnableToCreateTempFile(#[source] std::io::Error),
-    #[error("Unable to run docker build.")]
-    UnableToRunDockerBuild(#[source] std::io::Error),
+    #[error("Unable to run docker build: {0}")]
+    UnableToRunDockerBuild(#[source] spawn_wait::Error),
     #[error("docker build exited with code {0}.")]
     DockerBuildFailed(i32),
     #[error("docker tag {0} {1} exited with code {2}.")]
@@ -110,16 +107,15 @@ pub struct DockerBuildOptions {
     pub additional_args: Vec<String>,
 }
 
-fn spawn_buildkit(
+fn make_buildkit_command(
     dockerfile: &str,
     tag: Option<String>,
     target: Option<String>,
     has_dockerignore: bool,
     iidfile: Option<&str>,
-    signals: &mut SignalsInfo<SignalOnly>,
     options: &DockerBuildOptions,
     cwd: Option<&Path>,
-) -> Result<Child, BuildError> {
+) -> Command {
     let mut args = Vec::new();
     args.push("build".to_string());
     args.push(".".to_string());
@@ -173,86 +169,7 @@ fn spawn_buildkit(
         })
         .stderr(Stdio::inherit())
         .env("DOCKER_BUILDKIT", "1");
-    Ok(cmd.spawn().map_err(|e| UnableToRunDockerBuild(e))?)
-}
-
-fn wait_on(
-    children: &mut [impl BorrowMut<Child>],
-    signals: &mut SignalsInfo<SignalOnly>,
-    mut progress: impl FnMut(usize),
-) -> Result<(), BuildError> {
-    let mut child_returned = vec![false; children.len()];
-    loop {
-        let mut has_sigchild = false;
-        let mut has_term = false;
-        for sig in signals.wait() {
-            if sig == SIGCHLD {
-                has_sigchild = true;
-            } else if sig == SIGINT || sig == SIGTERM {
-                has_term = true;
-            }
-        }
-        fn kill_all(children: &mut [impl BorrowMut<Child>]) {
-            for child in children.iter_mut() {
-                let child = child.borrow_mut();
-                if matches!(child.try_wait(), Ok(None)) {
-                    let _ = nix::sys::signal::kill(
-                        nix::unistd::Pid::from_raw(child.id().try_into().unwrap()),
-                        nix::sys::signal::Signal::SIGINT,
-                    );
-                }
-            }
-            for child in children.iter_mut() {
-                let _ = child.borrow_mut().wait();
-            }
-        }
-        if has_term {
-            kill_all(children);
-            return Err(Interrupted);
-        }
-        if has_sigchild {
-            for (i, child) in children.iter_mut().enumerate() {
-                if child_returned[i] {
-                    continue;
-                }
-                let wait_res = child.borrow_mut().try_wait().map_err(|e| IOError(e))?;
-                if let Some(wait_res) = wait_res {
-                    child_returned[i] = true;
-                    if !wait_res.success() {
-                        kill_all(children);
-                        return Err(DockerBuildFailed(wait_res.code().unwrap_or(-1)));
-                    }
-                    progress(i);
-                }
-            }
-            if child_returned.iter().all(|x| *x) {
-                return Ok(());
-            }
-        }
-    }
-}
-
-fn invoke_buildkit(
-    dockerfile: &str,
-    tag: Option<String>,
-    target: Option<String>,
-    has_dockerignore: bool,
-    iidfile: Option<&str>,
-    signals: &mut SignalsInfo<SignalOnly>,
-    options: &DockerBuildOptions,
-    cwd: Option<&Path>,
-) -> Result<(), BuildError> {
-    let cmd = spawn_buildkit(
-        dockerfile,
-        tag,
-        target,
-        has_dockerignore,
-        iidfile,
-        signals,
-        options,
-        cwd,
-    )?;
-    wait_on(&mut [cmd], signals, |_| {})
+    cmd
 }
 
 /// A holder for a file name that deletes the file when dropped.
@@ -407,15 +324,11 @@ fn test_image_ref_is_hash() {
     ));
 }
 
-fn check_terminate(signals: &mut SignalsInfo<SignalOnly>) -> bool {
-    signals.pending().any(|s| s == SIGINT || s == SIGTERM)
-}
-
 pub fn resolve_froms(
     build_plan: &mut BuildPlan,
     docker_build_options: &DockerBuildOptions,
     frontend_image: &str,
-    signals: &mut SignalsInfo,
+    sh: &mut SignalHandler,
     tmp_tags: &mut Vec<String>,
 ) -> Result<(), BuildError> {
     let queue = build_plan
@@ -432,19 +345,22 @@ pub fn resolve_froms(
         return Ok(());
     }
 
-    let mut stderr = std::io::stderr();
     let _ctx = AutoRmTmpDir::new_empty().map_err(BuildError::UnableToCreateTempDir)?;
     let ctx = _ctx.path();
     std::env::set_current_dir(ctx).map_err(EnterContextDir)?; // CWD Restored outside
 
-    #[derive(Debug)]
+    let mut procs = ProcessSet::with_concurrency_limit(10);
+
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     struct Task {
-        child: Child,
+        original_image_ref: String,
         iidfile: PathBuf,
     }
-    let mut tasks = Vec::with_capacity(queue.len());
     for (i, &image_ref) in queue.iter().enumerate() {
         let ctx = ctx.join(i.to_string());
+        if sh.termination_pending() {
+            return Err(Interrupted);
+        }
         std::fs::create_dir(&ctx).map_err(|e| UnableToCreateTempDir(e))?;
         let dockerfile = ctx.join(gen_tmp_filename());
         let iidfile = ctx.join(gen_tmp_filename());
@@ -479,79 +395,88 @@ pub fn resolve_froms(
         content.push_str(
             &serde_json::to_string(&tmp_plan).expect("Unable to serialize temporary build plan"),
         );
-        if check_terminate(signals) {
+        if sh.termination_pending() {
             return Err(Interrupted);
         }
         std::fs::write(&dockerfile, content.as_bytes())
             .map_err(|e| BuildError::UnableToWriteTmpFile(dockerfile.display().to_string(), e))?;
-        let child = spawn_buildkit(
+        let cmd = make_buildkit_command(
             dockerfile.to_str().expect("path to be utf-8"),
             None,
             None,
             false,
             Some(iidfile.to_str().expect("path to be utf-8")),
-            signals,
             &DockerBuildOptions {
                 quiet: true,
                 verbose: false,
                 ..docker_build_options.clone()
             },
             Some(&ctx),
-        )?;
-        tasks.push(Task {
-            child,
-            iidfile: iidfile.clone(),
-        });
+        );
+        let t = Task {
+            original_image_ref: image_ref.clone(),
+            iidfile: iidfile,
+        };
+        procs.add_command(t, cmd);
     }
 
     let mut nb_done = 0usize;
-    wait_on(
-        &mut tasks.iter_mut().map(|x| &mut x.child).collect::<Vec<_>>(),
-        signals,
-        |task_id| {
-            let original_ref = queue[task_id];
-            let _ = write!(
-                stderr,
-                "\x1b[2K\r{}\x1b[0m",
-                format!(
-                    "[{}/{}] Resolved from({:?})...",
-                    nb_done + 1,
-                    queue.len(),
-                    original_ref
-                )
-                .blue()
-            );
-            nb_done += 1;
-            let _ = stderr.flush();
-        },
-    )?;
-    let _ = write!(stderr, "\n");
-    let _ = stderr.flush();
-
     let mut hm = HashMap::with_capacity(queue.len());
-    for (i, t) in tasks.into_iter().enumerate() {
-        let original = queue[i];
-        let resolved = std::fs::read_to_string(&t.iidfile)
-            .map_err(|e| UnableToReadTmpFile(t.iidfile.display().to_string(), e))?;
+    loop {
+        use spawn_wait::WaitAnyResult::*;
+        match procs.wait_any(sh) {
+            Subprocess(t, child) => {
+                if let Err(err) = child {
+                    let _ = procs.sigint_all_and_wait(sh);
+                    return Err(UnableToRunDockerBuild(err));
+                }
+                let (_, exit_status) = child.unwrap();
+                if !exit_status.success() {
+                    let _ = procs.sigint_all_and_wait(sh);
+                    return Err(DockerBuildFailed(exit_status.code().unwrap_or(-1)));
+                }
+                nb_done += 1;
+                let resolved = std::fs::read_to_string(&t.iidfile)
+                    .map_err(|e| UnableToReadTmpFile(t.iidfile.display().to_string(), e))?;
+                let original = &t.original_image_ref;
+                let tmp_tag = format!("modus_tmp_tag_{}", &resolved);
+                // tmp_tag is going to be something like modus_tmp_tag_sha256:1234....
+                // This is very much intentional.
+                let st = Command::new("docker")
+                    .args(&["tag", &resolved, &tmp_tag])
+                    .status()?;
+                if !st.success() {
+                    return Err(BuildError::DockerTagFailed(
+                        resolved,
+                        tmp_tag,
+                        st.code().unwrap(),
+                    ));
+                }
+                tmp_tags.push(tmp_tag.clone());
 
-        let tmp_tag = format!("modus_tmp_tag_{}", &resolved);
-        // tmp_tag is going to be something like modus_tmp_tag_sha256:1234....
-        // This is very much intentional.
-        let st = Command::new("docker")
-            .args(&["tag", &resolved, &tmp_tag])
-            .status()?;
-        if !st.success() {
-            return Err(BuildError::DockerTagFailed(
-                resolved,
-                tmp_tag,
-                st.code().unwrap(),
-            ));
+                debug_assert!(!hm.contains_key(original));
+                hm.insert(original.clone(), tmp_tag);
+                eprintln!(
+                    "\x1b[2K\r{}\x1b[0m",
+                    format!(
+                        "[{}/{}] Resolved from({:?})...",
+                        nb_done,
+                        queue.len(),
+                        original
+                    )
+                    .blue()
+                );
+            }
+            ReceivedTerminationSignal(_) => {
+                let _ = procs.sigint_all_and_wait(sh);
+                return Err(Interrupted);
+            }
+            NoProcessesRunning => {
+                break;
+            }
         }
-        tmp_tags.push(tmp_tag.clone());
-
-        debug_assert!(!hm.contains_key(original));
-        hm.insert(original.clone(), tmp_tag);
     }
+    debug_assert_eq!(nb_done, queue.len());
 
     for node in build_plan.nodes.iter_mut() {
         if let BuildNode::From { image_ref, .. } = node {
@@ -585,11 +510,7 @@ pub fn build<P: AsRef<Path>>(
     docker_build_options: &DockerBuildOptions,
     frontend_image: &str,
 ) -> Result<Vec<String>, BuildError> {
-    let mut signals = SignalsInfo::with_exfiltrator(&[SIGINT, SIGTERM, SIGCHLD], SignalOnly)
-        .expect("Failed to create signal handler.");
-    if check_terminate(&mut signals) {
-        return Err(Interrupted);
-    }
+    let mut sh = SignalHandler::default();
     let context = context.as_ref().canonicalize().map_err(CwdError)?;
     let previous_cwd = PathBuf::from(".").canonicalize().map_err(CwdError)?;
     let _restore_cwd = RestoreCwd(previous_cwd);
@@ -598,7 +519,7 @@ pub fn build<P: AsRef<Path>>(
         &mut build_plan,
         docker_build_options,
         frontend_image,
-        &mut signals,
+        &mut sh,
         &mut tmp_tags.0,
     )?;
     std::env::set_current_dir(&context).map_err(EnterContextDir)?;
@@ -608,67 +529,61 @@ pub fn build<P: AsRef<Path>>(
     content.push_str(frontend_image);
     content.push('\n');
     content.push_str(&serde_json::to_string(&build_plan).expect("Unable to serialize build plan"));
-    if check_terminate(&mut signals) {
+    if sh.termination_pending() {
         return Err(Interrupted);
     }
     let dockerfile = write_tmp_dockerfile(&content).map_err(UnableToCreateTempFile)?;
+    use spawn_wait::WaitAnyResult::*;
+    eprintln!("{}", "Running docker build...".blue());
+    let main_img_iidfile = AutoDeleteTmpFilename::gen(".iid");
+    let mut procs = ProcessSet::new();
+    procs.add_command(
+        (),
+        make_buildkit_command(
+            dockerfile.name(),
+            None,
+            None,
+            has_dockerignore,
+            Some(main_img_iidfile.name()),
+            &docker_build_options,
+            None,
+        ),
+    );
+    match procs.wait_any(&mut sh) {
+        Subprocess(_, res) => {
+            let (_, exit_status) = res.map_err(|e| UnableToRunDockerBuild(e))?;
+            if !exit_status.success() {
+                return Err(DockerBuildFailed(exit_status.code().unwrap_or(-1)));
+            }
+        }
+        ReceivedTerminationSignal(_) => {
+            let _ = procs.sigint_all_and_wait(&mut sh);
+            return Err(Interrupted);
+        }
+        NoProcessesRunning => unreachable!(),
+    }
     match build_plan.outputs.len() {
         0 => unreachable!(), // not possible because if there is no solution to the initial query, there will be an SLD failure.
         1 => {
-            eprintln!("{}", "Running docker build...".blue());
-            let iidfile = AutoDeleteTmpFilename::gen(".iid");
-            invoke_buildkit(
-                dockerfile.name(),
-                None,
-                None,
-                has_dockerignore,
-                Some(iidfile.name()),
-                &mut signals,
-                &docker_build_options,
-                None,
-            )?;
-            if check_terminate(&mut signals) {
-                return Err(Interrupted);
-            }
-            let iid = std::fs::read_to_string(iidfile.name())
-                .map_err(|e| UnableToReadTmpFile(iidfile.name().to_owned(), e))?;
+            let iid = std::fs::read_to_string(main_img_iidfile.name())
+                .map_err(|e| UnableToReadTmpFile(main_img_iidfile.name().to_owned(), e))?;
             Ok(vec![iid])
         }
         nb_outputs => {
-            eprintln!("{}", "Running docker build...".blue());
-            if check_terminate(&mut signals) {
-                return Err(Interrupted);
-            }
-            invoke_buildkit(
-                dockerfile.name(),
-                None,
-                None,
-                has_dockerignore,
-                None,
-                &mut signals,
-                docker_build_options,
-                None,
-            )?;
+            let mut procs = ProcessSet::with_concurrency_limit(10);
             let mut res = vec![None; nb_outputs];
-            let stderr = std::io::stderr();
-            // TODO: check isatty
-            let mut stderr = stderr.lock();
-            write!(
-                stderr,
-                "\x1b[1A\x1b[2K\r=== Build success, exporting individual images ===\n"
-            )?;
-            let mut children = Vec::with_capacity(nb_outputs);
+            // Overwrite the last line printed by buildkit.
+            eprintln!("\x1b[1A\x1b[2K\r=== Build success, exporting individual images ===");
             let mut iidfiles = Vec::with_capacity(nb_outputs);
             for i in 0..nb_outputs {
                 let target_str = format!("{}", i);
                 let iidfile = AutoDeleteTmpFilename::gen(".iid");
-                let child = spawn_buildkit(
+                let cmd = make_buildkit_command(
                     dockerfile.name(),
                     None,
                     Some(target_str),
                     has_dockerignore,
                     Some(iidfile.name()),
-                    &mut signals,
                     &DockerBuildOptions {
                         no_cache: false,
                         verbose: false,
@@ -676,36 +591,63 @@ pub fn build<P: AsRef<Path>>(
                         ..docker_build_options.clone()
                     },
                     None,
-                )?;
-                children.push(child);
+                );
                 iidfiles.push(iidfile);
+                procs.add_command(i, cmd);
             }
             let mut nb_done = 0usize;
-            wait_on(&mut children, &mut signals, |i| {
-                nb_done += 1;
-                let iidfname = iidfiles[i].name();
-                let iid = std::fs::read_to_string(iidfname)
-                    .map_err(|e| UnableToReadTmpFile(iidfname.to_owned(), e))
-                    .unwrap(); // TODO
-                res[i] = Some(iid);
-                let _ = write!(
-                    stderr,
-                    "{}",
-                    format!(
-                        "Exported {}/{}: {} -> {}\n",
-                        nb_done,
-                        nb_outputs,
-                        build_plan.outputs[i]
+            loop {
+                match procs.wait_any(&mut sh) {
+                    Subprocess(i, r) => {
+                        let literal_str = build_plan.outputs[i]
                             .source_literal
                             .as_ref()
                             .expect("Expected source_literal to present in build plan")
-                            .to_string(),
-                        res[i].as_ref().unwrap()
-                    )
-                    .blue()
-                );
-                let _ = stderr.flush();
-            })?;
+                            .to_string();
+                        if let Err(err) = r {
+                            let _ = procs.sigint_all_and_wait(&mut sh);
+                            return Err(UnableToRunDockerBuild(err));
+                        }
+                        let exit_status = r.unwrap().1;
+                        if !exit_status.success() {
+                            eprintln!(
+                                "{}",
+                                format!(
+                                    "Exporting {} failed with exit code {}",
+                                    literal_str,
+                                    exit_status.code().unwrap_or(-1)
+                                )
+                                .red()
+                            );
+                            let _ = procs.sigint_all_and_wait(&mut sh);
+                            return Err(DockerBuildFailed(exit_status.code().unwrap_or(-1)));
+                        }
+                        let iid = std::fs::read_to_string(iidfiles[i].name())
+                            .map_err(|e| UnableToReadTmpFile(iidfiles[i].name().to_owned(), e))?;
+                        res[i] = Some(iid);
+                        nb_done += 1;
+                        eprintln!(
+                            "{}",
+                            format!(
+                                "Exported {}/{}: {} -> {}",
+                                nb_done,
+                                nb_outputs,
+                                literal_str,
+                                res[i].as_ref().unwrap()
+                            )
+                            .blue()
+                        );
+                    }
+                    ReceivedTerminationSignal(_) => {
+                        let _ = procs.sigint_all_and_wait(&mut sh);
+                        return Err(Interrupted);
+                    }
+                    NoProcessesRunning => {
+                        break;
+                    }
+                }
+            }
+            debug_assert_eq!(nb_done, nb_outputs);
             Ok(res.into_iter().map(|x| x.unwrap()).collect())
         }
     }
