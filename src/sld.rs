@@ -323,13 +323,13 @@ impl Proof {
                         crate::analysis::Kind::Image => {
                             builder.add_empty_child(format!(
                                 "{}",
-                                b.substitute(&p.valuation).to_string().bold()
+                                b.substitute(&p.valuation).to_string().cyan()
                             ));
                         }
                         crate::analysis::Kind::Layer => {
                             builder.add_empty_child(format!(
                                 "{}",
-                                b.substitute(&p.valuation).to_string().italic()
+                                b.substitute(&p.valuation).to_string().bright_blue()
                             ));
                         }
                         crate::analysis::Kind::Logic => {
@@ -343,7 +343,7 @@ impl Proof {
                                     //       but may not make sense as a DAG.
                                     builder.add_empty_child(format!(
                                         ")::{}",
-                                        b.substitute(&p.valuation).unmangle().to_string()
+                                        b.substitute(&p.valuation).unmangle().to_string().italic()
                                     ));
                                 }
                             }
