@@ -408,7 +408,7 @@ fn main() {
                                 println!(
                                     "{} proof(s) found for query {}",
                                     proofs.len(),
-                                    e.to_string().blue()
+                                    e.to_string().underline()
                                 );
 
                                 for (_, proof) in proofs {
