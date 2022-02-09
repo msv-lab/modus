@@ -333,11 +333,11 @@ fn test_image_ref_is_hash() {
     ));
 }
 
-pub fn resolve_froms(
+fn resolve_froms(
     build_plan: &mut BuildPlan,
     build_options: &BuildOptions,
     sh: &mut SignalHandler,
-    tmp_tags: &mut Vec<String>,
+    image_cleanup: &mut DockerImageRmOnDrop,
 ) -> Result<(), BuildError> {
     let queue = build_plan
         .nodes
@@ -465,7 +465,7 @@ pub fn resolve_froms(
                         st.code().unwrap(),
                     ));
                 }
-                tmp_tags.push(tmp_tag.clone());
+                image_cleanup.add(tmp_tag.clone());
 
                 debug_assert!(!hm.contains_key(original));
                 hm.insert(original.clone(), tmp_tag);
@@ -502,14 +502,20 @@ pub fn resolve_froms(
     Ok(())
 }
 
-struct CleanupTmpTags(Vec<String>);
+struct DockerImageRmOnDrop(Vec<String>);
 
-impl Drop for CleanupTmpTags {
+impl DockerImageRmOnDrop {
+    pub fn add(&mut self, image_ref_or_tag: String) {
+        self.0.push(image_ref_or_tag);
+    }
+}
+
+impl Drop for DockerImageRmOnDrop {
     fn drop(&mut self) {
-        eprintln!("Cleaning up {} temporary tags...", self.0.len());
-        for tag in self.0.iter() {
+        eprintln!("Cleaning up {} temporary images and tags...", self.0.len());
+        for img in self.0.iter() {
             let _ = Command::new("docker")
-                .args(&["image", "rm", tag])
+                .args(&["image", "rm", img])
                 .stdout(Stdio::null())
                 .status();
         }
@@ -526,8 +532,8 @@ pub fn build<P: AsRef<Path>>(
     let context = context.as_ref().canonicalize().map_err(CwdError)?;
     let previous_cwd = PathBuf::from(".").canonicalize().map_err(CwdError)?;
     let _restore_cwd = RestoreCwd(previous_cwd);
-    let mut tmp_tags = CleanupTmpTags(Vec::new());
-    resolve_froms(&mut build_plan, build_options, &mut sh, &mut tmp_tags.0)?;
+    let mut image_cleanup = DockerImageRmOnDrop(Vec::new());
+    resolve_froms(&mut build_plan, build_options, &mut sh, &mut image_cleanup)?;
     std::env::set_current_dir(&context).map_err(EnterContextDir)?;
     let has_dockerignore = check_dockerignore()?;
     let mut content = String::new();
@@ -568,14 +574,13 @@ pub fn build<P: AsRef<Path>>(
         }
         NoProcessesRunning => unreachable!(),
     }
+    let main_img_iid = std::fs::read_to_string(main_img_iidfile.name())
+        .map_err(|e| UnableToReadTmpFile(main_img_iidfile.name().to_owned(), e))?;
     match build_plan.outputs.len() {
         0 => unreachable!(), // not possible because if there is no solution to the initial query, there will be an SLD failure.
-        1 => {
-            let iid = std::fs::read_to_string(main_img_iidfile.name())
-                .map_err(|e| UnableToReadTmpFile(main_img_iidfile.name().to_owned(), e))?;
-            Ok(vec![iid])
-        }
+        1 => Ok(vec![main_img_iid]),
         nb_outputs => {
+            image_cleanup.add(main_img_iid.clone());
             let mut procs = ProcessSet::with_concurrency_limit(
                 build_options.export_concurrency.try_into().unwrap(),
             );
@@ -657,7 +662,6 @@ pub fn build<P: AsRef<Path>>(
             }
             debug_assert_eq!(nb_done, nb_outputs);
             Ok(res.into_iter().map(|x| x.unwrap()).collect())
-            // TODO: remove main image
         }
     }
 }
