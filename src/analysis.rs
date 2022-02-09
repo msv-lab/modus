@@ -15,10 +15,10 @@ use codespan_reporting::term::{self, Config};
 use petgraph::algo::has_path_connecting;
 
 use crate::logic::{Literal, Predicate, SpannedPosition};
+use crate::modusfile::Modusfile;
 use crate::modusfile::{Expression, ModusClause, ModusTerm};
-use crate::Modusfile;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Kind {
     Image,
     Layer,
@@ -29,28 +29,28 @@ impl Kind {
     /// Returns `true` if the kind is [`Image`].
     ///
     /// [`Image`]: Kind::Image
-    fn is_image(&self) -> bool {
+    pub fn is_image(&self) -> bool {
         matches!(self, Self::Image)
     }
 
     /// Returns `true` if the kind is [`Layer`].
     ///
     /// [`Layer`]: Kind::Layer
-    fn is_layer(&self) -> bool {
+    pub fn is_layer(&self) -> bool {
         matches!(self, Self::Layer)
     }
 
     /// Returns `true` if the kind is [`Logic`].
     ///
     /// [`Logic`]: Kind::Logic
-    fn is_logic(&self) -> bool {
+    pub fn is_logic(&self) -> bool {
         matches!(self, Self::Logic)
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct KindResult {
-    pred_kind: HashMap<String, Kind>,
+    pub pred_kind: HashMap<String, Kind>,
 
     /// For convenience, informational diagnostic messages that describe the predicate
     /// kind using spans.
@@ -159,7 +159,9 @@ impl ModusSemantics for Modusfile {
                         pred_kind.insert(lit.predicate.0.clone(), k.clone());
                         Ok(k)
                     } else {
-                        Ok(naive_predicate_kind(&lit.predicate))
+                        let naive_kind = naive_predicate_kind(&lit.predicate);
+                        pred_kind.insert(lit.predicate.to_string(), naive_kind);
+                        Ok(naive_kind)
                     }
                 }
                 Expression::OperatorApplication(_, expr, op) => {
@@ -431,11 +433,6 @@ mod tests {
     use super::*;
 
     use petgraph::algo::{is_cyclic_directed, is_isomorphic};
-
-    use crate::{
-        analysis::{ModusSemantics, PredicateDependency},
-        modusfile::Modusfile,
-    };
 
     #[test]
     fn acyclic_dependency() {

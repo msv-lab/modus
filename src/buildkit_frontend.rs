@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 // (otherwise there will be a lot of warnings for functions that are only used in the main binary.)
 
+mod analysis;
 mod buildkit;
 mod builtin;
 mod dockerfile;

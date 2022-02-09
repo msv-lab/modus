@@ -19,10 +19,13 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::{self, Debug},
     hash::Hash,
+    iter,
 };
 
 use crate::{
     builtin,
+    logic::Predicate,
+    modusfile::{self, Modusfile},
     unification::{compose_extend, compose_no_extend, Rename, Substitution},
 };
 use crate::{builtin::SelectBuiltinResult, unification::RenameWithSubstitution};
@@ -790,7 +793,7 @@ struct PathNode {
 // sequence of nodes and global mgu
 type Path = (Vec<PathNode>, Substitution);
 
-pub fn proofs(tree: &Tree, rules: &[Clause], goal: &Goal) -> Vec<Proof> {
+pub fn proofs(tree: &Tree, rules: &[Clause], goal: &Goal) -> HashMap<Goal, Proof> {
     fn flatten_compose(
         lid: &LiteralGoalId,
         cid: &ClauseId,
@@ -903,11 +906,54 @@ pub fn proofs(tree: &Tree, rules: &[Clause], goal: &Goal) -> Vec<Proof> {
         }
         solution_to_proof_tree.insert(solution, p);
     }
-    solution_to_proof_tree.into_values().collect()
+    solution_to_proof_tree
+}
+
+pub fn tree_from_modusfile(
+    mf: Modusfile,
+    query: modusfile::Expression,
+    max_depth: usize,
+    full_tree: bool,
+) -> (Goal, Vec<Clause>, SLDResult) {
+    // 1. Create a new clause with a nullary goal '_query', with a body of the user's query.
+    // 2. Translate this and other clauses.
+    // 3. Use the body of the IR clause with the '_query' head predicate as the goal.
+
+    let goal_pred = Predicate("_query".to_owned());
+    let user_clause = modusfile::ModusClause {
+        head: Literal {
+            position: None,
+            predicate: goal_pred.clone(),
+            args: Vec::new(),
+        },
+        body: Some(query),
+    };
+    let clauses: Vec<Clause> =
+        mf.0.iter()
+            .chain(iter::once(&user_clause))
+            .flat_map(|mc| {
+                let clauses: Vec<Clause> = mc.into();
+                clauses
+            })
+            .collect();
+
+    let q_clause = clauses
+        .iter()
+        .find(|c| c.head.predicate == goal_pred)
+        .expect("should find same predicate name after translation");
+    let goal = &q_clause.body;
+
+    (
+        goal.clone(),
+        clauses.clone(),
+        sld(&clauses, &goal, max_depth, full_tree),
+    )
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::modusfile::{Expression, ModusTerm};
+
     use super::*;
     use serial_test::serial;
 
@@ -1192,6 +1238,33 @@ mod tests {
         let tree = sld(&clauses, &goal, 15, true).tree;
         let sld_proofs = proofs(&tree, &clauses, &goal);
         assert_eq!(sld_proofs.len(), 1);
-        assert_eq!(sld_proofs[0].height(), 1, "{:?}", sld_proofs[0]);
+        assert_eq!(
+            sld_proofs.values().next().unwrap().height(),
+            1,
+            "{:?}",
+            sld_proofs[&goal]
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn tree_from_expression_query() {
+        let mf: Modusfile = "base_image(\"alpine3.14\"). base_image(\"alpine3.15\")."
+            .parse()
+            .unwrap();
+        let query = Expression::Literal(Literal {
+            position: None,
+            predicate: Predicate("base_image".into()),
+            args: vec![ModusTerm::FormatString {
+                position: logic::SpannedPosition {
+                    offset: 11,
+                    length: 13,
+                },
+                format_string_literal: "alpine${X}".to_owned(),
+            }],
+        });
+
+        let (_, _, sld_res) = tree_from_modusfile(mf, query, 20, true);
+        assert!(sld_res.tree.is_success());
     }
 }

@@ -44,15 +44,14 @@ use codespan_reporting::{
 };
 use colored::Colorize;
 use ptree::write_tree;
+use sld::tree_from_modusfile;
 use std::{ffi::OsStr, fs, path::Path};
 use std::{io::Write, path::PathBuf};
 use transpiler::render_tree;
 
 use modusfile::Modusfile;
 
-use crate::{buildkit::DockerBuildOptions, logic::Clause};
-
-use analysis::check_and_output_analysis;
+use crate::buildkit::DockerBuildOptions;
 
 fn get_file(path: &Path) -> SimpleFile<&str, String> {
     let file_name: &str = path
@@ -211,8 +210,9 @@ fn main() {
         ("transpile", Some(sub)) => {
             let input_file = sub.value_of("FILE").unwrap();
             let file = get_file(Path::new(input_file));
-            let query: logic::Literal = sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
-            let query = query.with_position(None);
+            let query: modusfile::Expression =
+                sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
+            let query = query.without_position();
 
             let mf: Modusfile = match file.source().parse() {
                 Ok(mf) => mf,
@@ -221,7 +221,7 @@ fn main() {
                     std::process::exit(1);
                 }
             };
-            if !check_and_output_analysis(
+            if !analysis::check_and_output_analysis(
                 &mf,
                 false,
                 &mut err_writer.lock(),
@@ -248,11 +248,12 @@ fn main() {
             let context_dir = sub.value_of_os("CONTEXT").unwrap();
             let input_file = sub
                 .value_of_os("FILE")
-                .map(|x| PathBuf::from(x))
+                .map(PathBuf::from)
                 .unwrap_or_else(|| Path::new(context_dir).join("Modusfile"));
             let file = get_file(input_file.as_path());
-            let query: logic::Literal = sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
-            let query = query.with_position(None);
+            let query: modusfile::Expression =
+                sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
+            let query = query.without_position();
 
             let mf: Modusfile = match file.source().parse() {
                 Ok(mf) => mf,
@@ -261,7 +262,7 @@ fn main() {
                     std::process::exit(1);
                 }
             };
-            if !check_and_output_analysis(
+            if !analysis::check_and_output_analysis(
                 &mf,
                 false,
                 &mut err_writer.lock(),
@@ -368,8 +369,9 @@ fn main() {
 
             let input_file = sub.value_of("FILE").unwrap();
             let file = get_file(Path::new(input_file));
-            let query: Option<logic::Literal> = sub.value_of("QUERY").map(|l| l.parse().unwrap());
-            let query = query.map(|lit| lit.with_position(None));
+            let query: Option<modusfile::Expression> =
+                sub.value_of("QUERY").map(|s| s.parse().unwrap());
+            let query = query.map(|q| q.without_position());
 
             match (file.source().parse::<Modusfile>(), query) {
                 (Ok(modus_f), None) => println!(
@@ -377,8 +379,8 @@ fn main() {
                     input_file,
                     modus_f.0.len()
                 ),
-                (Ok(modus_f), Some(l)) => {
-                    if !check_and_output_analysis(
+                (Ok(modus_f), Some(e)) => {
+                    if !analysis::check_and_output_analysis(
                         &modus_f,
                         false,
                         &mut err_writer.lock(),
@@ -389,16 +391,8 @@ fn main() {
                     }
 
                     let max_depth = 175;
-                    let clauses: Vec<Clause> = modus_f
-                        .0
-                        .iter()
-                        .flat_map(|mc| {
-                            let clauses: Vec<Clause> = mc.into();
-                            clauses
-                        })
-                        .collect();
-                    let goal = &vec![l.clone()];
-                    let sld_result = sld::sld(&clauses, goal, max_depth, true);
+                    let (goal, clauses, sld_result) =
+                        tree_from_modusfile(modus_f, e.clone(), max_depth, true);
 
                     if should_output_graph {
                         render_tree(&clauses, sld_result, &mut out_writer.lock());
@@ -408,14 +402,18 @@ fn main() {
                             .expect("Error when printing tree to stdout.");
                     } else {
                         let proof_result =
-                            Result::from(sld_result).map(|t| sld::proofs(&t, &clauses, goal));
+                            Result::from(sld_result).map(|t| sld::proofs(&t, &clauses, &goal));
                         match proof_result {
                             Ok(proofs) => {
                                 println!(
                                     "{} proof(s) found for query {}",
                                     proofs.len(),
-                                    l.to_string().blue()
+                                    e.to_string().blue()
                                 );
+
+                                for ground_goal in proofs.keys() {
+                                    println!("{:?}", ground_goal);
+                                }
                                 // TODO: pretty print proof, we could use the 'colored' library for terminal colors
                             }
                             Err(e) => {
@@ -444,7 +442,7 @@ fn main() {
 
             match file.source().parse::<Modusfile>() {
                 Ok(mf) => {
-                    if !check_and_output_analysis(
+                    if !analysis::check_and_output_analysis(
                         &mf,
                         is_verbose,
                         &mut err_writer.lock(),

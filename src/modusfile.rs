@@ -20,6 +20,7 @@ use nom::character::complete::not_line_ending;
 use nom::error::convert_error;
 use nom::error::VerboseError;
 use rand::Rng;
+use std::collections::HashSet;
 use std::fmt;
 use std::str;
 
@@ -67,6 +68,42 @@ impl Expression {
             Expression::Or(s, _, _) => &s,
         }
     }
+
+    pub fn without_position(&self) -> Self {
+        match self {
+            Expression::Literal(lit) => Expression::Literal(Literal {
+                position: None,
+                ..lit.clone()
+            }),
+            Expression::OperatorApplication(_, e, op) => Expression::OperatorApplication(
+                None,
+                Box::new(e.without_position()),
+                op.clone().with_position(None),
+            ),
+            Expression::And(_, e1, e2) => Expression::And(
+                None,
+                Box::new(e1.without_position()),
+                Box::new(e2.without_position()),
+            ),
+            Expression::Or(_, e1, e2) => Expression::Or(
+                None,
+                Box::new(e1.without_position()),
+                Box::new(e2.without_position()),
+            ),
+        }
+    }
+
+    pub fn literals(&self) -> HashSet<Literal> {
+        match self {
+            Expression::Literal(lit) => vec![lit.clone()].into_iter().collect(),
+            Expression::OperatorApplication(_, e, _) => e.literals(),
+            Expression::And(_, e1, e2) | Expression::Or(_, e1, e2) => e1
+                .literals()
+                .into_iter()
+                .chain(e2.literals().into_iter())
+                .collect(),
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -100,6 +137,15 @@ pub enum ModusTerm {
         format_string_literal: String,
     },
     UserVariable(String),
+}
+
+impl ModusTerm {
+    pub fn is_variable(&self) -> bool {
+        match self {
+            ModusTerm::FormatString { .. } | ModusTerm::UserVariable(_) => true,
+            _ => false,
+        }
+    }
 }
 
 impl fmt::Display for ModusTerm {
@@ -203,6 +249,27 @@ impl str::FromStr for Modusfile {
     }
 }
 
+impl str::FromStr for Expression {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let span = Span::new(s);
+        match parser::body(span) {
+            Ok((_, o)) => Ok(o),
+            Err(nom::Err::Error(e) | nom::Err::Failure(e)) => {
+                let errors = e
+                    .errors
+                    .into_iter()
+                    .map(|(span, err)| (span.fragment().to_owned(), err))
+                    .collect();
+                let str_verbose_error = VerboseError { errors };
+                Result::Err(convert_error(s, str_verbose_error))
+            }
+            _ => unimplemented!(),
+        }
+    }
+}
+
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -285,9 +352,11 @@ pub mod parser {
     };
 
     fn comment(s: Span) -> IResult<Span, Span> {
-        recognize(
-            delimited(tag("#"), opt(not_line_ending), alt((line_ending, eof)))
-        )(s)
+        recognize(delimited(
+            tag("#"),
+            opt(not_line_ending),
+            alt((line_ending, eof)),
+        ))(s)
     }
 
     #[test]
@@ -404,7 +473,7 @@ pub mod parser {
         ))(i)
     }
 
-    fn body(i: Span) -> IResult<Span, Expression> {
+    pub fn body(i: Span) -> IResult<Span, Expression> {
         let comma_separated_exprs = map(
             separated_list1(delimited(comments, tag(","), comments), expression_inner),
             |es| {
@@ -454,12 +523,16 @@ pub mod parser {
         // defines it as "head."
         context(
             stringify!(fact),
-            map(terminated(head, terminated(nom::character::complete::char('.'), token_sep0)), |h| {
-                ModusClause {
+            map(
+                terminated(
+                    head,
+                    terminated(nom::character::complete::char('.'), token_sep0),
+                ),
+                |h| ModusClause {
                     head: h,
                     body: None,
-                }
-            }),
+                },
+            ),
         )(i)
     }
 
@@ -472,7 +545,10 @@ pub mod parser {
                     delimited(token_sep0, tag(":-"), token_sep0),
                     context(
                         "rule_body",
-                        cut(terminated(body, terminated(nom::character::complete::char('.'), token_sep0))),
+                        cut(terminated(
+                            body,
+                            terminated(nom::character::complete::char('.'), token_sep0),
+                        )),
                     ),
                 ),
                 |(head, body)| ModusClause {

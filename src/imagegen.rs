@@ -1,10 +1,11 @@
 use std::collections::{HashMap, HashSet};
-use std::iter::FromIterator;
-use std::path::Path;
+use std::iter::{self, FromIterator};
+use std::path::{Path, PathBuf};
 
-use crate::logic::{Clause, IRTerm, Literal};
-use crate::modusfile::Modusfile;
-use crate::sld::{self, ClauseId, Proof};
+use crate::analysis::{Kind, ModusSemantics};
+use crate::logic::{Clause, IRTerm, Literal, Predicate};
+use crate::modusfile::{self, Modusfile};
+use crate::sld::{self, ClauseId, Proof, ResolutionError};
 use crate::unification::Substitute;
 
 use codespan_reporting::diagnostic::Diagnostic;
@@ -689,26 +690,124 @@ fn join_path(base: &str, path: &str) -> String {
 
 pub fn plan_from_modusfile(
     mf: Modusfile,
-    query: Literal,
+    query: modusfile::Expression,
 ) -> Result<BuildPlan, Vec<Diagnostic<()>>> {
-    let goal = vec![query.clone()];
-    let max_depth = 175;
-    let clauses: Vec<Clause> =
-        mf.0.iter()
-            .flat_map(|mc| {
-                let clauses: Vec<Clause> = mc.into();
-                clauses
+    // 1. Adds a new clause based on the user's expression query to the Modusfile, `_query :- ...`.
+    // 2. Translates the Modusfile to IR.
+    // 3. Find proof for `_query`. We need to do this, and not just find proof of the image literal due to any
+    //    possible logical constraints.
+    // 4. Modify proof to give proof for the single image literal. The other literals, if any, should
+    //    only be logic literals.
+    //
+    // Operators on image literals will not work.
+
+    fn validate_query_expression(query: &modusfile::Expression) -> Result<(), Vec<Diagnostic<()>>> {
+        // ensures that no operators were used
+        match query {
+            modusfile::Expression::Literal(_) => Ok(()),
+            modusfile::Expression::OperatorApplication(_, _, _) => {
+                Err(vec![Diagnostic::error().with_message(
+                    "Operators in queries are currently unsupported.",
+                )])
+            }
+            modusfile::Expression::And(_, e1, e2) | modusfile::Expression::Or(_, e1, e2) => {
+                validate_query_expression(e1)?;
+                validate_query_expression(e2)
+            }
+        }
+    }
+
+    fn get_image_literal(
+        query: &modusfile::Expression,
+        mf_with_query: &Modusfile,
+        ir_q_clause: &Clause,
+    ) -> Result<Literal<IRTerm>, Vec<Diagnostic<()>>> {
+        let mut errs = Vec::new();
+
+        if let Err(mut es) = validate_query_expression(query) {
+            errs.append(&mut es);
+        }
+
+        let query_lits = query.literals();
+
+        let kind_res = mf_with_query.kinds();
+
+        let image_count = query_lits
+            .iter()
+            .filter(|query_lit| {
+                kind_res.pred_kind.get(query_lit.predicate.0.as_str()) == Some(&Kind::Image)
             })
-            .collect();
+            .count();
+        if image_count != 1 {
+            errs.push(Diagnostic::error().with_message(format!("There must be exactly one image predicate in the query, but {image_count} were found.")));
+        }
+
+        let layer_count = query_lits
+            .iter()
+            .filter(|query_lit| {
+                kind_res.pred_kind.get(query_lit.predicate.0.as_str()) == Some(&Kind::Layer)
+            })
+            .count();
+        if layer_count > 0 {
+            errs.push(Diagnostic::error().with_message(format!(
+                "Layer predicates in queries are currently unsupported, but we found {layer_count}"
+            )));
+        }
+
+        if !errs.is_empty() {
+            return Err(errs);
+        }
+
+        let expression_image_literal = query_lits
+            .iter()
+            .find(|lit| kind_res.pred_kind.get(lit.predicate.0.as_str()) == Some(&Kind::Image))
+            .unwrap();
+        let image_literal = ir_q_clause
+            .body
+            .iter()
+            .find(|lit| lit.predicate == expression_image_literal.predicate)
+            .expect("should find matching predicate name after translation");
+        Ok(image_literal.clone())
+    }
+
+    let max_depth = 175;
+
+    let goal_pred = Predicate("_query".to_owned());
+    let user_clause = modusfile::ModusClause {
+        head: Literal {
+            position: None,
+            predicate: goal_pred.clone(),
+            args: Vec::new(),
+        },
+        body: Some(query.clone()),
+    };
+
+    let mf_with_query = Modusfile(mf.0.into_iter().chain(iter::once(user_clause)).collect());
+    let ir_clauses: Vec<Clause> = mf_with_query
+        .0
+        .iter()
+        .flat_map(|mc| {
+            let clauses: Vec<Clause> = mc.into();
+            clauses
+        })
+        .collect();
+
+    let q_clause = ir_clauses
+        .iter()
+        .find(|c| c.head.predicate == goal_pred)
+        .expect("should find same predicate name after translation");
+    let query_goal = &q_clause.body;
+
+    let image_literal = get_image_literal(&query, &mf_with_query, q_clause)?;
 
     // don't store full tree as this takes a lot of memory, and is probably not needed
     // when building/transpiling
-    let success_tree = Result::from(sld::sld(&clauses, &goal, max_depth, false))?;
-    // TODO: sld::proofs should return the ground query corresponding to each proof.
-    let proofs = sld::proofs(&success_tree, &clauses, &goal);
+    let success_tree = Result::from(sld::sld(&ir_clauses, &query_goal, max_depth, false))?;
+    let proofs = sld::proofs(&success_tree, &ir_clauses, &query_goal);
+
     let query_and_proofs = proofs
         .into_iter()
-        .map(|p| (query.substitute(&p.valuation), p))
+        .map(|(_, p)| (image_literal.substitute(&p.valuation), p))
         .collect::<Vec<_>>();
-    Ok(build_dag_from_proofs(&query_and_proofs[..], &clauses))
+    Ok(build_dag_from_proofs(&query_and_proofs[..], &ir_clauses))
 }

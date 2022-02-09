@@ -203,8 +203,10 @@ impl Literal {
             })
             .unwrap_or_default()
     }
+}
 
-    pub fn with_position(self, position: Option<SpannedPosition>) -> Literal {
+impl<T> Literal<T> {
+    pub fn with_position(self, position: Option<SpannedPosition>) -> Literal<T> {
         Literal { position, ..self }
     }
 }
@@ -388,7 +390,10 @@ pub mod parser {
                 terminated(literal_identifier, space0.clone()),
                 opt(delimited(
                     terminated(tag("("), space0.clone()),
-                    separated_list1(terminated(tag(","), space0.clone()), terminated(term.clone(), space0.clone())),
+                    separated_list1(
+                        terminated(tag(","), space0.clone()),
+                        terminated(term.clone(), space0.clone()),
+                    ),
                     cut(terminated(tag(")"), space0.clone())),
                 )),
             ))(i)?;

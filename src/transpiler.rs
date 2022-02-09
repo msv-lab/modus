@@ -23,7 +23,7 @@ use crate::{
     dockerfile::{Dockerfile, Image, Instruction, ResolvedDockerfile, ResolvedParent, Run},
     imagegen::{self, BuildPlan, MergeNode, NodeId},
     logic::{self, Clause, IRTerm, Literal, Predicate},
-    modusfile::Modusfile,
+    modusfile::{self, Modusfile},
     sld::{self, ClauseId, ResolutionError, SLDResult, Tree},
 };
 
@@ -38,7 +38,7 @@ pub fn render_tree<W: Write>(clauses: &Vec<Clause>, sld_result: SLDResult, outpu
 
 pub fn transpile(
     mf: Modusfile,
-    query: logic::Literal,
+    query: modusfile::Expression,
 ) -> Result<Dockerfile<ResolvedParent>, Vec<Diagnostic<()>>> {
     let build_plan = imagegen::plan_from_modusfile(mf, query)?;
     Ok(plan_to_docker(&build_plan))
@@ -54,7 +54,10 @@ fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
             let node = &plan.nodes[node_id];
             let str_id = format!("n_{}", node_id);
             match node {
-                BuildNode::From { image_ref, display_name: _ } => vec![Instruction::From(From {
+                BuildNode::From {
+                    image_ref,
+                    display_name: _,
+                } => vec![Instruction::From(From {
                     parent: ResolvedParent::Image(Image::from_str(image_ref).unwrap()),
                     alias: Some(str_id),
                 })],
