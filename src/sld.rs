@@ -19,7 +19,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::{self, Debug},
     hash::Hash,
-    iter,
+    io, iter,
 };
 
 use crate::{
@@ -36,7 +36,7 @@ use crate::{
 };
 use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
 use logic::{Clause, IRTerm, Literal};
-use ptree::{item::StringItem, TreeBuilder};
+use ptree::{item::StringItem, print_tree, TreeBuilder};
 
 pub trait Auxiliary: Rename<Self> + Sized {
     fn aux() -> Self;
@@ -297,6 +297,39 @@ impl Proof {
             .map(|child| child.height() + 1)
             .max()
             .unwrap_or(0)
+    }
+
+    pub fn pretty_print(&self, clauses: &Vec<Clause>) -> io::Result<()> {
+        fn dfs(p: &Proof, clauses: &Vec<Clause>, builder: &mut TreeBuilder) {
+            for child in &p.children {
+                match &child.clause {
+                    ClauseId::Rule(rid) => {
+                        builder
+                            .begin_child(clauses[*rid].head.substitute(&p.valuation).to_string());
+                        dfs(&child, clauses, builder);
+                        builder.end_child();
+                    }
+                    ClauseId::Query => {
+                        builder.add_empty_child("query".to_string());
+                    }
+                    ClauseId::Builtin(b) => {
+                        if b.predicate.is_operator() {
+                            if b.predicate.0.ends_with("_begin") {
+                                builder
+                                    .begin_child(b.substitute(&p.valuation).unmangle().to_string());
+                            } else {
+                                builder.end_child();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut builder = TreeBuilder::new("".to_string());
+        dfs(self, clauses, &mut builder);
+
+        print_tree(&builder.build())
     }
 }
 

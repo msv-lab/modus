@@ -77,6 +77,21 @@ impl Predicate {
     pub fn is_operator(&self) -> bool {
         self.0.starts_with("_operator_")
     }
+
+    /// Unmangles the name if it's an operator.
+    pub fn unmangle(self) -> Predicate {
+        if self.is_operator() {
+            Predicate(
+                self.0
+                    .trim_start_matches("_operator_")
+                    .trim_end_matches("_begin")
+                    .trim_end_matches("_end")
+                    .to_string(),
+            )
+        } else {
+            self
+        }
+    }
 }
 
 impl From<String> for Predicate {
@@ -202,6 +217,20 @@ impl Literal {
                 l
             })
             .unwrap_or_default()
+    }
+
+    /// Unmangles this literal if it represents an operator. Replaces it's predicate name
+    /// and removes argument used for matching the operator.
+    pub fn unmangle(self) -> Literal {
+        if self.predicate.is_operator() {
+            Literal {
+                predicate: self.predicate.unmangle(),
+                args: self.args[1..].to_vec(),
+                ..self
+            }
+        } else {
+            self
+        }
     }
 }
 
