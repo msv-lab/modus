@@ -45,13 +45,13 @@ use codespan_reporting::{
 use colored::Colorize;
 use ptree::write_tree;
 use sld::tree_from_modusfile;
-use std::{ffi::OsStr, fs, path::Path};
+use std::{ffi::OsStr, fs, path::Path, convert::TryInto};
 use std::{io::Write, path::PathBuf};
 use transpiler::render_tree;
 
 use modusfile::Modusfile;
 
-use crate::buildkit::DockerBuildOptions;
+use crate::buildkit::{BuildOptions, DockerBuildOptions};
 
 fn get_file(path: &Path) -> SimpleFile<&str, String> {
     let file_name: &str = path
@@ -151,6 +151,22 @@ fn main() {
                         .multiple(true)
                         .required(false)
                         .help("Pass additional options to docker build")
+                )
+                .arg(
+                    Arg::with_name("RESOLVE_CONCURRENCY")
+                        .long("image-resolve-concurrency")
+                        .takes_value(true)
+                        .required(true)
+                        .default_value("3")
+                        .value_name("NUM")
+                )
+                .arg(
+                    Arg::with_name("EXPORT_CONCURRENCY")
+                        .long("image-export-concurrency")
+                        .takes_value(true)
+                        .required(true)
+                        .default_value("8")
+                        .value_name("NUM")
                 )
                 .arg(
                     Arg::with_name("CUSTOM_FRONTEND")
@@ -304,20 +320,28 @@ fn main() {
                 .expect("Unable to write to stderr.");
                 std::process::exit(1)
             }
-            let options = DockerBuildOptions {
-                verbose: sub.is_present("VERBOSE"),
-                no_cache: sub.is_present("NO_CACHE"),
-                quiet: false,
-                additional_args: sub
-                    .values_of("ADDITIONAL_OPTS")
-                    .map(|x| x.map(ToOwned::to_owned).collect())
-                    .unwrap_or_default(),
+            let options = BuildOptions {
+                frontend_image: sub.value_of("CUSTOM_FRONTEND").unwrap().to_owned(),
+                resolve_concurrency: sub.value_of("RESOLVE_CONCURRENCY").unwrap().parse().unwrap_or_else(|_| {
+                    print_build_error_and_exit("invalid resolve concurrency - expected number", &err_writer)
+                }),
+                export_concurrency: sub.value_of("EXPORT_CONCURRENCY").unwrap().parse().unwrap_or_else(|_| {
+                    print_build_error_and_exit("invalid export concurrency - expected number", &err_writer)
+                }),
+                docker_build_options: DockerBuildOptions {
+                    verbose: sub.is_present("VERBOSE"),
+                    no_cache: sub.is_present("NO_CACHE"),
+                    quiet: false,
+                    additional_args: sub
+                        .values_of("ADDITIONAL_OPTS")
+                        .map(|x| x.map(ToOwned::to_owned).collect())
+                        .unwrap_or_default(),
+                },
             };
             match buildkit::build(
                 build_plan.clone(),
                 context_dir,
                 &options,
-                sub.value_of("CUSTOM_FRONTEND").unwrap(),
             ) {
                 Err(e) => {
                     print_build_error_and_exit(&e.to_string(), &err_writer);

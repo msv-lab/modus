@@ -40,6 +40,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    convert::TryInto,
     fs::OpenOptions,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -105,6 +106,14 @@ pub struct DockerBuildOptions {
     pub quiet: bool,
     pub no_cache: bool,
     pub additional_args: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BuildOptions {
+    pub frontend_image: String,
+    pub resolve_concurrency: u32,
+    pub export_concurrency: u32,
+    pub docker_build_options: DockerBuildOptions,
 }
 
 fn make_buildkit_command(
@@ -326,8 +335,7 @@ fn test_image_ref_is_hash() {
 
 pub fn resolve_froms(
     build_plan: &mut BuildPlan,
-    docker_build_options: &DockerBuildOptions,
-    frontend_image: &str,
+    build_options: &BuildOptions,
     sh: &mut SignalHandler,
     tmp_tags: &mut Vec<String>,
 ) -> Result<(), BuildError> {
@@ -349,7 +357,8 @@ pub fn resolve_froms(
     let ctx = _ctx.path();
     std::env::set_current_dir(ctx).map_err(EnterContextDir)?; // CWD Restored outside
 
-    let mut procs = ProcessSet::with_concurrency_limit(10);
+    let mut procs =
+        ProcessSet::with_concurrency_limit(build_options.resolve_concurrency.try_into().unwrap());
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     struct Task {
@@ -390,7 +399,7 @@ pub fn resolve_froms(
 
         let mut content = String::new();
         content.push_str("#syntax=");
-        content.push_str(frontend_image);
+        content.push_str(&build_options.frontend_image);
         content.push('\n');
         content.push_str(
             &serde_json::to_string(&tmp_plan).expect("Unable to serialize temporary build plan"),
@@ -409,7 +418,7 @@ pub fn resolve_froms(
             &DockerBuildOptions {
                 quiet: true,
                 verbose: false,
-                ..docker_build_options.clone()
+                ..build_options.docker_build_options.clone()
             },
             Some(&ctx),
         );
@@ -507,26 +516,19 @@ impl Drop for CleanupTmpTags {
 pub fn build<P: AsRef<Path>>(
     mut build_plan: BuildPlan,
     context: P,
-    docker_build_options: &DockerBuildOptions,
-    frontend_image: &str,
+    build_options: &BuildOptions,
 ) -> Result<Vec<String>, BuildError> {
     let mut sh = SignalHandler::default();
     let context = context.as_ref().canonicalize().map_err(CwdError)?;
     let previous_cwd = PathBuf::from(".").canonicalize().map_err(CwdError)?;
     let _restore_cwd = RestoreCwd(previous_cwd);
     let mut tmp_tags = CleanupTmpTags(Vec::new());
-    resolve_froms(
-        &mut build_plan,
-        docker_build_options,
-        frontend_image,
-        &mut sh,
-        &mut tmp_tags.0,
-    )?;
+    resolve_froms(&mut build_plan, build_options, &mut sh, &mut tmp_tags.0)?;
     std::env::set_current_dir(&context).map_err(EnterContextDir)?;
     let has_dockerignore = check_dockerignore()?;
     let mut content = String::new();
     content.push_str("#syntax=");
-    content.push_str(frontend_image);
+    content.push_str(&build_options.frontend_image);
     content.push('\n');
     content.push_str(&serde_json::to_string(&build_plan).expect("Unable to serialize build plan"));
     if sh.termination_pending() {
@@ -545,7 +547,7 @@ pub fn build<P: AsRef<Path>>(
             None,
             has_dockerignore,
             Some(main_img_iidfile.name()),
-            &docker_build_options,
+            &build_options.docker_build_options,
             None,
         ),
     );
@@ -570,7 +572,9 @@ pub fn build<P: AsRef<Path>>(
             Ok(vec![iid])
         }
         nb_outputs => {
-            let mut procs = ProcessSet::with_concurrency_limit(10);
+            let mut procs = ProcessSet::with_concurrency_limit(
+                build_options.export_concurrency.try_into().unwrap(),
+            );
             let mut res = vec![None; nb_outputs];
             // Overwrite the last line printed by buildkit.
             eprintln!("\x1b[1A\x1b[2K\r=== Build success, exporting individual images ===");
@@ -588,7 +592,7 @@ pub fn build<P: AsRef<Path>>(
                         no_cache: false,
                         verbose: false,
                         quiet: true,
-                        ..docker_build_options.clone()
+                        ..build_options.docker_build_options.clone()
                     },
                     None,
                 );
@@ -649,6 +653,7 @@ pub fn build<P: AsRef<Path>>(
             }
             debug_assert_eq!(nb_done, nb_outputs);
             Ok(res.into_iter().map(|x| x.unwrap()).collect())
+            // TODO: remove main image
         }
     }
 }
