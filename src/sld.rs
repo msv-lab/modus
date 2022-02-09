@@ -312,16 +312,27 @@ impl Proof {
                     ClauseId::Query => {
                         builder.add_empty_child("query".to_string());
                     }
-                    ClauseId::Builtin(b) => {
-                        if b.predicate.is_operator() {
-                            if b.predicate.0.ends_with("_begin") {
-                                builder
-                                    .begin_child(b.substitute(&p.valuation).unmangle().to_string());
-                            } else {
-                                builder.end_child();
+                    ClauseId::Builtin(b) => match b.predicate.naive_predicate_kind() {
+                        crate::analysis::Kind::Image | crate::analysis::Kind::Layer => {
+                            builder.add_empty_child(b.substitute(&p.valuation).to_string());
+                        }
+                        crate::analysis::Kind::Logic => {
+                            if b.predicate.is_operator() {
+                                if b.predicate.0.ends_with("_begin") {
+                                    builder.begin_child("(".to_string());
+                                } else {
+                                    builder.end_child();
+                                    // HACK: Because we want to print the operators *after* their scope,
+                                    //       we add a leaf node here. It will look as expected in the term
+                                    //       but may not make sense as a DAG.
+                                    builder.add_empty_child(format!(
+                                        ")::{}",
+                                        b.substitute(&p.valuation).unmangle().to_string()
+                                    ));
+                                }
                             }
                         }
-                    }
+                    },
                 }
             }
         }

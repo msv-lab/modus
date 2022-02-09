@@ -65,15 +65,6 @@ pub trait ModusSemantics {
 
 impl ModusSemantics for Modusfile {
     fn kinds(&self) -> KindResult {
-        /// Returns the kind based on it's name.
-        fn naive_predicate_kind(pred: &Predicate) -> Kind {
-            match pred.0.as_str() {
-                "from" => Kind::Image,
-                "run" | "copy" => Kind::Layer,
-                _ => Kind::Logic,
-            }
-        }
-
         fn problematic_pred_diagnostic(lit: &Literal<ModusTerm>) -> Diagnostic<()> {
             let message = "Couldn't evaluate expression due to a possible cyclic dependency.";
             let mut labels = Vec::new();
@@ -159,7 +150,7 @@ impl ModusSemantics for Modusfile {
                         pred_kind.insert(lit.predicate.0.clone(), k.clone());
                         Ok(k)
                     } else {
-                        let naive_kind = naive_predicate_kind(&lit.predicate);
+                        let naive_kind = lit.predicate.naive_predicate_kind();
                         pred_kind.insert(lit.predicate.to_string(), naive_kind);
                         Ok(naive_kind)
                     }

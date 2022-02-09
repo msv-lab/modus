@@ -23,6 +23,7 @@
 use nom::character::complete::multispace0;
 use nom_locate::LocatedSpan;
 
+use crate::analysis::Kind;
 use crate::logic::parser::Span;
 use crate::sld;
 use crate::unification::Rename;
@@ -90,6 +91,16 @@ impl Predicate {
             )
         } else {
             self
+        }
+    }
+
+    /// Returns the kind based on this predicate name.
+    /// May not be the true kind in an actual Modus program.
+    pub fn naive_predicate_kind(&self) -> Kind {
+        match self.0.as_str() {
+            "from" => Kind::Image,
+            "run" | "copy" => Kind::Layer,
+            _ => Kind::Logic,
         }
     }
 }
