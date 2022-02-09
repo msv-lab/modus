@@ -430,6 +430,10 @@ pub fn resolve_froms(
     }
 
     let mut nb_done = 0usize;
+    eprintln!(
+        "{}",
+        format!("Resolving {} base images...", queue.len()).blue()
+    );
     let mut hm = HashMap::with_capacity(queue.len());
     loop {
         use spawn_wait::WaitAnyResult::*;
