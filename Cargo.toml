@@ -37,8 +37,8 @@ failure = "^0.1"
 serde = "^1.0"
 serde_json = "^1.0"
 rand = "0.8"
-signal-hook = { version = "0.3.13", features = ["iterator"] }
 shell-escape = "0.1.5"
+spawn-wait = "0.2"
 
 [dev-dependencies]
 serial_test = "*"
