@@ -19,7 +19,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::{self, Debug},
     hash::Hash,
-    iter,
+    io, iter,
 };
 
 use crate::{
@@ -35,8 +35,9 @@ use crate::{
     wellformed,
 };
 use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
+use colored::Colorize;
 use logic::{Clause, IRTerm, Literal};
-use ptree::{item::StringItem, TreeBuilder};
+use ptree::{item::StringItem, print_tree, TreeBuilder};
 
 pub trait Auxiliary: Rename<Self> + Sized {
     fn aux() -> Self;
@@ -297,6 +298,65 @@ impl Proof {
             .map(|child| child.height() + 1)
             .max()
             .unwrap_or(0)
+    }
+
+    pub fn pretty_print(&self, clauses: &Vec<Clause>) -> io::Result<()> {
+        fn dfs(p: &Proof, clauses: &Vec<Clause>, builder: &mut TreeBuilder) {
+            for child in &p.children {
+                match &child.clause {
+                    ClauseId::Rule(rid) => {
+                        builder.begin_child(format!(
+                            "{}",
+                            clauses[*rid]
+                                .head
+                                .substitute(&p.valuation)
+                                .to_string()
+                                .dimmed()
+                        ));
+                        dfs(&child, clauses, builder);
+                        builder.end_child();
+                    }
+                    ClauseId::Query => {
+                        builder.add_empty_child("query".to_string());
+                    }
+                    ClauseId::Builtin(b) => match b.predicate.naive_predicate_kind() {
+                        crate::analysis::Kind::Image => {
+                            builder.add_empty_child(format!(
+                                "{}",
+                                b.substitute(&p.valuation).to_string().cyan()
+                            ));
+                        }
+                        crate::analysis::Kind::Layer => {
+                            builder.add_empty_child(format!(
+                                "{}",
+                                b.substitute(&p.valuation).to_string().bright_blue()
+                            ));
+                        }
+                        crate::analysis::Kind::Logic => {
+                            if b.predicate.is_operator() {
+                                if b.predicate.0.ends_with("_begin") {
+                                    builder.begin_child("(".to_string());
+                                } else {
+                                    builder.end_child();
+                                    // HACK: Because we want to print the operators *after* their scope,
+                                    //       we add a leaf node here. It will look as expected in the term
+                                    //       but may not make sense as a DAG.
+                                    builder.add_empty_child(format!(
+                                        ")::{}",
+                                        b.substitute(&p.valuation).unmangle().to_string().italic()
+                                    ));
+                                }
+                            }
+                        }
+                    },
+                }
+            }
+        }
+
+        let mut builder = TreeBuilder::new("".to_string());
+        dfs(self, clauses, &mut builder);
+
+        print_tree(&builder.build())
     }
 }
 

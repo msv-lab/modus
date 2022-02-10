@@ -438,13 +438,12 @@ fn main() {
                                 println!(
                                     "{} proof(s) found for query {}",
                                     proofs.len(),
-                                    e.to_string().blue()
+                                    e.to_string().underline()
                                 );
 
-                                for ground_goal in proofs.keys() {
-                                    println!("{:?}", ground_goal);
+                                for (_, proof) in proofs {
+                                    proof.pretty_print(&clauses).expect("error when printing");
                                 }
-                                // TODO: pretty print proof, we could use the 'colored' library for terminal colors
                             }
                             Err(e) => {
                                 for diag_error in e {
