@@ -53,13 +53,19 @@ use modusfile::Modusfile;
 
 use crate::buildkit::{BuildOptions, DockerBuildOptions};
 
-fn get_file(path: &Path) -> SimpleFile<&str, String> {
+fn get_file_or_exit(path: &Path) -> SimpleFile<&str, String> {
     let file_name: &str = path
         .file_name()
         .map(|os_str| os_str.to_str())
         .unwrap()
         .unwrap();
-    let file_content: String = fs::read_to_string(path).unwrap();
+    let file_content: String = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(err) => {
+            eprintln!("Error reading {}: {}", path.display(), err);
+            std::process::exit(1);
+        }
+    };
 
     SimpleFile::new(file_name, file_content)
 }
@@ -225,7 +231,7 @@ fn main() {
     match matches.subcommand() {
         ("transpile", Some(sub)) => {
             let input_file = sub.value_of("FILE").unwrap();
-            let file = get_file(Path::new(input_file));
+            let file = get_file_or_exit(Path::new(input_file));
             let query: modusfile::Expression =
                 sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
             let query = query.without_position();
@@ -266,7 +272,7 @@ fn main() {
                 .value_of_os("FILE")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| Path::new(context_dir).join("Modusfile"));
-            let file = get_file(input_file.as_path());
+            let file = get_file_or_exit(input_file.as_path());
             let query: modusfile::Expression =
                 sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
             let query = query.without_position();
@@ -392,7 +398,7 @@ fn main() {
             let should_explain = sub.is_present("explain");
 
             let input_file = sub.value_of("FILE").unwrap();
-            let file = get_file(Path::new(input_file));
+            let file = get_file_or_exit(Path::new(input_file));
             let query: Option<modusfile::Expression> =
                 sub.value_of("QUERY").map(|s| s.parse().unwrap());
             let query = query.map(|q| q.without_position());
@@ -460,7 +466,7 @@ fn main() {
         }
         ("check", Some(sub)) => {
             let input_file = sub.value_of("FILE").unwrap();
-            let file = get_file(Path::new(input_file));
+            let file = get_file_or_exit(Path::new(input_file));
 
             let is_verbose = sub.is_present("verbose");
 
