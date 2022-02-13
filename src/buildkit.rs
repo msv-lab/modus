@@ -434,7 +434,7 @@ fn resolve_froms(
         "{}",
         format!("Resolving {} base images...", queue.len()).blue()
     );
-    let mut hm = HashMap::with_capacity(queue.len());
+    let mut orig_to_resolved_tag = HashMap::with_capacity(queue.len());
     loop {
         use spawn_wait::WaitAnyResult::*;
         match procs.wait_any(sh) {
@@ -467,8 +467,8 @@ fn resolve_froms(
                 }
                 image_cleanup.add(tmp_tag.clone());
 
-                debug_assert!(!hm.contains_key(original));
-                hm.insert(original.clone(), tmp_tag);
+                debug_assert!(!orig_to_resolved_tag.contains_key(original));
+                orig_to_resolved_tag.insert(original.clone(), tmp_tag);
                 eprintln!(
                     "\x1b[2K\r{}\x1b[0m",
                     format!(
@@ -493,7 +493,7 @@ fn resolve_froms(
 
     for node in build_plan.nodes.iter_mut() {
         if let BuildNode::From { image_ref, .. } = node {
-            if let Some(resolved) = hm.get(image_ref) {
+            if let Some(resolved) = orig_to_resolved_tag.get(image_ref) {
                 *image_ref = resolved.clone();
             }
         }
@@ -502,11 +502,12 @@ fn resolve_froms(
     Ok(())
 }
 
-struct DockerImageRmOnDrop(Vec<String>);
+#[derive(Debug, Default)]
+struct DockerImageRmOnDrop(HashSet<String>);
 
 impl DockerImageRmOnDrop {
     pub fn add(&mut self, image_ref_or_tag: String) {
-        self.0.push(image_ref_or_tag);
+        self.0.insert(image_ref_or_tag);
     }
 }
 
@@ -532,7 +533,7 @@ pub fn build<P: AsRef<Path>>(
     let context = context.as_ref().canonicalize().map_err(CwdError)?;
     let previous_cwd = PathBuf::from(".").canonicalize().map_err(CwdError)?;
     let _restore_cwd = RestoreCwd(previous_cwd);
-    let mut image_cleanup = DockerImageRmOnDrop(Vec::new());
+    let mut image_cleanup = DockerImageRmOnDrop::default();
     resolve_froms(&mut build_plan, build_options, &mut sh, &mut image_cleanup)?;
     std::env::set_current_dir(&context).map_err(EnterContextDir)?;
     let has_dockerignore = check_dockerignore()?;
