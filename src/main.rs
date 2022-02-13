@@ -45,7 +45,7 @@ use codespan_reporting::{
 use colored::Colorize;
 use ptree::write_tree;
 use sld::tree_from_modusfile;
-use std::{ffi::OsStr, fs, path::Path, convert::TryInto};
+use std::{convert::TryInto, ffi::OsStr, fs, path::Path};
 use std::{io::Write, path::PathBuf};
 use transpiler::render_tree;
 
@@ -328,12 +328,26 @@ fn main() {
             }
             let options = BuildOptions {
                 frontend_image: sub.value_of("CUSTOM_FRONTEND").unwrap().to_owned(),
-                resolve_concurrency: sub.value_of("RESOLVE_CONCURRENCY").unwrap().parse().unwrap_or_else(|_| {
-                    print_build_error_and_exit("invalid resolve concurrency - expected number", &err_writer)
-                }),
-                export_concurrency: sub.value_of("EXPORT_CONCURRENCY").unwrap().parse().unwrap_or_else(|_| {
-                    print_build_error_and_exit("invalid export concurrency - expected number", &err_writer)
-                }),
+                resolve_concurrency: sub
+                    .value_of("RESOLVE_CONCURRENCY")
+                    .unwrap()
+                    .parse()
+                    .unwrap_or_else(|_| {
+                        print_build_error_and_exit(
+                            "invalid resolve concurrency - expected number",
+                            &err_writer,
+                        )
+                    }),
+                export_concurrency: sub
+                    .value_of("EXPORT_CONCURRENCY")
+                    .unwrap()
+                    .parse()
+                    .unwrap_or_else(|_| {
+                        print_build_error_and_exit(
+                            "invalid export concurrency - expected number",
+                            &err_writer,
+                        )
+                    }),
                 docker_build_options: DockerBuildOptions {
                     verbose: sub.is_present("VERBOSE"),
                     no_cache: sub.is_present("NO_CACHE"),
@@ -344,11 +358,7 @@ fn main() {
                         .unwrap_or_default(),
                 },
             };
-            match buildkit::build(
-                build_plan.clone(),
-                context_dir,
-                &options,
-            ) {
+            match buildkit::build(build_plan.clone(), context_dir, &options) {
                 Err(e) => {
                     print_build_error_and_exit(&e.to_string(), &err_writer);
                 }

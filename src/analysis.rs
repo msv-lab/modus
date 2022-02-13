@@ -1,9 +1,10 @@
 //! This module provides helpers to perform (semantic) analysis over Modusfile ASTs.
 //!
-//! Primarily, we check predicate kinds based on predicate names and/or corresponding expression bodies.
-//! To remedy the problem of recursion, we compute a 'predicate dependency graph' which helps us determine if we
-//! should not bother evaluating the kind of some predicate.
-//! Note that this does not necessarily mean that it is not solvable, but that it would require a different approach.
+//! We use a fixpoint approach to evaluate predicate kinds, which deals with the issue of recursion.
+//! Clauses are repeatedly 'applied' until a fixpoint.
+//! Instead of trying to work out the proper order we should 'apply' clauses, we apply all of them,
+//! and if we cannot evaluate some expression body because we haven't evaluated a future predicate kind
+//! yet, we move on - eventually it will be handled.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -113,10 +114,21 @@ impl ModusSemantics for Modusfile {
                     if let Some(kind) = pred_kind.get(&lit.predicate) {
                         return Ok(kind.clone());
                     } else {
-                        if let Some(_) = clauses.iter().find(|c| c.body.is_some() && c.head.predicate == lit.predicate) {
+                        if let Some(_) = clauses
+                            .iter()
+                            .find(|c| c.body.is_some() && c.head.predicate == lit.predicate)
+                        {
                             // If there is some rule with the desired predicate, we'll defer to evaluating it, instead of
-                            // assuming it's a logical kind
-                            return Err(Diagnostic::note().with_message(format!("{} not determined yet.", lit.predicate)))
+                            // assuming that it is a logical kind.
+                            //
+                            // This may lead to issues with cases like:
+                            // ````
+                            // foo(X) :- bar(X).
+                            // bar(X) :- foo(X).
+                            // ````
+                            // Since both will 'defer' to each other. However, this isn't a sensible program on it's own anyway.
+                            return Err(Diagnostic::warning()
+                                .with_message(format!("{} not determined yet.", lit.predicate)));
                         } else {
                             return Ok(lit.predicate.naive_predicate_kind());
                         }
@@ -166,9 +178,13 @@ impl ModusSemantics for Modusfile {
             }
         }
 
-        let mut pred_kind: HashMap<Predicate, Kind> = vec![(Predicate("from".into()), Kind::Image),
-                                                            (Predicate("run".into()), Kind::Layer),
-                                                            (Predicate("copy".into()), Kind::Layer)].into_iter().collect();
+        let mut pred_kind: HashMap<Predicate, Kind> = vec![
+            (Predicate("from".into()), Kind::Image),
+            (Predicate("run".into()), Kind::Layer),
+            (Predicate("copy".into()), Kind::Layer),
+        ]
+        .into_iter()
+        .collect();
 
         // Compute the index positions of the predicates
         type RuleId = usize; // index position w.r.t. clauses
@@ -186,13 +202,20 @@ impl ModusSemantics for Modusfile {
         loop {
             let mut new_pred = false;
             for c in self.0.iter().filter(|c| c.body.is_some()) {
-                let k_res = evaluate_expression(&c.body.as_ref().unwrap(), &pred_to_rid, &pred_kind, &self.0);
+                let k_res = evaluate_expression(
+                    &c.body.as_ref().unwrap(),
+                    &pred_to_rid,
+                    &pred_kind,
+                    &self.0,
+                );
                 if let Ok(k) = k_res {
-                    // TODO: is this correct?
-                    if pred_kind.get(&c.head.predicate) != Some(&k) {
+                    // This assumes that we correctly determine the kind the first time
+                    // we can evaluate it. An alternative approach may overwrite previously
+                    // found kinds, but that would risk not reaching a fixpoint.
+                    if !pred_kind.contains_key(&c.head.predicate) {
                         new_pred = true;
+                        pred_kind.insert(c.head.predicate.clone(), k);
                     }
-                    pred_kind.insert(c.head.predicate.clone(), k);
                 }
             }
 
@@ -203,15 +226,15 @@ impl ModusSemantics for Modusfile {
 
         let mut messages = Vec::new();
         let mut errs = Vec::new();
+        // evaluate all the expression bodies a final time to pick up any conflicting definitions
         for c in self.0.iter().filter(|c| c.body.is_some()) {
-            match evaluate_expression(&c.body.as_ref().unwrap(), &pred_to_rid, &pred_kind, &self.0) {
+            match evaluate_expression(&c.body.as_ref().unwrap(), &pred_to_rid, &pred_kind, &self.0)
+            {
                 Ok(kind) => {
                     let pred = &c.head.predicate;
                     if let Some(k) = pred_kind.get(&pred) {
                         if k != &kind {
-                            // display a warning if the predicate kind is different using
-                            // a different expr body
-                            // TODO: maybe make it an error?
+                            // Display an error if there is a conflicting predicate kind
                             let maybe_curr_span =
                                 c.body.as_ref().unwrap().get_spanned_position().as_ref();
                             let maybe_prev_span = pred_to_rid[&pred].iter().find_map(|rid| {
@@ -235,7 +258,7 @@ impl ModusSemantics for Modusfile {
                                 Vec::new()
                             };
                             errs.push(
-                                Diagnostic::warning()
+                                Diagnostic::error()
                                     .with_message(
                                         "A rule with matching head predicate has a different kind.",
                                     )
@@ -247,7 +270,7 @@ impl ModusSemantics for Modusfile {
 
                     messages.push(generate_msg_diagnostic(c, &kind));
                     pred_kind.insert(pred.clone(), kind);
-                },
+                }
                 Err(e) => errs.push(e.with_notes(vec![format!(
                     "Therefore, couldn't evaluate clause with head {}.",
                     c.head,
@@ -263,9 +286,6 @@ impl ModusSemantics for Modusfile {
     }
 }
 
-// TODO: change approach to computing signature dependency instead, so each node would be
-// a (predicate, num_args) pair instead of just predicate.
-// Also, should compare approach with how imagegen does it to ensure we are consistent.
 trait PredicateDependency {
     /// Returns a graph where an edge, (n1, n2), means that the predicate
     /// n1 depends on n2 to compute it's type.
@@ -413,6 +433,7 @@ mod tests {
 
         let kind_res = mf.kinds();
         let pred = &Predicate("a".into());
+        assert_eq!(kind_res.errs.len(), 0);
         assert!(kind_res.pred_kind.contains_key(pred));
         assert_eq!(&Kind::Image, kind_res.pred_kind.get(pred).unwrap());
     }
@@ -426,7 +447,11 @@ mod tests {
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
         let kind_res = mf.kinds();
-        assert_eq!(Some(&Kind::Layer), kind_res.pred_kind.get(&Predicate("b".into())));
+        assert_eq!(kind_res.errs.len(), 0);
+        assert_eq!(
+            Some(&Kind::Layer),
+            kind_res.pred_kind.get(&Predicate("b".into()))
+        );
     }
 
     #[test]
@@ -435,7 +460,11 @@ mod tests {
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
         let kind_res = mf.kinds();
-        assert_eq!(Some(&Kind::Logic), kind_res.pred_kind.get(&Predicate("b".into())));
+        assert_eq!(kind_res.errs.len(), 0);
+        assert_eq!(
+            Some(&Kind::Logic),
+            kind_res.pred_kind.get(&Predicate("b".into()))
+        );
     }
 
     #[test]
@@ -448,26 +477,46 @@ mod tests {
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
         let kind_res = mf.kinds();
-        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get(&Predicate("a".into())));
-        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get(&Predicate("b".into())));
-        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get(&Predicate("c".into())));
+        assert_eq!(kind_res.errs.len(), 0);
+        assert_eq!(
+            Some(&Kind::Image),
+            kind_res.pred_kind.get(&Predicate("a".into()))
+        );
+        assert_eq!(
+            Some(&Kind::Image),
+            kind_res.pred_kind.get(&Predicate("b".into()))
+        );
+        assert_eq!(
+            Some(&Kind::Image),
+            kind_res.pred_kind.get(&Predicate("c".into()))
+        );
     }
 
     #[test]
-    fn ignores_indirect_recursion() {
+    fn handles_indirect_recursion() {
+        // Since we can evaluate foo in the third clause, we should be able to evaluate
+        // `bar`.
         let clauses = vec![
             "foo(X) :- bar(X).",
             "bar(X) :- foo(X).",
-            "a(X) :- from(X), run(\"apt-get update\").",
+            "foo(X) :- from(X), run(\"apt-get update\").",
         ];
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
         let kind_res = mf.kinds();
-        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get(&Predicate("a".into())));
+        assert_eq!(kind_res.errs.len(), 0);
+        assert_eq!(
+            Some(&Kind::Image),
+            kind_res.pred_kind.get(&Predicate("foo".into()))
+        );
+        assert_eq!(
+            Some(&Kind::Image),
+            kind_res.pred_kind.get(&Predicate("bar".into()))
+        );
     }
 
     #[test]
-    fn ignores_recursion() {
+    fn warns_recursion() {
         let clauses = vec![
             "recurse :- recurse.",
             "a(X) :- from(X), run(\"apt-get update\").",
@@ -475,6 +524,32 @@ mod tests {
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
         let kind_res = mf.kinds();
-        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get(&Predicate("a".into())));
+        assert_eq!(kind_res.errs.len(), 1);
+        assert_eq!(kind_res.errs[0].severity, Severity::Warning);
+        assert_eq!(
+            Some(&Kind::Image),
+            kind_res.pred_kind.get(&Predicate("a".into()))
+        );
+    }
+
+    #[test]
+    fn warns_indirect_recursion() {
+        let clauses = vec!["foo(X) :- bar(X).", "bar(X) :- foo(X)."];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+
+        let kind_res = mf.kinds();
+        assert_eq!(kind_res.errs.len(), 2);
+        assert_eq!(kind_res.errs[0].severity, Severity::Warning);
+        assert_eq!(kind_res.errs[1].severity, Severity::Warning);
+    }
+
+    #[test]
+    fn errors_conflicting_predicate_kind() {
+        let clauses = vec!["foo :- \"1\" = \"1\".", "foo(X) :- from(X)."];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+
+        let kind_res = mf.kinds();
+        assert_eq!(kind_res.errs.len(), 1);
+        assert_eq!(kind_res.errs[0].severity, Severity::Error);
     }
 }

@@ -734,9 +734,7 @@ pub fn plan_from_modusfile(
 
         let image_count = query_lits
             .iter()
-            .filter(|query_lit| {
-                kind_res.pred_kind.get(&query_lit.predicate) == Some(&Kind::Image)
-            })
+            .filter(|query_lit| kind_res.pred_kind.get(&query_lit.predicate) == Some(&Kind::Image))
             .count();
         if image_count != 1 {
             errs.push(Diagnostic::error().with_message(format!("There must be exactly one image predicate in the query, but {image_count} were found.")));
@@ -744,9 +742,7 @@ pub fn plan_from_modusfile(
 
         let layer_count = query_lits
             .iter()
-            .filter(|query_lit| {
-                kind_res.pred_kind.get(&query_lit.predicate) == Some(&Kind::Layer)
-            })
+            .filter(|query_lit| kind_res.pred_kind.get(&query_lit.predicate) == Some(&Kind::Layer))
             .count();
         if layer_count > 0 {
             errs.push(Diagnostic::error().with_message(format!(
