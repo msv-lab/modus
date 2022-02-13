@@ -12,7 +12,6 @@ use std::ops::Range;
 use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
 use codespan_reporting::files::Files;
 use codespan_reporting::term::{self, Config};
-use petgraph::algo::has_path_connecting;
 
 use crate::logic::{Literal, Predicate, SpannedPosition};
 use crate::modusfile::Modusfile;
@@ -49,8 +48,8 @@ impl Kind {
 }
 
 #[derive(Debug, Clone)]
-pub struct KindResult {
-    pub pred_kind: HashMap<String, Kind>,
+pub struct KindResult<'a> {
+    pub pred_kind: HashMap<&'a Predicate, Kind>,
 
     /// For convenience, informational diagnostic messages that describe the predicate
     /// kind using spans.
@@ -200,76 +199,56 @@ impl ModusSemantics for Modusfile {
             }
         }
 
-        let pred_graph = self.compute_dependency();
-
-        // Every node in a non-trivial strongly connected component (scc) must be part of
-        // a non-trivial cycle.
-        // So if there's a path from a node n to a node that's in a non-trivial scc, then
-        // node n depends on something involved in a cyclic dependency, and we shouldn't
-        // bother trying to evaluate it.
-        let sccs = petgraph::algo::tarjan_scc(&pred_graph);
-        // TODO: This is probably slow, could optimise this by flipping edge direction and
-        // computing reachibility through DFS, etc.?
-        let mut problem_nodes = sccs
-            .into_iter()
-            .filter(|ids| {
-                ids.len() > 1
-                    || (ids.len() == 1
-                        // Handles the case of a trivial cycle (a cycle with one node)
-                        && pred_graph.contains_edge(*ids.first().unwrap(), *ids.first().unwrap()))
-            })
-            .flatten()
-            .collect::<HashSet<_>>();
-        for node in pred_graph.node_indices() {
-            if problem_nodes.contains(&node) {
-                continue;
-            }
-
-            if problem_nodes
-                .iter()
-                .any(|c_node| has_path_connecting(&pred_graph, node, *c_node, None))
-            {
-                problem_nodes.insert(node);
-            }
+        /// Attempts to get the predicate kind of the head, based on the current findings
+        /// of the predicate kind map.
+        fn apply_clause(
+            clause: &ModusClause,
+            pred_rid_map: &HashMap<&Predicate, Vec<RuleId>>,
+            pred_kind: &HashMap<&Predicate, Kind>,
+        ) -> Result<Kind, Diagnostic<()>> {
+            todo!()
         }
-        let problem_preds = problem_nodes
-            .into_iter()
-            .map(|id| pred_graph[id])
-            .collect::<HashSet<_>>();
+
+        let mut pred_kind: HashMap<&Predicate, Kind> = HashMap::new();
 
         // Compute the index positions of the predicates
         type RuleId = usize; // index position w.r.t. clauses
-        let mut pred_to_rid: HashMap<&str, Vec<RuleId>> = HashMap::new();
+        let mut pred_to_rid: HashMap<&Predicate, Vec<RuleId>> = HashMap::new();
         for (i, c) in self.0.iter().enumerate() {
-            let curr = pred_to_rid.entry(&c.head.predicate.0).or_default();
+            let curr = pred_to_rid.entry(&c.head.predicate).or_default();
             curr.push(i);
+
+            if c.body.is_none() {
+                // facts are logical kinds
+                pred_kind.insert(&c.head.predicate, Kind::Logic);
+            }
         }
 
-        // Then evaluate all predicate kinds that are not a problem.
-        let mut pred_kind: HashMap<String, Kind> = HashMap::new();
+        loop {
+            let mut new_pred = false;
+            for c in self.0.iter().filter(|c| c.body.is_some()) {
+                todo!()
+            }
+
+            if !new_pred {
+                break;
+            }
+        }
+
         let mut messages = Vec::new();
         let mut errs = Vec::new();
-
         for c in self.0.iter().filter(|c| c.body.is_some()) {
-            let res = evaluate_kind(
-                c.body.as_ref().unwrap(),
-                &self.0,
-                &pred_to_rid,
-                &mut pred_kind,
-                &problem_preds,
-            );
-
-            match res {
+            match apply_clause(c, &pred_to_rid, &pred_kind) {
                 Ok(kind) => {
-                    let pred_name = c.head.predicate.0.as_str();
-                    if let Some(k) = pred_kind.get(pred_name) {
+                    let pred = c.head.predicate;
+                    if let Some(k) = pred_kind.get(&pred) {
                         if k != &kind {
                             // display a warning if the predicate kind is different using
                             // a different expr body
                             // TODO: maybe make it an error?
                             let maybe_curr_span =
                                 c.body.as_ref().unwrap().get_spanned_position().as_ref();
-                            let maybe_prev_span = pred_to_rid[pred_name].iter().find_map(|rid| {
+                            let maybe_prev_span = pred_to_rid[&pred].iter().find_map(|rid| {
                                 self.0[*rid]
                                     .body
                                     .as_ref()
@@ -301,8 +280,8 @@ impl ModusSemantics for Modusfile {
                     }
 
                     messages.push(generate_msg_diagnostic(c, &kind));
-                    pred_kind.insert(pred_name.to_owned(), kind);
-                }
+                    pred_kind.insert(&pred, kind);
+                },
                 Err(e) => errs.push(e.with_notes(vec![format!(
                     "Therefore, couldn't evaluate clause with head {}.",
                     c.head,
