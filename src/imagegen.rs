@@ -735,7 +735,7 @@ pub fn plan_from_modusfile(
         let image_count = query_lits
             .iter()
             .filter(|query_lit| {
-                kind_res.pred_kind.get(query_lit.predicate.0.as_str()) == Some(&Kind::Image)
+                kind_res.pred_kind.get(&query_lit.predicate) == Some(&Kind::Image)
             })
             .count();
         if image_count != 1 {
@@ -745,7 +745,7 @@ pub fn plan_from_modusfile(
         let layer_count = query_lits
             .iter()
             .filter(|query_lit| {
-                kind_res.pred_kind.get(query_lit.predicate.0.as_str()) == Some(&Kind::Layer)
+                kind_res.pred_kind.get(&query_lit.predicate) == Some(&Kind::Layer)
             })
             .count();
         if layer_count > 0 {
@@ -760,7 +760,7 @@ pub fn plan_from_modusfile(
 
         let expression_image_literal = query_lits
             .iter()
-            .find(|lit| kind_res.pred_kind.get(lit.predicate.0.as_str()) == Some(&Kind::Image))
+            .find(|lit| kind_res.pred_kind.get(&lit.predicate) == Some(&Kind::Image))
             .unwrap();
         let image_literal = ir_q_clause
             .body

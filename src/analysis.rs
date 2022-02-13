@@ -13,9 +13,9 @@ use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
 use codespan_reporting::files::Files;
 use codespan_reporting::term::{self, Config};
 
-use crate::logic::{Literal, Predicate, SpannedPosition};
+use crate::logic::{Predicate, SpannedPosition};
 use crate::modusfile::Modusfile;
-use crate::modusfile::{Expression, ModusClause, ModusTerm};
+use crate::modusfile::{Expression, ModusClause};
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Kind {
@@ -48,8 +48,8 @@ impl Kind {
 }
 
 #[derive(Debug, Clone)]
-pub struct KindResult<'a> {
-    pub pred_kind: HashMap<&'a Predicate, Kind>,
+pub struct KindResult {
+    pub pred_kind: HashMap<Predicate, Kind>,
 
     /// For convenience, informational diagnostic messages that describe the predicate
     /// kind using spans.
@@ -64,20 +64,6 @@ pub trait ModusSemantics {
 
 impl ModusSemantics for Modusfile {
     fn kinds(&self) -> KindResult {
-        fn problematic_pred_diagnostic(lit: &Literal<ModusTerm>) -> Diagnostic<()> {
-            let message = "Couldn't evaluate expression due to a possible cyclic dependency.";
-            let mut labels = Vec::new();
-            if let Some(span) = &lit.position {
-                labels.push(
-                    Label::primary((), Range::from(span))
-                        .with_message(format!("{} may lead to a cyclic dependency.", lit)),
-                )
-            }
-            Diagnostic::warning()
-                .with_message(message)
-                .with_labels(labels)
-        }
-
         fn generate_err_diagnostic(
             span: &Option<SpannedPosition>,
             e1: &Expression,
@@ -114,49 +100,30 @@ impl ModusSemantics for Modusfile {
             Diagnostic::note().with_message(message).with_labels(labels)
         }
 
-        fn evaluate_kind(
-            expr: &Expression,
+        /// Attempts to get the predicate kind of the head, based on the current findings
+        /// of the predicate kind map.
+        fn evaluate_expression(
+            expression: &Expression,
+            pred_rid_map: &HashMap<&Predicate, Vec<RuleId>>,
+            pred_kind: &HashMap<Predicate, Kind>,
             clauses: &[ModusClause],
-            pred_rid_map: &HashMap<&str, Vec<RuleId>>,
-            pred_kind: &mut HashMap<String, Kind>,
-            problem_preds: &HashSet<&str>,
         ) -> Result<Kind, Diagnostic<()>> {
-            match expr {
+            match expression {
                 Expression::Literal(lit) => {
-                    if let Some(kind) = pred_kind.get(lit.predicate.0.as_str()) {
+                    if let Some(kind) = pred_kind.get(&lit.predicate) {
                         return Ok(kind.clone());
-                    }
-
-                    if problem_preds.contains(lit.predicate.0.as_str()) {
-                        return Err(problematic_pred_diagnostic(lit));
-                    }
-
-                    // NOTE: there may be multiple expression bodies related to some predicate name.
-                    // We just take the first one. We could/should emit some kind of warning maybe.
-                    let maybe_expr = pred_rid_map.get(lit.predicate.0.as_str()).and_then(|rids| {
-                        // if it doesn't have a body, it won't give us any new information,
-                        // so skip facts
-                        rids.iter().find_map(|rid| clauses[*rid].body.as_ref())
-                    });
-                    if let Some(expr_body) = maybe_expr {
-                        let k = evaluate_kind(
-                            expr_body,
-                            clauses,
-                            pred_rid_map,
-                            pred_kind,
-                            problem_preds,
-                        )?;
-                        pred_kind.insert(lit.predicate.0.clone(), k.clone());
-                        Ok(k)
                     } else {
-                        let naive_kind = lit.predicate.naive_predicate_kind();
-                        pred_kind.insert(lit.predicate.to_string(), naive_kind);
-                        Ok(naive_kind)
+                        if let Some(_) = clauses.iter().find(|c| c.body.is_some() && c.head.predicate == lit.predicate) {
+                            // If there is some rule with the desired predicate, we'll defer to evaluating it, instead of
+                            // assuming it's a logical kind
+                            return Err(Diagnostic::note().with_message(format!("{} not determined yet.", lit.predicate)))
+                        } else {
+                            return Ok(lit.predicate.naive_predicate_kind());
+                        }
                     }
                 }
                 Expression::OperatorApplication(_, expr, op) => {
-                    let expr_kind =
-                        evaluate_kind(expr, clauses, pred_rid_map, pred_kind, problem_preds)?;
+                    let expr_kind = evaluate_expression(expr, pred_rid_map, pred_kind, clauses)?;
                     if expr_kind.is_image() && op.predicate.0 == "copy" {
                         Ok(Kind::Layer)
                     } else {
@@ -165,8 +132,8 @@ impl ModusSemantics for Modusfile {
                 }
                 Expression::And(span, e1, e2) => {
                     // Could propogate multiple errors up instead of terminating early with '?'
-                    let sem1 = evaluate_kind(e1, clauses, pred_rid_map, pred_kind, problem_preds)?;
-                    let sem2 = evaluate_kind(e2, clauses, pred_rid_map, pred_kind, problem_preds)?;
+                    let sem1 = evaluate_expression(e1, pred_rid_map, pred_kind, clauses)?;
+                    let sem2 = evaluate_expression(e2, pred_rid_map, pred_kind, clauses)?;
 
                     let is_image_expr = (sem1.is_image() && !sem2.is_image())
                         || (sem1.is_logic() && sem2.is_image());
@@ -186,8 +153,8 @@ impl ModusSemantics for Modusfile {
                     }
                 }
                 Expression::Or(span, e1, e2) => {
-                    let sem1 = evaluate_kind(e1, clauses, pred_rid_map, pred_kind, problem_preds)?;
-                    let sem2 = evaluate_kind(e2, clauses, pred_rid_map, pred_kind, problem_preds)?;
+                    let sem1 = evaluate_expression(e1, pred_rid_map, pred_kind, clauses)?;
+                    let sem2 = evaluate_expression(e2, pred_rid_map, pred_kind, clauses)?;
 
                     let matching_expr = sem1 == sem2;
                     if matching_expr {
@@ -199,17 +166,9 @@ impl ModusSemantics for Modusfile {
             }
         }
 
-        /// Attempts to get the predicate kind of the head, based on the current findings
-        /// of the predicate kind map.
-        fn apply_clause(
-            clause: &ModusClause,
-            pred_rid_map: &HashMap<&Predicate, Vec<RuleId>>,
-            pred_kind: &HashMap<&Predicate, Kind>,
-        ) -> Result<Kind, Diagnostic<()>> {
-            todo!()
-        }
-
-        let mut pred_kind: HashMap<&Predicate, Kind> = HashMap::new();
+        let mut pred_kind: HashMap<Predicate, Kind> = vec![(Predicate("from".into()), Kind::Image),
+                                                            (Predicate("run".into()), Kind::Layer),
+                                                            (Predicate("copy".into()), Kind::Layer)].into_iter().collect();
 
         // Compute the index positions of the predicates
         type RuleId = usize; // index position w.r.t. clauses
@@ -220,14 +179,21 @@ impl ModusSemantics for Modusfile {
 
             if c.body.is_none() {
                 // facts are logical kinds
-                pred_kind.insert(&c.head.predicate, Kind::Logic);
+                pred_kind.insert(c.head.predicate.clone(), Kind::Logic);
             }
         }
 
         loop {
             let mut new_pred = false;
             for c in self.0.iter().filter(|c| c.body.is_some()) {
-                todo!()
+                let k_res = evaluate_expression(&c.body.as_ref().unwrap(), &pred_to_rid, &pred_kind, &self.0);
+                if let Ok(k) = k_res {
+                    // TODO: is this correct?
+                    if pred_kind.get(&c.head.predicate) != Some(&k) {
+                        new_pred = true;
+                    }
+                    pred_kind.insert(c.head.predicate.clone(), k);
+                }
             }
 
             if !new_pred {
@@ -238,9 +204,9 @@ impl ModusSemantics for Modusfile {
         let mut messages = Vec::new();
         let mut errs = Vec::new();
         for c in self.0.iter().filter(|c| c.body.is_some()) {
-            match apply_clause(c, &pred_to_rid, &pred_kind) {
+            match evaluate_expression(&c.body.as_ref().unwrap(), &pred_to_rid, &pred_kind, &self.0) {
                 Ok(kind) => {
-                    let pred = c.head.predicate;
+                    let pred = &c.head.predicate;
                     if let Some(k) = pred_kind.get(&pred) {
                         if k != &kind {
                             // display a warning if the predicate kind is different using
@@ -280,7 +246,7 @@ impl ModusSemantics for Modusfile {
                     }
 
                     messages.push(generate_msg_diagnostic(c, &kind));
-                    pred_kind.insert(&pred, kind);
+                    pred_kind.insert(pred.clone(), kind);
                 },
                 Err(e) => errs.push(e.with_notes(vec![format!(
                     "Therefore, couldn't evaluate clause with head {}.",
@@ -446,8 +412,9 @@ mod tests {
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
         let kind_res = mf.kinds();
-        assert!(kind_res.pred_kind.contains_key("a"));
-        assert_eq!(&Kind::Image, kind_res.pred_kind.get("a").unwrap());
+        let pred = &Predicate("a".into());
+        assert!(kind_res.pred_kind.contains_key(pred));
+        assert_eq!(&Kind::Image, kind_res.pred_kind.get(pred).unwrap());
     }
 
     #[test]
@@ -459,7 +426,7 @@ mod tests {
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
         let kind_res = mf.kinds();
-        assert_eq!(Some(&Kind::Layer), kind_res.pred_kind.get("b"));
+        assert_eq!(Some(&Kind::Layer), kind_res.pred_kind.get(&Predicate("b".into())));
     }
 
     #[test]
@@ -468,7 +435,7 @@ mod tests {
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
         let kind_res = mf.kinds();
-        assert_eq!(Some(&Kind::Logic), kind_res.pred_kind.get("b"));
+        assert_eq!(Some(&Kind::Logic), kind_res.pred_kind.get(&Predicate("b".into())));
     }
 
     #[test]
@@ -481,9 +448,9 @@ mod tests {
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
         let kind_res = mf.kinds();
-        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get("a"));
-        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get("b"));
-        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get("c"));
+        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get(&Predicate("a".into())));
+        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get(&Predicate("b".into())));
+        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get(&Predicate("c".into())));
     }
 
     #[test]
@@ -496,7 +463,7 @@ mod tests {
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
         let kind_res = mf.kinds();
-        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get("a"));
+        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get(&Predicate("a".into())));
     }
 
     #[test]
@@ -508,6 +475,6 @@ mod tests {
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
         let kind_res = mf.kinds();
-        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get("a"));
+        assert_eq!(Some(&Kind::Image), kind_res.pred_kind.get(&Predicate("a".into())));
     }
 }
