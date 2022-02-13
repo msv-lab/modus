@@ -460,7 +460,15 @@ pub mod parser {
             ),
             |(expr, ops_with_span)| {
                 ops_with_span.into_iter().fold(expr, |acc, (span, op)| {
-                    Expression::OperatorApplication(Some(span), Box::new(acc), op)
+                    // span for an op application is span for the expression and operator(s)
+                    let new_span: Option<SpannedPosition> = acc
+                        .get_spanned_position()
+                        .as_ref()
+                        .map(|s| SpannedPosition {
+                            offset: s.offset,
+                            length: span.offset + span.length - s.offset,
+                        });
+                    Expression::OperatorApplication(new_span, Box::new(acc), op)
                 })
             },
         );
