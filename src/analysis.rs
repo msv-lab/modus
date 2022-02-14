@@ -105,37 +105,34 @@ impl ModusSemantics for Modusfile {
         /// of the predicate kind map.
         fn evaluate_expression(
             expression: &Expression,
-            pred_rid_map: &HashMap<&Predicate, Vec<RuleId>>,
             pred_kind: &HashMap<Predicate, Kind>,
             clauses: &[ModusClause],
         ) -> Result<Kind, Diagnostic<()>> {
             match expression {
                 Expression::Literal(lit) => {
                     if let Some(kind) = pred_kind.get(&lit.predicate) {
-                        return Ok(kind.clone());
+                        Ok(*kind)
+                    } else if clauses
+                        .iter()
+                        .any(|c| c.body.is_some() && c.head.predicate == lit.predicate)
+                    {
+                        // If there is some rule with the desired predicate, we'll defer to evaluating it, instead of
+                        // assuming that it is a logical kind.
+                        //
+                        // This may lead to issues with cases like:
+                        // ````
+                        // foo(X) :- bar(X).
+                        // bar(X) :- foo(X).
+                        // ````
+                        // Since both will 'defer' to each other. However, this isn't a sensible program on it's own anyway.
+                        Err(Diagnostic::warning()
+                            .with_message(format!("{} not determined yet.", lit.predicate)))
                     } else {
-                        if let Some(_) = clauses
-                            .iter()
-                            .find(|c| c.body.is_some() && c.head.predicate == lit.predicate)
-                        {
-                            // If there is some rule with the desired predicate, we'll defer to evaluating it, instead of
-                            // assuming that it is a logical kind.
-                            //
-                            // This may lead to issues with cases like:
-                            // ````
-                            // foo(X) :- bar(X).
-                            // bar(X) :- foo(X).
-                            // ````
-                            // Since both will 'defer' to each other. However, this isn't a sensible program on it's own anyway.
-                            return Err(Diagnostic::warning()
-                                .with_message(format!("{} not determined yet.", lit.predicate)));
-                        } else {
-                            return Ok(lit.predicate.naive_predicate_kind());
-                        }
+                        Ok(lit.predicate.naive_predicate_kind())
                     }
                 }
                 Expression::OperatorApplication(_, expr, op) => {
-                    let expr_kind = evaluate_expression(expr, pred_rid_map, pred_kind, clauses)?;
+                    let expr_kind = evaluate_expression(expr, pred_kind, clauses)?;
                     if expr_kind.is_image() && op.predicate.0 == "copy" {
                         Ok(Kind::Layer)
                     } else {
@@ -144,8 +141,8 @@ impl ModusSemantics for Modusfile {
                 }
                 Expression::And(span, e1, e2) => {
                     // Could propogate multiple errors up instead of terminating early with '?'
-                    let sem1 = evaluate_expression(e1, pred_rid_map, pred_kind, clauses)?;
-                    let sem2 = evaluate_expression(e2, pred_rid_map, pred_kind, clauses)?;
+                    let sem1 = evaluate_expression(e1, pred_kind, clauses)?;
+                    let sem2 = evaluate_expression(e2, pred_kind, clauses)?;
 
                     let is_image_expr = (sem1.is_image() && !sem2.is_image())
                         || (sem1.is_logic() && sem2.is_image());
@@ -165,8 +162,8 @@ impl ModusSemantics for Modusfile {
                     }
                 }
                 Expression::Or(span, e1, e2) => {
-                    let sem1 = evaluate_expression(e1, pred_rid_map, pred_kind, clauses)?;
-                    let sem2 = evaluate_expression(e2, pred_rid_map, pred_kind, clauses)?;
+                    let sem1 = evaluate_expression(e1, pred_kind, clauses)?;
+                    let sem2 = evaluate_expression(e2, pred_kind, clauses)?;
 
                     let matching_expr = sem1 == sem2;
                     if matching_expr {
@@ -202,12 +199,7 @@ impl ModusSemantics for Modusfile {
         loop {
             let mut new_pred = false;
             for c in self.0.iter().filter(|c| c.body.is_some()) {
-                let k_res = evaluate_expression(
-                    &c.body.as_ref().unwrap(),
-                    &pred_to_rid,
-                    &pred_kind,
-                    &self.0,
-                );
+                let k_res = evaluate_expression(c.body.as_ref().unwrap(), &pred_kind, &self.0);
                 if let Ok(k) = k_res {
                     // This assumes that we correctly determine the kind the first time
                     // we can evaluate it. An alternative approach may overwrite previously
@@ -228,11 +220,10 @@ impl ModusSemantics for Modusfile {
         let mut errs = Vec::new();
         // evaluate all the expression bodies a final time to pick up any conflicting definitions
         for c in self.0.iter().filter(|c| c.body.is_some()) {
-            match evaluate_expression(&c.body.as_ref().unwrap(), &pred_to_rid, &pred_kind, &self.0)
-            {
+            match evaluate_expression(c.body.as_ref().unwrap(), &pred_kind, &self.0) {
                 Ok(kind) => {
                     let pred = &c.head.predicate;
-                    if let Some(k) = pred_kind.get(&pred) {
+                    if let Some(k) = pred_kind.get(pred) {
                         if k != &kind {
                             // Display an error if there is a conflicting predicate kind
                             let maybe_curr_span =
