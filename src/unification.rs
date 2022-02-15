@@ -76,6 +76,7 @@ impl Substitute<IRTerm> for Literal<IRTerm> {
     type Output = Literal;
     fn substitute(&self, s: &Substitution<IRTerm>) -> Self::Output {
         Literal {
+            positive: self.positive,
             position: self.position.clone(),
             predicate: self.predicate.clone(),
             args: self.args.iter().map(|t| t.substitute(s)).collect(),

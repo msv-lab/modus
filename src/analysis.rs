@@ -140,7 +140,7 @@ impl ModusSemantics for Modusfile {
                         Ok(expr_kind)
                     }
                 }
-                Expression::And(span, e1, e2) => {
+                Expression::And(span, true, e1, e2) => {
                     // Could propogate multiple errors up instead of terminating early with '?'
                     let sem1 = evaluate_expression(e1, pred_kind, clauses)?;
                     let sem2 = evaluate_expression(e2, pred_kind, clauses)?;
@@ -162,7 +162,7 @@ impl ModusSemantics for Modusfile {
                         Err(generate_err_diagnostic(span, e1, e2, &sem1, &sem2))
                     }
                 }
-                Expression::Or(span, e1, e2) => {
+                Expression::Or(span, true, e1, e2) => {
                     let sem1 = evaluate_expression(e1, pred_kind, clauses)?;
                     let sem2 = evaluate_expression(e2, pred_kind, clauses)?;
 
@@ -173,6 +173,9 @@ impl ModusSemantics for Modusfile {
                         Err(generate_err_diagnostic(span, e1, e2, &sem1, &sem2))
                     }
                 }
+                // A negated expression is a check for whether we can prove the expression,
+                // so `!foo` is always a logical kind, regardless of foo.
+                &Expression::And(_, false, ..) | Expression::Or(_, false, ..) => Ok(Kind::Logic),
             }
         }
 
@@ -184,6 +187,7 @@ impl ModusSemantics for Modusfile {
             (
                 from_pred.clone(),
                 select_builtin(&Literal {
+                    positive: true,
                     position: None,
                     predicate: from_pred,
                     args: vec![logic::IRTerm::Constant("".to_string())],
@@ -195,6 +199,7 @@ impl ModusSemantics for Modusfile {
             (
                 run_pred.clone(),
                 select_builtin(&Literal {
+                    positive: true,
                     position: None,
                     predicate: run_pred,
                     args: vec![logic::IRTerm::Constant("".to_string())],
@@ -206,6 +211,7 @@ impl ModusSemantics for Modusfile {
             (
                 copy_pred.clone(),
                 select_builtin(&Literal {
+                    positive: true,
                     position: None,
                     predicate: copy_pred,
                     args: vec![
@@ -315,6 +321,7 @@ impl ModusSemantics for Modusfile {
     }
 }
 
+// TODO: stratification instead of this.
 trait PredicateDependency {
     /// Returns a graph where an edge, (n1, n2), means that the predicate
     /// n1 depends on n2 to compute it's type.
@@ -330,12 +337,12 @@ impl PredicateDependency for Modusfile {
             match expr {
                 Expression::Literal(lit) => vec![&lit.predicate.0],
                 Expression::OperatorApplication(_, expr, _) => get_predicate_names(expr),
-                Expression::And(_, e1, e2) => {
+                Expression::And(_, _, e1, e2) => {
                     let mut pred1 = get_predicate_names(e1);
                     pred1.append(&mut get_predicate_names(e2));
                     pred1
                 }
-                Expression::Or(_, e1, e2) => {
+                Expression::Or(_, _, e1, e2) => {
                     let mut pred1 = get_predicate_names(e1);
                     pred1.append(&mut get_predicate_names(e2));
                     pred1

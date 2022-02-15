@@ -982,6 +982,7 @@ pub fn tree_from_modusfile(
     let goal_pred = Predicate("_query".to_owned());
     let user_clause = modusfile::ModusClause {
         head: Literal {
+            positive: true,
             position: None,
             predicate: goal_pred.clone(),
             args: Vec::new(),
@@ -1313,6 +1314,7 @@ mod tests {
             .parse()
             .unwrap();
         let query = Expression::Literal(Literal {
+            positive: true,
             position: None,
             predicate: Predicate("base_image".into()),
             args: vec![ModusTerm::FormatString {

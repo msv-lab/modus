@@ -165,7 +165,7 @@ impl From<Span<'_>> for SpannedPosition {
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Literal<T = IRTerm> {
-    /// False if this is a negated literal.
+    /// True if if this is a positive literal, else it's a negated literal.
     /// Double negations should be collapsed, if any.
     pub positive: bool,
 
@@ -193,8 +193,9 @@ pub struct Clause<T = IRTerm> {
 
 #[cfg(test)]
 impl<T: PartialEq> Clause<T> {
-    fn eq_ignoring_position(&self, other: &Clause<T>) -> bool {
+    pub fn eq_ignoring_position(&self, other: &Clause<T>) -> bool {
         self.head.eq_ignoring_position(&other.head)
+            && self.body.len() == other.body.len()
             && self
                 .body
                 .iter()
@@ -312,8 +313,19 @@ fn display_sep<T: fmt::Display>(seq: &[T], sep: &str) -> String {
 impl fmt::Display for Literal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &*self.args {
-            [] => write!(f, "{}", self.predicate),
-            _ => write!(f, "{}({})", self.predicate, display_sep(&self.args, ", ")),
+            [] => write!(
+                f,
+                "{}{}",
+                if self.positive { "" } else { "!" },
+                self.predicate
+            ),
+            _ => write!(
+                f,
+                "{}{}({})",
+                if self.positive { "" } else { "!" },
+                self.predicate,
+                display_sep(&self.args, ", ")
+            ),
         }
     }
 }
@@ -356,11 +368,11 @@ pub mod parser {
     use nom::{
         branch::alt,
         bytes::complete::{tag, take_until},
-        character::complete::{alpha1, alphanumeric1, multispace0, space0},
+        character::complete::{alpha1, alphanumeric1, multispace0},
         combinator::{cut, map, opt, recognize},
         error::VerboseError,
         multi::{many0, many0_count, separated_list0, separated_list1},
-        sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
+        sequence::{delimited, pair, separated_pair, terminated, tuple},
         Offset, Slice,
     };
 

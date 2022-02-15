@@ -39,6 +39,7 @@ fn convert_format_string(
     let mut curr_string = format_string_content;
     let mut prev_variable: IRTerm = Auxiliary::aux();
     let mut new_literals = vec![logic::Literal {
+        positive: true,
         // This initial literal is a no-op that makes the code simpler.
         // It does not have an equivalent position, but we can link to the start
         // of the f-string for clarity.
@@ -67,6 +68,7 @@ fn convert_format_string(
             let constant_string = process_raw_string(constant_str.fragment()).replace("\\$", "$");
             let new_var: IRTerm = Auxiliary::aux();
             let new_literal = logic::Literal {
+                positive: true,
                 position: Some(SpannedPosition {
                     offset: spanned_position.offset + curr_string_offset,
                     length: span_length,
@@ -89,6 +91,7 @@ fn convert_format_string(
             let new_var: IRTerm = Auxiliary::aux();
             let span_length = 2 + variable.fragment().len() + 1; // the variable string surrounded by ${...}
             let new_literal = logic::Literal {
+                positive: true,
                 position: Some(SpannedPosition {
                     offset: spanned_position.offset + curr_string_offset,
                     length: span_length,
@@ -155,6 +158,7 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                     literals.extend_from_slice(&new_literals);
                 }
                 literals.push(logic::Literal {
+                    positive: l.positive,
                     position: l.position.clone(),
                     predicate: l.predicate.clone(),
                     args: new_literal_args,
@@ -164,6 +168,7 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                     body: literals,
                 });
             }
+
             Some(Expression::OperatorApplication(_, expr, op)) => clauses.extend(
                 Self::from(&ModusClause {
                     head: modus_clause.head.clone(),
@@ -181,12 +186,14 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                         t
                     }));
                     body.push(logic::Literal {
+                        positive: true,
                         position: op.position.clone(),
                         predicate: Predicate(format!("_operator_{}_begin", &op.predicate.0)),
                         args: op_args.clone(),
                     });
                     body.extend_from_slice(&c.body);
                     body.push(logic::Literal {
+                        positive: true,
                         position: op.position.clone(),
                         predicate: Predicate(format!("_operator_{}_end", &op.predicate.0)),
                         args: op_args,
@@ -197,7 +204,8 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                     }
                 }),
             ),
-            Some(Expression::And(_, expr1, expr2)) => {
+
+            Some(Expression::And(_, true, expr1, expr2)) => {
                 let c1 = Self::from(&ModusClause {
                     head: modus_clause.head.clone(),
                     body: Some(*expr1.clone()),
@@ -223,7 +231,7 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                     }
                 }
             }
-            Some(Expression::Or(_, expr1, expr2)) => {
+            Some(Expression::Or(_, true, expr1, expr2)) => {
                 let c1 = Self::from(&ModusClause {
                     head: modus_clause.head.clone(),
                     body: Some(*expr1.clone()),
@@ -236,6 +244,31 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                 clauses.extend(c1);
                 clauses.extend(c2);
             }
+
+            // If this is a negated expression, apply De Morgan's laws and translate that instead.
+            Some(Expression::And(s, false, expr1, expr2)) => {
+                return Self::from(&ModusClause {
+                    head: modus_clause.head.clone(),
+                    body: Some(Expression::Or(
+                        s.clone(),
+                        true,
+                        Box::new(expr1.negate_current()),
+                        Box::new(expr2.negate_current()),
+                    )),
+                })
+            }
+            Some(Expression::Or(s, false, expr1, expr2)) => {
+                return Self::from(&ModusClause {
+                    head: modus_clause.head.clone(),
+                    body: Some(Expression::And(
+                        s.clone(),
+                        true,
+                        Box::new(expr1.negate_current()),
+                        Box::new(expr2.negate_current()),
+                    )),
+                })
+            }
+
             None => clauses.push(logic::Clause {
                 head: modus_clause.head.clone().into(),
                 body: Vec::new(),
@@ -274,6 +307,7 @@ mod tests {
         let case = "";
 
         let lits = vec![logic::Literal {
+            positive: true,
             position: Some(SpannedPosition {
                 offset: 0,
                 length: 1,
@@ -307,6 +341,7 @@ mod tests {
 
         let lits = vec![
             logic::Literal {
+                positive: true,
                 position: Some(SpannedPosition {
                     offset: 0,
                     length: 1,
@@ -319,6 +354,7 @@ mod tests {
                 ],
             },
             logic::Literal {
+                positive: true,
                 position: Some(SpannedPosition {
                     offset: 2,
                     length: 16,
@@ -331,6 +367,7 @@ mod tests {
                 ],
             },
             logic::Literal {
+                positive: true,
                 position: Some(SpannedPosition {
                     offset: 18,
                     length: 18,
@@ -366,6 +403,7 @@ mod tests {
 
         let lits = vec![
             logic::Literal {
+                positive: true,
                 position: Some(SpannedPosition {
                     offset: 0,
                     length: 1,
@@ -378,6 +416,7 @@ mod tests {
                 ],
             },
             logic::Literal {
+                positive: true,
                 position: Some(SpannedPosition {
                     offset: 2,
                     length: 6,
@@ -390,6 +429,7 @@ mod tests {
                 ],
             },
             logic::Literal {
+                positive: true,
                 position: Some(SpannedPosition {
                     offset: 8,
                     length: 10,
@@ -402,6 +442,7 @@ mod tests {
                 ],
             },
             logic::Literal {
+                positive: true,
                 position: Some(SpannedPosition {
                     offset: 18,
                     length: 51,
@@ -425,5 +466,35 @@ mod tests {
                 case
             )
         );
+    }
+
+    #[test]
+    fn translates_negated_and() {
+        let modus_clause: ModusClause = "foo :- !(a, b, c).".parse().unwrap();
+        let expected: Vec<logic::Clause> = vec![
+            "foo :- !a.".parse().unwrap(),
+            "foo :- !b.".parse().unwrap(),
+            "foo :- !c.".parse().unwrap(),
+        ];
+
+        let actual: Vec<logic::Clause> = (&modus_clause).into();
+        assert_eq!(expected.len(), actual.len());
+        assert!(expected
+            .iter()
+            .zip(actual)
+            .all(|(a, b)| a.eq_ignoring_position(&b)));
+    }
+
+    #[test]
+    fn translates_negated_or() {
+        let modus_clause: ModusClause = "foo :- !(a; b; c).".parse().unwrap();
+        let expected: Vec<logic::Clause> = vec!["foo :- !a, !b, !c.".parse().unwrap()];
+
+        let actual: Vec<logic::Clause> = (&modus_clause).into();
+        assert_eq!(expected.len(), actual.len());
+        assert!(expected
+            .iter()
+            .zip(actual)
+            .all(|(a, b)| a.eq_ignoring_position(&b)));
     }
 }
