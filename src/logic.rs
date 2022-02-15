@@ -165,6 +165,10 @@ impl From<Span<'_>> for SpannedPosition {
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Literal<T = IRTerm> {
+    /// False if this is a negated literal.
+    /// Double negations should be collapsed, if any.
+    pub positive: bool,
+
     pub position: Option<SpannedPosition>,
     pub predicate: Predicate,
     pub args: Vec<T>,
@@ -355,8 +359,8 @@ pub mod parser {
         character::complete::{alpha1, alphanumeric1, multispace0, space0},
         combinator::{cut, map, opt, recognize},
         error::VerboseError,
-        multi::{many0, separated_list0, separated_list1},
-        sequence::{delimited, pair, preceded, separated_pair, terminated},
+        multi::{many0, many0_count, separated_list0, separated_list1},
+        sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
         Offset, Slice,
     };
 
@@ -426,7 +430,12 @@ pub mod parser {
         S: FnMut(Span<'a>) -> IResult<Span<'a>, Any> + Clone,
     {
         move |i| {
-            let (i, (spanned_pos, (name, args))) = recognized_span(pair(
+            let (i, (spanned_pos, (neg_count, name, args))) = recognized_span(tuple((
+                // allow whitespace between '!'
+                many0_count(terminated(
+                    nom::character::complete::char('!'),
+                    space0.clone(),
+                )),
                 terminated(literal_identifier, space0.clone()),
                 opt(delimited(
                     terminated(tag("("), space0.clone()),
@@ -436,20 +445,17 @@ pub mod parser {
                     ),
                     cut(terminated(tag(")"), space0.clone())),
                 )),
-            ))(i)?;
+            )))(i)?;
 
             Ok((
                 i,
-                match args {
-                    Some(args) => Literal {
-                        position: Some(spanned_pos),
-                        predicate: Predicate(name.fragment().to_string()),
-                        args,
-                    },
-                    None => Literal {
-                        position: Some(spanned_pos),
-                        predicate: Predicate(name.fragment().to_string()),
-                        args: Vec::new(),
+                Literal {
+                    positive: neg_count % 2 == 0,
+                    position: Some(spanned_pos),
+                    predicate: Predicate(name.fragment().to_string()),
+                    args: match args {
+                        Some(args) => args,
+                        None => Vec::new(),
                     },
                 },
             ))
@@ -488,6 +494,7 @@ mod tests {
     #[test]
     fn literals() {
         let l1 = Literal {
+            positive: true,
             position: None,
             predicate: Predicate("l1".into()),
             args: vec![IRTerm::Constant("c".into()), IRTerm::Constant("d".into())],
@@ -504,6 +511,7 @@ mod tests {
     #[test]
     fn literal_with_variable() {
         let l1 = Literal {
+            positive: true,
             position: None,
             predicate: Predicate("l1".into()),
             args: vec![
@@ -515,6 +523,24 @@ mod tests {
         assert_eq!("l1(\"\", X)", l1.to_string());
 
         let actual: Literal = "l1(\"\", X)".parse().unwrap();
+        assert!(l1.eq_ignoring_position(&actual));
+    }
+
+    #[test]
+    fn negated_literal() {
+        let l1 = Literal {
+            positive: false,
+            position: None,
+            predicate: Predicate("l1".into()),
+            args: vec![
+                IRTerm::Constant("".into()),
+                IRTerm::UserVariable("X".into()),
+            ],
+        };
+
+        assert_eq!("!l1(\"\", X)", l1.to_string());
+
+        let actual: Literal = "!!!l1(\"\", X)".parse().unwrap();
         assert!(l1.eq_ignoring_position(&actual));
     }
 
@@ -535,16 +561,19 @@ mod tests {
         let va = IRTerm::UserVariable("A".into());
         let vb = IRTerm::UserVariable("B".into());
         let l1 = Literal {
+            positive: true,
             position: None,
             predicate: Predicate("l1".into()),
             args: vec![va.clone(), vb.clone()],
         };
         let l2 = Literal {
+            positive: true,
             position: None,
             predicate: Predicate("l2".into()),
             args: vec![va.clone(), c.clone()],
         };
         let l3 = Literal {
+            positive: true,
             position: None,
             predicate: Predicate("l3".into()),
             args: vec![vb.clone(), c.clone()],
@@ -564,11 +593,13 @@ mod tests {
     fn nullary_predicate() {
         let va = IRTerm::UserVariable("A".into());
         let l1 = Literal {
+            positive: true,
             position: None,
             predicate: Predicate("l1".into()),
             args: Vec::new(),
         };
         let l2 = Literal {
+            positive: true,
             position: None,
             predicate: Predicate("l2".into()),
             args: vec![va.clone()],
