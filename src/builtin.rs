@@ -15,7 +15,10 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use crate::logic::{Clause, IRTerm, Literal, Predicate};
+use crate::{
+    analysis::Kind,
+    logic::{Clause, IRTerm, Literal, Predicate},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SelectBuiltinResult {
@@ -36,6 +39,10 @@ impl SelectBuiltinResult {
 pub trait BuiltinPredicate {
     fn name(&self) -> &'static str;
 
+    /// The kind of this predicate or operator.
+    /// Should match https://github.com/modus-continens/docs/blob/main/src/library/README.md
+    fn kind(&self) -> Kind;
+
     /// Return if the argument is allowed to be ungrounded. This means that a "false" here will force a constant.
     fn arg_groundness(&self) -> &'static [bool];
 
@@ -48,10 +55,11 @@ pub trait BuiltinPredicate {
         if &predicate.0 != self.name() {
             return SelectBuiltinResult::NoMatch;
         }
-        if args
-            .iter()
-            .zip(self.arg_groundness().into_iter())
-            .all(|pair| matches!(pair, (_, true) | (IRTerm::Constant(_), false)))
+        if args.len() == self.arg_groundness().len()
+            && args
+                .iter()
+                .zip(self.arg_groundness().into_iter())
+                .all(|pair| matches!(pair, (_, true) | (IRTerm::Constant(_), false)))
         {
             SelectBuiltinResult::Match
         } else {
@@ -102,6 +110,10 @@ mod string_concat {
             "string_concat"
         }
 
+        fn kind(&self) -> crate::analysis::Kind {
+            crate::analysis::Kind::Logic
+        }
+
         fn arg_groundness(&self) -> &'static [bool] {
             &[false, false, true]
         }
@@ -120,9 +132,14 @@ mod string_concat {
             "string_concat"
         }
 
+        fn kind(&self) -> crate::analysis::Kind {
+            crate::analysis::Kind::Logic
+        }
+
         fn arg_groundness(&self) -> &'static [bool] {
             &[true, false, false]
         }
+
         fn apply(&self, lit: &Literal) -> Option<Literal> {
             let b = lit.args[1].as_constant()?;
             let c = lit.args[2].as_constant()?;
@@ -138,6 +155,10 @@ mod string_concat {
     impl BuiltinPredicate for StringConcat3 {
         fn name(&self) -> &'static str {
             "string_concat"
+        }
+
+        fn kind(&self) -> crate::analysis::Kind {
+            crate::analysis::Kind::Logic
         }
 
         fn arg_groundness(&self) -> &'static [bool] {
@@ -167,6 +188,10 @@ mod equality {
             "string_eq"
         }
 
+        fn kind(&self) -> crate::analysis::Kind {
+            crate::analysis::Kind::Logic
+        }
+
         fn arg_groundness(&self) -> &'static [bool] {
             &[false, true]
         }
@@ -188,6 +213,10 @@ mod equality {
     impl BuiltinPredicate for StringEq2 {
         fn name(&self) -> &'static str {
             "string_eq"
+        }
+
+        fn kind(&self) -> crate::analysis::Kind {
+            crate::analysis::Kind::Logic
         }
 
         fn arg_groundness(&self) -> &'static [bool] {
@@ -217,6 +246,10 @@ mod number {
             "number_gt"
         }
 
+        fn kind(&self) -> crate::analysis::Kind {
+            crate::analysis::Kind::Logic
+        }
+
         fn arg_groundness(&self) -> &'static [bool] {
             &[false, false]
         }
@@ -239,6 +272,10 @@ mod number {
             "number_geq"
         }
 
+        fn kind(&self) -> crate::analysis::Kind {
+            crate::analysis::Kind::Logic
+        }
+
         fn arg_groundness(&self) -> &'static [bool] {
             &[false, false]
         }
@@ -257,12 +294,16 @@ mod number {
 }
 
 macro_rules! intrinsic_predicate {
-    ($name:ident, $($arg_groundness:expr),*) => {
+    ($name:ident, $kind:expr, $($arg_groundness:expr),*) => {
         #[allow(non_camel_case_types)]
         pub struct $name;
         impl BuiltinPredicate for $name {
             fn name(&self) -> &'static str {
                 stringify!($name)
+            }
+
+            fn kind(&self) -> Kind {
+                $kind
             }
 
             fn arg_groundness(&self) -> &'static [bool] {
@@ -276,25 +317,101 @@ macro_rules! intrinsic_predicate {
     };
 }
 
-intrinsic_predicate!(run, false);
-intrinsic_predicate!(from, false);
-intrinsic_predicate!(_operator_copy_begin, false, false, false);
-intrinsic_predicate!(_operator_copy_end, false, false, false);
-intrinsic_predicate!(_operator_in_workdir_begin, false, false);
-intrinsic_predicate!(_operator_in_workdir_end, false, false);
-intrinsic_predicate!(_operator_set_workdir_begin, false, false);
-intrinsic_predicate!(_operator_set_workdir_end, false, false);
-intrinsic_predicate!(_operator_set_entrypoint_begin, false, false);
-intrinsic_predicate!(_operator_set_entrypoint_end, false, false);
-intrinsic_predicate!(_operator_set_env_begin, false, false, false);
-intrinsic_predicate!(_operator_set_env_end, false, false, false);
-intrinsic_predicate!(_operator_in_env_begin, false, false, false);
-intrinsic_predicate!(_operator_in_env_end, false, false, false);
-intrinsic_predicate!(_operator_append_path_begin, false, false);
-intrinsic_predicate!(_operator_append_path_end, false, false);
-intrinsic_predicate!(copy, false, false);
-intrinsic_predicate!(_operator_merge_begin, false);
-intrinsic_predicate!(_operator_merge_end, false);
+intrinsic_predicate!(run, crate::analysis::Kind::Layer, false);
+intrinsic_predicate!(from, crate::analysis::Kind::Image, false);
+intrinsic_predicate!(
+    _operator_copy_begin,
+    crate::analysis::Kind::Image,
+    false,
+    false,
+    false
+);
+intrinsic_predicate!(
+    _operator_copy_end,
+    crate::analysis::Kind::Image,
+    false,
+    false,
+    false
+);
+intrinsic_predicate!(
+    _operator_in_workdir_begin,
+    crate::analysis::Kind::Layer,
+    false,
+    false
+);
+intrinsic_predicate!(
+    _operator_in_workdir_end,
+    crate::analysis::Kind::Layer,
+    false,
+    false
+);
+intrinsic_predicate!(
+    _operator_set_workdir_begin,
+    crate::analysis::Kind::Image,
+    false,
+    false
+);
+intrinsic_predicate!(
+    _operator_set_workdir_end,
+    crate::analysis::Kind::Image,
+    false,
+    false
+);
+intrinsic_predicate!(
+    _operator_set_entrypoint_begin,
+    crate::analysis::Kind::Image,
+    false,
+    false
+);
+intrinsic_predicate!(
+    _operator_set_entrypoint_end,
+    crate::analysis::Kind::Image,
+    false,
+    false
+);
+intrinsic_predicate!(
+    _operator_set_env_begin,
+    crate::analysis::Kind::Image,
+    false,
+    false,
+    false
+);
+intrinsic_predicate!(
+    _operator_set_env_end,
+    crate::analysis::Kind::Image,
+    false,
+    false,
+    false
+);
+intrinsic_predicate!(
+    _operator_in_env_begin,
+    crate::analysis::Kind::Layer,
+    false,
+    false,
+    false
+);
+intrinsic_predicate!(
+    _operator_in_env_end,
+    crate::analysis::Kind::Layer,
+    false,
+    false,
+    false
+);
+intrinsic_predicate!(
+    _operator_append_path_begin,
+    crate::analysis::Kind::Image,
+    false,
+    false
+);
+intrinsic_predicate!(
+    _operator_append_path_end,
+    crate::analysis::Kind::Image,
+    false,
+    false
+);
+intrinsic_predicate!(copy, crate::analysis::Kind::Layer, false, false);
+intrinsic_predicate!(_operator_merge_begin, crate::analysis::Kind::Layer, false);
+intrinsic_predicate!(_operator_merge_end, crate::analysis::Kind::Layer, false);
 
 /// Convenience macro that returns Some(b) for the first b that can be selected.
 macro_rules! select_builtins {
@@ -353,7 +470,7 @@ pub fn select_builtin<'a>(
 
 #[cfg(test)]
 mod test {
-    use crate::{builtin::SelectBuiltinResult, logic::IRTerm};
+    use crate::{analysis::Kind, builtin::SelectBuiltinResult, logic::IRTerm};
 
     #[test]
     pub fn test_select() {
@@ -368,6 +485,7 @@ mod test {
         assert!(b.0.is_match());
         let b = b.1.unwrap();
         assert_eq!(b.name(), "run");
+        assert_eq!(b.kind(), Kind::Layer);
         assert_eq!(b.apply(&lit), Some(lit));
 
         let lit = Literal {
@@ -383,6 +501,7 @@ mod test {
         assert!(b.0.is_match());
         let b = b.1.unwrap();
         assert_eq!(b.name(), "string_concat");
+        assert_eq!(b.kind(), Kind::Logic);
         assert_eq!(
             b.apply(&lit),
             Some(Literal {
@@ -457,6 +576,7 @@ mod test {
         assert!(b.0.is_match());
         let b = b.1.unwrap();
         assert_eq!(b.name(), "number_gt");
+        assert_eq!(b.kind(), Kind::Logic);
         assert_eq!(b.apply(&lit), Some(lit));
     }
 
@@ -476,6 +596,7 @@ mod test {
         assert!(b.0.is_match());
         let b = b.1.unwrap();
         assert_eq!(b.name(), "number_geq");
+        assert_eq!(b.kind(), Kind::Logic);
         assert_eq!(b.apply(&lit), Some(lit));
     }
 }

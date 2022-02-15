@@ -14,7 +14,8 @@ use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
 use codespan_reporting::files::Files;
 use codespan_reporting::term::{self, Config};
 
-use crate::logic::{Predicate, SpannedPosition};
+use crate::builtin::select_builtin;
+use crate::logic::{self, Literal, Predicate, SpannedPosition};
 use crate::modusfile::Modusfile;
 use crate::modusfile::{Expression, ModusClause};
 
@@ -128,7 +129,7 @@ impl ModusSemantics for Modusfile {
                         Err(Diagnostic::warning()
                             .with_message(format!("{} not determined yet.", lit.predicate)))
                     } else {
-                        Ok(lit.predicate.naive_predicate_kind())
+                        Ok(Kind::Logic)
                     }
                 }
                 Expression::OperatorApplication(_, expr, op) => {
@@ -175,10 +176,47 @@ impl ModusSemantics for Modusfile {
             }
         }
 
+        let from_pred = Predicate("from".into());
+        let run_pred = Predicate("run".into());
+        let copy_pred = Predicate("copy".into());
+        // This initializes the map with the kinds of from/run/copy.
         let mut pred_kind: HashMap<Predicate, Kind> = vec![
-            (Predicate("from".into()), Kind::Image),
-            (Predicate("run".into()), Kind::Layer),
-            (Predicate("copy".into()), Kind::Layer),
+            (
+                from_pred.clone(),
+                select_builtin(&Literal {
+                    position: None,
+                    predicate: from_pred,
+                    args: vec![logic::IRTerm::Constant("".to_string())],
+                })
+                .1
+                .unwrap()
+                .kind(),
+            ),
+            (
+                run_pred.clone(),
+                select_builtin(&Literal {
+                    position: None,
+                    predicate: run_pred,
+                    args: vec![logic::IRTerm::Constant("".to_string())],
+                })
+                .1
+                .unwrap()
+                .kind(),
+            ),
+            (
+                copy_pred.clone(),
+                select_builtin(&Literal {
+                    position: None,
+                    predicate: copy_pred,
+                    args: vec![
+                        logic::IRTerm::Constant("".to_string()),
+                        logic::IRTerm::Constant("".to_string()),
+                    ],
+                })
+                .1
+                .unwrap()
+                .kind(),
+            ),
         ]
         .into_iter()
         .collect();
