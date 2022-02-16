@@ -91,8 +91,10 @@ pub struct Tree {
     /// Branches that will lead to failing paths.
     fail_resolvents: HashMap<(LiteralGoalId, ClauseId), (Substitution, Substitution, Tree)>,
 
-    /// Possible error associated with this node. It should be a leaf if present.
-    /// Note that even if this error is not present, the tree may still have failing paths,
+    /// Possible error associated with this node. It is probably a leaf if present.
+    /// If this is a negation check, this might not be a leaf node.
+    ///
+    /// Note that even if error is None, the tree may still have failing paths,
     /// it's just that this particular node is not the point where it failed.
     error: Option<ResolutionError>,
 }
@@ -166,6 +168,7 @@ impl Tree {
     /// Returns a string explaining the SLD tree, using indentation, etc.
     pub fn explain(&self, rules: &[Clause]) -> StringItem {
         fn dfs(t: &Tree, rules: &[Clause], builder: &mut TreeBuilder) {
+
             let mut resolvent_pairs = t.resolvents().into_iter().collect::<Vec<_>>();
             resolvent_pairs.sort_by_key(|(k, _)| k.0);
 
@@ -177,7 +180,7 @@ impl Tree {
                         .map(|(t1, t2)| (t1.get_original().clone(), t2.clone()))
                         .collect();
 
-                let chosen_rule_body = match cid {
+                let requirement = match cid {
                     ClauseId::Rule(rid) => rules[*rid]
                         .substitute(&substitution_map)
                         .body
@@ -187,24 +190,31 @@ impl Tree {
                         .join(", "),
                     ClauseId::Query => unimplemented!(),
                     ClauseId::Builtin(lit) => lit.substitute(&v.0).to_string(),
-                    ClauseId::NegationCheck => todo!(),
+                    ClauseId::NegationCheck => {
+                        format!("{} to have no proof", t.goal[*goal_id].literal.negated())
+                    }
                 };
                 let curr_attempt = format!(
                     "{} requires {}",
                     t.goal[*goal_id].literal,
-                    if chosen_rule_body.is_empty() {
-                        "nothing, it's a fact.".to_owned()
+                    if requirement.is_empty() {
+                        "nothing, it's a fact.".to_owned().italic()
                     } else {
-                        chosen_rule_body
+                        requirement.italic()
                     }
                 );
-                builder.begin_child(curr_attempt);
+
+                if let Some(e) = &v.2.error {
+                    builder.begin_child(format!("{}", e.to_string().bright_red()));
+                } else {
+                    builder.begin_child(curr_attempt);
+                }
                 dfs(&v.2, rules, builder);
                 builder.end_child();
             }
 
             if t.goal.is_empty() {
-                builder.add_empty_child("Success".to_owned());
+                builder.add_empty_child(format!("{}", "Success".green()));
             } else if !t.goal.is_empty() && resolvent_pairs.is_empty() {
                 let err = t
                     .error
@@ -436,7 +446,7 @@ impl fmt::Display for ResolutionError {
                 "{} clause(s) have inconsistent signatures",
                 signatures.len()
             ),
-            ResolutionError::NegationProof(lit) => write!(f, "A proof was found for {lit}"),
+            ResolutionError::NegationProof(lit) => write!(f, "A proof was found for {}", lit.negated()),
         }
     }
 }
@@ -549,6 +559,12 @@ pub fn sld(
     ) -> Result<(LiteralGoalId, LiteralWithHistory), ResolutionError> {
         for (id, lit) in goal.iter().enumerate() {
             let literal = &lit.literal;
+
+            // A negated literal with variables should not be selected (for now).
+            if !literal.positive && !literal.args.iter().all(|arg| arg.is_constant()) {
+                continue;
+            }
+
             let select_builtin_res = builtin::select_builtin(literal);
             if select_builtin_res.0.is_match() {
                 return Ok((id, lit.clone()));
@@ -636,6 +652,7 @@ pub fn sld(
             literal: l.literal.negated(),
             ..l
         }];
+
         // Perform SLD resolution with this goal and check if it succeeds or not.
         let sld_res = inner(
             rules,
@@ -646,24 +663,30 @@ pub fn sld(
             grounded,
             store_full_tree,
         );
+
+        let rid = ClauseId::NegationCheck;
+        let mgu = HashMap::new();
+        let renaming = HashMap::new();
+
+        let mut success_resolvents = HashMap::new();
+        let mut fail_resolvents = HashMap::new();
         if sld_res.tree.is_success() {
-            // TODO: could store the proof of this literal to make it clearer
-            // why this negation check failed
+            if store_full_tree {
+                fail_resolvents.insert((lid, rid), (mgu, renaming, sld_res.tree));
+            }
+
             let err = ResolutionError::NegationProof(l.literal);
             errs.insert(err.clone());
             let tree = Tree {
                 goal: goal.to_owned(),
                 level,
-                success_resolvents: HashMap::new(),
-                fail_resolvents: HashMap::new(),
+                success_resolvents,
+                fail_resolvents,
                 error: Some(err),
             };
 
             return SLDResult { tree, errors: errs };
         } else {
-            let rid = ClauseId::NegationCheck;
-            let mgu = HashMap::new();
-            let renaming = HashMap::new();
             let resolvent = resolve(
                 lid,
                 rid.clone(),
@@ -684,8 +707,6 @@ pub fn sld(
                 store_full_tree,
             );
 
-            let mut success_resolvents = HashMap::new();
-            let mut fail_resolvents = HashMap::new();
             if tree.is_success() {
                 success_resolvents.insert((lid, rid), (mgu, renaming, tree));
             } else if store_full_tree {

@@ -1,0 +1,10 @@
+app(profile) :-
+    (
+        !(profile = "debug"),
+        from("alpine"),
+        run("echo hello-world")
+    ;
+        profile = "debug",
+        from("ubuntu"),
+        run("echo hello-world")
+    ).
