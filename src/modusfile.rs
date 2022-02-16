@@ -547,20 +547,24 @@ pub mod parser {
 
     /// Parses an operator based on a literal, failing if negation is encountered.
     fn operator(i: Span) -> IResult<Span, Operator> {
-        let (new_i, lit) = literal(modus_term, token_sep0)(i)?;
-
-        if lit.positive {
-            Ok((
-                new_i,
-                Operator {
-                    position: lit.position,
-                    predicate: lit.predicate,
-                    args: lit.args,
-                },
-            ))
-        } else {
-            fail(i)
-        }
+        map(
+            recognized_span(pair(
+                terminated(literal_identifier, token_sep0),
+                opt(delimited(
+                    terminated(tag("("), token_sep0),
+                    separated_list1(
+                        terminated(tag(","), token_sep0),
+                        terminated(modus_term, token_sep0),
+                    ),
+                    cut(terminated(tag(")"), token_sep0)),
+                )),
+            )),
+            |(spanned_pos, (name, args))| Operator {
+                position: Some(spanned_pos),
+                predicate: Predicate(name.fragment().to_string()),
+                args: args.unwrap_or(Vec::new()),
+            },
+        )(i)
     }
 
     fn expression_inner(i: Span) -> IResult<Span, Expression> {
