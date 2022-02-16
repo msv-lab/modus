@@ -309,6 +309,7 @@ pub fn build_dag_from_proofs(
                         // an image anyway, so just dfs as normal.
                     }
                 }
+                ClauseId::NegationCheck => {}
             }
 
             process_children(

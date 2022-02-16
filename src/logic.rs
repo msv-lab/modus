@@ -120,6 +120,13 @@ pub enum IRTerm {
 }
 
 impl IRTerm {
+    /// Returns `true` if the IRTerm is [`Constant`].
+    ///
+    /// [`Constant`]: IRTerm::Constant
+    pub fn is_constant(&self) -> bool {
+        matches!(self, Self::Constant(..))
+    }
+
     pub fn as_constant(&self) -> Option<&str> {
         match self {
             IRTerm::Constant(c) => Some(&c[..]),
@@ -246,6 +253,13 @@ impl Literal {
             }
         } else {
             self
+        }
+    }
+
+    pub fn negated(&self) -> Literal {
+        Literal {
+            positive: !self.positive,
+            ..self.clone()
         }
     }
 }

@@ -48,12 +48,13 @@ type GoalId = usize;
 type TreeLevel = usize;
 pub(crate) type Goal<T = IRTerm> = Vec<Literal<T>>;
 
-/// A clause is either a rule, or a query
+/// In this usage, a 'clause' represents some method of resolution.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum ClauseId {
     Rule(RuleId),
     Query,
     Builtin(Literal<IRTerm>),
+    NegationCheck,
 }
 
 /// A literal origin can be uniquely identified through its source clause and its index in the clause body
@@ -148,6 +149,7 @@ impl Tree {
                         ClauseId::Rule(rid) => rules[*rid].head.to_string(),
                         ClauseId::Query => "query".to_string(),
                         ClauseId::Builtin(lit) => lit.to_string(),
+                        ClauseId::NegationCheck => "Negation check".to_string(),
                     };
                     edges.push((curr_index, new_index, edge_label));
                 }
@@ -185,6 +187,7 @@ impl Tree {
                         .join(", "),
                     ClauseId::Query => unimplemented!(),
                     ClauseId::Builtin(lit) => lit.substitute(&v.0).to_string(),
+                    ClauseId::NegationCheck => todo!(),
                 };
                 let curr_attempt = format!(
                     "{} requires {}",
@@ -349,6 +352,7 @@ impl Proof {
                             }
                         }
                     },
+                    ClauseId::NegationCheck => todo!(),
                 }
             }
         }
@@ -399,6 +403,8 @@ pub enum ResolutionError {
     InsufficientRules(Literal),
     /// Contains the set of inconsistent signatures.
     InconsistentGroundnessSignature(Vec<Signature>),
+    /// Proof of a negated literal was found.
+    NegationProof(Literal),
 }
 
 impl fmt::Display for ResolutionError {
@@ -430,6 +436,7 @@ impl fmt::Display for ResolutionError {
                 "{} clause(s) have inconsistent signatures",
                 signatures.len()
             ),
+            ResolutionError::NegationProof(lit) => write!(f, "A proof was found for {lit}"),
         }
     }
 }
@@ -490,6 +497,11 @@ impl ResolutionError {
                 sigs.iter().map(|sig| sig.to_string()).collect(),
                 Severity::Error,
             ),
+            ResolutionError::NegationProof(lit) => (
+                get_position_labels(&[lit.clone()]),
+                get_notes(&[lit]),
+                Severity::Warning,
+            ),
         };
 
         Diagnostic::new(severity)
@@ -530,7 +542,8 @@ pub fn sld(
     maxdepth: TreeLevel,
     store_full_tree: bool,
 ) -> SLDResult {
-    /// select leftmost literal with compatible groundness
+    /// Select leftmost literal with compatible groundness.
+    /// Negated literals need to be fully grounded.
     fn select(
         goal: &GoalWithHistory,
         grounded: &HashMap<Signature, Vec<bool>>,
@@ -540,6 +553,13 @@ pub fn sld(
             let select_builtin_res = builtin::select_builtin(literal);
             if select_builtin_res.0.is_match() {
                 return Ok((id, lit.clone()));
+            }
+
+            // We only handle negated literals that are fully ground.
+            if !literal.positive && literal.args.iter().all(|arg| arg.is_constant()) {
+                return Ok((id, lit.clone()));
+            } else if !literal.positive {
+                continue;
             }
 
             // For any user-defined atom, we can get its groundness requirement
@@ -662,6 +682,79 @@ pub fn sld(
             let (lid, l) = selection_res.unwrap();
 
             let mut errs: HashSet<ResolutionError> = HashSet::new();
+
+            // handle negated literal by checking if there is a proof
+            if !l.literal.positive {
+                let singleton_goal = vec![LiteralWithHistory {
+                    literal: l.literal.negated(),
+                    ..l
+                }];
+                let sld_res = inner(
+                    rules,
+                    &singleton_goal,
+                    maxdepth - 1, // TODO
+                    0,
+                    grounded,
+                    store_full_tree,
+                );
+                if sld_res.tree.is_success() {
+                    // TODO: could store the proof of this literal to make it clearer
+                    // why this negation check failed
+                    let err = ResolutionError::NegationProof(l.literal);
+                    errs.insert(err.clone());
+                    let tree = Tree {
+                        goal: goal.to_owned(),
+                        level,
+                        success_resolvents: HashMap::new(),
+                        fail_resolvents: HashMap::new(),
+                        error: Some(err),
+                    };
+
+                    return SLDResult { tree, errors: errs };
+                } else {
+                    let rid = ClauseId::NegationCheck;
+                    let mgu = HashMap::new();
+                    let renaming = HashMap::new();
+                    let resolvent = resolve(
+                        lid,
+                        rid.clone(),
+                        goal,
+                        &mgu,
+                        &Clause {
+                            head: l.literal,
+                            body: Vec::new(),
+                        },
+                        level + 1,
+                    );
+                    let SLDResult { tree, errors } = inner(
+                        rules,
+                        &resolvent,
+                        maxdepth,
+                        level + 1,
+                        grounded,
+                        store_full_tree,
+                    );
+
+                    let mut success_resolvents = HashMap::new();
+                    let mut fail_resolvents = HashMap::new();
+                    if tree.is_success() {
+                        success_resolvents.insert((lid, rid), (mgu, renaming, tree));
+                    } else if store_full_tree {
+                        fail_resolvents.insert((lid, rid), (mgu, renaming, tree));
+                    }
+                    errs.extend(errors);
+
+                    let tree = Tree {
+                        goal: goal.to_owned(),
+                        level,
+                        success_resolvents,
+                        fail_resolvents,
+                        error: None,
+                    };
+
+                    return SLDResult { tree, errors: errs };
+                }
+            }
 
             let selected_builtin = builtin::select_builtin(&l.literal);
             let builtin_resolves = match selected_builtin {
@@ -914,6 +1007,7 @@ pub fn proofs(tree: &Tree, rules: &[Clause], goal: &Goal) -> HashMap<Goal, Proof
             ClauseId::Query => assert_eq!(children_length, path[0].resolvent.len()),
             ClauseId::Rule(rid) => assert_eq!(children_length, rules[rid].body.len()),
             ClauseId::Builtin(_) => assert_eq!(children_length, 0),
+            ClauseId::NegationCheck => assert_eq!(children_length, 0), // TODO: double check
         };
 
         let mut sublevels = Vec::<TreeLevel>::with_capacity(sublevels_map.len());
@@ -1059,6 +1153,21 @@ mod tests {
         assert!(contains_ignoring_position(
             &solutions,
             &vec!["a(\"d\")".parse::<logic::Literal>().unwrap()]
+        ));
+    }
+
+    #[test]
+    #[serial]
+    fn simple_negation_solving() {
+        let goal: Goal<logic::IRTerm> = vec!["a(\"c\")".parse().unwrap()];
+        let clauses: Vec<logic::Clause> = vec!["a(X) :- !b(X).".parse().unwrap()];
+        let tree = sld(&clauses, &goal, 10, true).tree;
+        let solutions = solutions(&tree);
+        assert_eq!(solutions.len(), 1);
+
+        assert!(contains_ignoring_position(
+            &solutions,
+            &vec!["a(\"c\")".parse::<logic::Literal>().unwrap()]
         ));
     }
 
