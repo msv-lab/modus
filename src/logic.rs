@@ -386,7 +386,7 @@ pub mod parser {
         combinator::{cut, map, opt, recognize},
         error::VerboseError,
         multi::{many0, many0_count, separated_list0, separated_list1},
-        sequence::{delimited, pair, separated_pair, terminated, tuple},
+        sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
         Offset, Slice,
     };
 
@@ -493,12 +493,17 @@ pub mod parser {
         FT: FnMut(Span) -> IResult<Span, T> + Clone,
     {
         map(
-            separated_pair(
+            pair(
                 literal(term.clone(), multispace0),
-                ws(tag(":-")),
-                separated_list0(ws(tag(",")), literal(term, multispace0)),
+                opt(preceded(
+                    ws(tag(":-")),
+                    separated_list0(ws(tag(",")), literal(term, multispace0)),
+                )),
             ),
-            |(head, body)| Clause { head, body },
+            |(head, body)| Clause {
+                head,
+                body: body.unwrap_or(Vec::new()),
+            },
         )
     }
 }

@@ -543,7 +543,6 @@ pub fn sld(
     store_full_tree: bool,
 ) -> SLDResult {
     /// Select leftmost literal with compatible groundness.
-    /// Negated literals need to be fully grounded.
     fn select(
         goal: &GoalWithHistory,
         grounded: &HashMap<Signature, Vec<bool>>,
@@ -553,13 +552,6 @@ pub fn sld(
             let select_builtin_res = builtin::select_builtin(literal);
             if select_builtin_res.0.is_match() {
                 return Ok((id, lit.clone()));
-            }
-
-            // We only handle negated literals that are fully ground.
-            if !literal.positive && literal.args.iter().all(|arg| arg.is_constant()) {
-                return Ok((id, lit.clone()));
-            } else if !literal.positive {
-                continue;
             }
 
             // For any user-defined atom, we can get its groundness requirement
@@ -628,6 +620,91 @@ pub fn sld(
         g.substitute(mgu)
     }
 
+    fn handle_negated_literal(
+        lid: LiteralGoalId,
+        l: LiteralWithHistory,
+        goal: &GoalWithHistory,
+        rules: &[Clause<IRTerm>],
+        maxdepth: TreeLevel,
+        level: TreeLevel,
+        grounded: &HashMap<Signature, Vec<bool>>,
+        store_full_tree: bool,
+    ) -> SLDResult {
+        let mut errs: HashSet<ResolutionError> = HashSet::new();
+
+        let singleton_goal = vec![LiteralWithHistory {
+            literal: l.literal.negated(),
+            ..l
+        }];
+        // Perform SLD resolution with this goal and check if it succeeds or not.
+        let sld_res = inner(
+            rules,
+            &singleton_goal,
+            // TODO: replace max depth reduction with stratification check
+            maxdepth - 1,
+            0,
+            grounded,
+            store_full_tree,
+        );
+        if sld_res.tree.is_success() {
+            // TODO: could store the proof of this literal to make it clearer
+            // why this negation check failed
+            let err = ResolutionError::NegationProof(l.literal);
+            errs.insert(err.clone());
+            let tree = Tree {
+                goal: goal.to_owned(),
+                level,
+                success_resolvents: HashMap::new(),
+                fail_resolvents: HashMap::new(),
+                error: Some(err),
+            };
+
+            return SLDResult { tree, errors: errs };
+        } else {
+            let rid = ClauseId::NegationCheck;
+            let mgu = HashMap::new();
+            let renaming = HashMap::new();
+            let resolvent = resolve(
+                lid,
+                rid.clone(),
+                goal,
+                &mgu,
+                &Clause {
+                    head: l.literal,
+                    body: Vec::new(),
+                },
+                level + 1,
+            );
+            let SLDResult { tree, errors } = inner(
+                rules,
+                &resolvent,
+                maxdepth,
+                level + 1,
+                grounded,
+                store_full_tree,
+            );
+
+            let mut success_resolvents = HashMap::new();
+            let mut fail_resolvents = HashMap::new();
+            if tree.is_success() {
+                success_resolvents.insert((lid, rid), (mgu, renaming, tree));
+            } else if store_full_tree {
+                fail_resolvents.insert((lid, rid), (mgu, renaming, tree));
+            }
+            errs.extend(errors);
+
+            let tree = Tree {
+                goal: goal.to_owned(),
+                level,
+                success_resolvents,
+                fail_resolvents,
+                error: None,
+            };
+
+            return SLDResult { tree, errors: errs };
+        }
+    }
+
     fn inner(
         rules: &[Clause<IRTerm>],
         goal: &GoalWithHistory,
@@ -681,80 +758,20 @@ pub fn sld(
             }
             let (lid, l) = selection_res.unwrap();
 
-            let mut errs: HashSet<ResolutionError> = HashSet::new();
-
-            // handle negated literal by checking if there is a proof
             if !l.literal.positive {
-                let singleton_goal = vec![LiteralWithHistory {
-                    literal: l.literal.negated(),
-                    ..l
-                }];
-                let sld_res = inner(
+                return handle_negated_literal(
+                    lid,
+                    l,
+                    goal,
                     rules,
-                    &singleton_goal,
-                    maxdepth - 1, // TODO
-                    0,
+                    maxdepth,
+                    level,
                     grounded,
                     store_full_tree,
                 );
-                if sld_res.tree.is_success() {
-                    // TODO: could store the proof of this literal to make it clearer
-                    // why this negation check failed
-                    let err = ResolutionError::NegationProof(l.literal);
-                    errs.insert(err.clone());
-                    let tree = Tree {
-                        goal: goal.to_owned(),
-                        level,
-                        success_resolvents: HashMap::new(),
-                        fail_resolvents: HashMap::new(),
-                        error: Some(err),
-                    };
-
-                    return SLDResult { tree, errors: errs };
-                } else {
-                    let rid = ClauseId::NegationCheck;
-                    let mgu = HashMap::new();
-                    let renaming = HashMap::new();
-                    let resolvent = resolve(
-                        lid,
-                        rid.clone(),
-                        goal,
-                        &mgu,
-                        &Clause {
-                            head: l.literal,
-                            body: Vec::new(),
-                        },
-                        level + 1,
-                    );
-                    let SLDResult { tree, errors } = inner(
-                        rules,
-                        &resolvent,
-                        maxdepth,
-                        level + 1,
-                        grounded,
-                        store_full_tree,
-                    );
-
-                    let mut success_resolvents = HashMap::new();
-                    let mut fail_resolvents = HashMap::new();
-                    if tree.is_success() {
-                        success_resolvents.insert((lid, rid), (mgu, renaming, tree));
-                    } else if store_full_tree {
-                        fail_resolvents.insert((lid, rid), (mgu, renaming, tree));
-                    }
-                    errs.extend(errors);
-
-                    let tree = Tree {
-                        goal: goal.to_owned(),
-                        level,
-                        success_resolvents,
-                        fail_resolvents,
-                        error: None,
-                    };
-
-                    return SLDResult { tree, errors: errs };
-                }
             }
+
+            let mut errs: HashSet<ResolutionError> = HashSet::new();
 
             let selected_builtin = builtin::select_builtin(&l.literal);
             let builtin_resolves = match selected_builtin {
@@ -1160,8 +1177,12 @@ mod tests {
     #[serial]
     fn simple_negation_solving() {
         let goal: Goal<logic::IRTerm> = vec!["a(\"c\")".parse().unwrap()];
-        let clauses: Vec<logic::Clause> = vec!["a(X) :- !b(X).".parse().unwrap()];
-        let tree = sld(&clauses, &goal, 10, true).tree;
+        let clauses: Vec<logic::Clause> = vec![
+            "a(X) :- !b(X).".parse().unwrap(),
+            "b(\"d\").".parse().unwrap(),
+        ];
+        let sld_res = sld(&clauses, &goal, 10, true);
+        let tree = sld_res.tree;
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 1);
 
@@ -1396,14 +1417,8 @@ mod tests {
         let goal: Goal<logic::IRTerm> = vec!["foo(X)".parse().unwrap()];
         let clauses: Vec<logic::Clause> = vec![
             "foo(X) :- bar(X).".parse().unwrap(),
-            logic::Clause {
-                head: "bar(\"test\")".parse().unwrap(),
-                body: vec![],
-            },
-            logic::Clause {
-                head: "foo(\"test\")".parse().unwrap(),
-                body: vec![],
-            },
+            "bar(\"test\").".parse().unwrap(),
+            "foo(\"test\").".parse().unwrap(),
         ];
         let tree = sld(&clauses, &goal, 15, true).tree;
         let sld_proofs = proofs(&tree, &clauses, &goal);
