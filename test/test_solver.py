@@ -85,3 +85,22 @@ class TestSolver(ModusTestCase):
         images = self.build(md, 'number_gt(version, "3.14"), foo(f"alpine:${version}")', should_succeed=True)
         self.assertEqual(len(images), 1)
         self.assertIn(Fact("foo", ("alpine:3.15",)), images)
+
+    def test_supports_negation(self):
+        md = dedent("""\
+            app(X) :-
+                (
+                    X = f"windows/${windows_variant}",
+                    from("jturolla/failing-container")
+                ;
+                    X != f"windows/${windows_variant}",
+                    from(X),
+                    run("echo hello-world")
+                ).
+        """)
+
+        self.build(md, 'app("windows/windowsservercore-ltsc2022")', should_succeed=False)
+
+        images = self.build(md, 'app("alpine:3.15")', should_succeed=True)
+        self.assertEqual(len(images), 1)
+        self.assertIn(Fact("app", ("alpine:3.15",)), images)
