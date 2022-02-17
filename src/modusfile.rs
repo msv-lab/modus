@@ -425,7 +425,7 @@ pub mod parser {
     use nom::combinator::{cut, fail, opt, recognize};
     use nom::error::context;
     use nom::multi::{many0_count, many1, separated_list1};
-    use nom::sequence::pair;
+    use nom::sequence::{pair, tuple};
     use nom::{
         branch::alt,
         bytes::complete::tag,
@@ -502,22 +502,21 @@ pub mod parser {
     }
 
     /// Parses `<term1> = <term2>` into a builtin call, `string_eq(term1, term2)`.
+    /// Supports the negated version with `!=`.
     fn unification_sugar(i: Span) -> IResult<Span, Literal> {
-        let (i, (spanned_pos, (t1, t2))) = recognized_span(separated_pair(
-            modus_term,
-            delimited(token_sep0, tag("="), token_sep0),
-            cut(modus_term),
-        ))(i)?;
-
-        Ok((
-            i,
-            Literal {
-                positive: true,
+        map(
+            recognized_span(tuple((
+                modus_term,
+                delimited(token_sep0, alt((tag("!="), tag("="))), token_sep0),
+                cut(modus_term),
+            ))),
+            |(spanned_pos, (t1, op, t2))| Literal {
+                positive: op.fragment().len() == 1,
                 position: Some(spanned_pos),
                 predicate: Predicate("string_eq".to_owned()),
                 args: vec![t1, t2],
             },
-        ))
+        )(i)
     }
 
     fn modus_literal(i: Span) -> IResult<Span, Expression> {
@@ -1098,9 +1097,20 @@ mod tests {
 
     #[test]
     fn modus_unification() {
-        let inp = "foo(X, Y) :- X = Y.";
+        let modus_clause: ModusClause = "foo(X, Y, A, B) :- X = Y, A != B.".parse().unwrap();
+        let expected_body = Expression::And(
+            None,
+            true,
+            Box::new(Expression::Literal("string_eq(X, Y)".parse().unwrap())),
+            Box::new(Expression::Literal("!string_eq(A, B)".parse().unwrap())),
+        );
+        assert!(expected_body.eq_ignoring_position(&modus_clause.body.unwrap()));
+    }
 
-        let expected_lit: Literal = "string_eq(X, Y)".parse().unwrap();
+    #[test]
+    fn modus_negated_unification() {
+        let inp = "foo(X, Y) :- X != Y.";
+        let expected_lit: Literal = "!string_eq(X, Y)".parse().unwrap();
         let actual: Expression = inp.parse().map(|r: ModusClause| r.body).unwrap().unwrap();
         assert!(Expression::Literal(expected_lit).eq_ignoring_position(&actual));
     }

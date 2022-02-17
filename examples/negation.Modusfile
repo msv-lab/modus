@@ -1,6 +1,6 @@
 app(profile) :-
     (
-        !(profile = "debug"),
+        profile != "debug",
         from("alpine"),
         run("echo hello-world")
     ;

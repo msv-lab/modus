@@ -564,7 +564,10 @@ pub fn sld(
         for (id, lit) in goal.iter().enumerate() {
             let literal = &lit.literal;
 
-            // A negated literal with variables should not be selected (for now).
+            // A negated literal with variables should never be selected (for now).
+            //
+            // Otherwise, something like !string_eq("constant", X) would be pointless, the
+            // user very likely means X to be bound through some other literal.
             if !literal.positive && !literal.args.iter().all(|arg| arg.is_constant()) {
                 continue;
             }
@@ -1479,5 +1482,27 @@ mod tests {
 
         let (_, _, sld_res) = tree_from_modusfile(mf, query, 20, true);
         assert!(sld_res.tree.is_success());
+    }
+
+    #[test]
+    #[serial]
+    fn negation_and_builtins() {
+        let goal: Goal<logic::IRTerm> = vec!["!is_alpine(\"notalpine3.15\")".parse().unwrap()];
+        let clauses: Vec<logic::Clause> = vec![
+            "is_alpine(variant) :- string_concat(\"alpine\", version, variant)."
+                .parse()
+                .unwrap(),
+        ];
+        let sld_res = sld(&clauses, &goal, 10, true);
+        let tree = sld_res.tree;
+        let solutions = solutions(&tree);
+        assert_eq!(solutions.len(), 1);
+
+        assert!(contains_ignoring_position(
+            &solutions,
+            &vec!["!is_alpine(\"notalpine3.15\")"
+                .parse::<logic::Literal>()
+                .unwrap()]
+        ));
     }
 }
