@@ -252,3 +252,19 @@ class TestMerge(ModusTestCase):
         """)
         img_b = self.build(md, "b")[Fact("b", ())]
         self.assertEqual(img_b.read_file("/tmp/file"), "2\n")
+
+    def test_copy_failure(self):
+        mf = """a :- from("alpine"), from("alpine")::copy("/aaa", "/aaa")::merge."""
+        self.build(mf, "a", should_succeed=False)
+
+    def test_copy_failure_2(self):
+        mf = """a :- from("alpine"), (run("true"), from("alpine")::copy("/aaa", "/aaa"), run("true"))::merge."""
+        self.build(mf, "a", should_succeed=False)
+
+    def test_copy_local_failure(self):
+        mf = """a :- from("alpine"), copy("aaa", "/aaa")::merge."""
+        self.build(mf, "a", should_succeed=False)
+
+    def test_copy_local_failure_2(self):
+        mf = """a :- from("alpine"), (run("true"), copy("aaa", "/aaa"), run("true"))::merge."""
+        self.build(mf, "a", should_succeed=False)

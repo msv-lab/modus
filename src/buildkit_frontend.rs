@@ -27,15 +27,14 @@ use std::{
 };
 
 use buildkit_frontend::{
-    oci::{Architecture, ImageConfig, ImageSpecification, OperatingSystem},
+    oci::{ImageConfig, ImageSpecification},
     run_frontend, Bridge, Frontend, FrontendOutput,
 };
 use buildkit_llb::prelude::*;
-use buildkit_llb::prelude::{fs::CopyOperation, source::LocalSource};
 
 use async_trait::async_trait;
 
-use imagegen::{BuildNode, BuildPlan, NodeId};
+use imagegen::{BuildNode, BuildPlan};
 
 use crate::imagegen::{MergeNode, MergeOperation};
 
@@ -367,6 +366,17 @@ async fn handle_build_plan(
                     mkdir_pf(path, script);
                     script.push(format!("echo cd {cd} && cd {cd}", cd = escape(path.into())));
                 }
+                fn cp_content(src: PathBuf, dst: &str, script: &mut Vec<String>) {
+                    let src_str = src.to_str().unwrap();
+                    let _s = src.join(".");
+                    let src_plus_dot = _s.to_str().unwrap();
+                    script.push(format!(
+                        "echo COPY -> {dst} && (if [ -d {src} ]; then cp -r {src_plus_dot} {dst}; else cp -r {src} {dst}; fi)",
+                        src=escape(src_str.into()),
+                        dst=escape(dst.into()),
+                        src_plus_dot=escape(src_plus_dot.into())
+                    ));
+                }
                 for op in operations {
                     match op {
                         MergeOperation::Run {
@@ -416,11 +426,7 @@ async fn handle_build_plan(
                             if let Some(par) = dst_path.parent() {
                                 mkdir_pf(par.to_str().unwrap(), &mut script);
                             }
-                            script.push(format!(
-                                "echo COPY '->' {dst} && cp -r {src} {dst}",
-                                dst = escape(dst_path.to_str().unwrap().into()),
-                                src = escape(mount_dir.to_str().unwrap().into())
-                            ));
+                            cp_content(mount_dir, dst_path.to_str().unwrap(), &mut script);
                             name.push(format!("...::copy({:?}, {:?})", src_path, dst_path));
                         }
                         MergeOperation::CopyFromLocal { src_path, dst_path } => {
@@ -442,11 +448,7 @@ async fn handle_build_plan(
                             if let Some(par) = dst_path.parent() {
                                 mkdir_pf(par.to_str().unwrap(), &mut script);
                             }
-                            script.push(format!(
-                                "echo COPY '->' {dst} && cp -r {src} {dst}",
-                                dst = escape(dst_path.to_str().unwrap().into()),
-                                src = escape(mount_dir.to_str().unwrap().into())
-                            ));
+                            cp_content(mount_dir, dst_path.to_str().unwrap(), &mut script);
                             name.push(format!("copy({:?}, {:?})", src_path, dst_path));
                         }
                     }
