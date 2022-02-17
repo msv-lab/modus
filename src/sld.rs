@@ -217,13 +217,6 @@ impl Tree {
 
             if t.goal.is_empty() {
                 builder.add_empty_child(format!("{}", "Success".green()));
-            } else if !t.goal.is_empty() && resolvent_pairs.is_empty() {
-                let err = t
-                    .error
-                    .as_ref()
-                    .expect("Failed path should store SLD error.");
-                let error_msg = err.to_string();
-                builder.add_empty_child(error_msg);
             }
         }
 

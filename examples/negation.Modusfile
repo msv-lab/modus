@@ -1,10 +1,11 @@
-app(profile) :-
+is_windows(variant) :- variant = f"windows/${suffix}".
+
+app(X) :-
     (
-        profile != "debug",
-        from("alpine"),
-        run("echo hello-world")
+        is_windows(X),
+        from("jturolla/failing-container")
     ;
-        profile = "debug",
-        from("ubuntu"),
+        !is_windows(X),
+        from(X),
         run("echo hello-world")
     ).

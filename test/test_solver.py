@@ -88,12 +88,14 @@ class TestSolver(ModusTestCase):
 
     def test_supports_negation(self):
         md = dedent("""\
+            is_windows(variant) :- variant = f"windows/${suffix}".
+
             app(X) :-
                 (
-                    X = f"windows/${windows_variant}",
+                    is_windows(X),
                     from("jturolla/failing-container")
                 ;
-                    X != f"windows/${windows_variant}",
+                    !is_windows(X),
                     from(X),
                     run("echo hello-world")
                 ).
