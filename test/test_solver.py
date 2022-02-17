@@ -99,8 +99,6 @@ class TestSolver(ModusTestCase):
                 ).
         """)
 
-        self.build(md, 'app("windows/windowsservercore-ltsc2022")', should_succeed=False)
-
         images = self.build(md, 'app("alpine:3.15")', should_succeed=True)
         self.assertEqual(len(images), 1)
         self.assertIn(Fact("app", ("alpine:3.15",)), images)
