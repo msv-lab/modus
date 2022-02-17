@@ -173,7 +173,101 @@ class TestMerge(ModusTestCase):
         img = imgs[Fact("b", ())]
         self.assertEqual(img.read_file("/tmp/bbb/ccc"), "aaa\n")
         self.assertEqual(img.read_file("/tmp/ddd/eee"), "content\n")
-        self.assertEqual(img.read_file("/tmp/ddd/dir/file"), "content\n")
+        self.assertEqual(img.read_file("/tmp/ddd/file"), "content\n")
+
+    def test_copy_dir_content(self):
+        mf = dedent("""\
+            a :-
+                from("alpine"),
+                run("mkdir /tmp/dir"),
+                run("echo content > /tmp/dir/file").
+            b :-
+                from("alpine"),
+                (
+                    a::copy("/tmp/dir", "/tmp")
+                )::merge.
+        """)
+        img = self.build(mf, "b")[Fact("b", ())]
+        self.assertEqual(img.read_file("/tmp/file"), "content\n")
+
+    def test_copy_dir_content_from_local(self):
+        self.init_files()
+        mf = dedent("""\
+            a :-
+                from("alpine"),
+                (
+                    copy("dir", "/tmp")
+                )::merge.
+        """)
+        img = self.build(mf, "a")[Fact("a", ())]
+        self.assertEqual(img.read_file("/tmp/file"), "content\n")
+
+    def test_copy_empty_dir(self):
+        mf = dedent("""\
+            a :- from("alpine"), run("mkdir /tmp/dir").
+            b :-
+                from("alpine"),
+                (
+                    a::copy("/tmp/dir", "/tmp")
+                )::merge,
+                run("ls /tmp > /filelist").
+        """)
+        img = self.build(mf, "b")[Fact("b", ())]
+        self.assertEqual(img.read_file("/filelist").strip(), "")
+
+    def test_copy_hidden_files(self):
+        mf = dedent("""\
+            a :- from("alpine"), run("mkdir /tmp/dir"), run("echo content > /tmp/dir/.hidden").
+            b :-
+                from("alpine"),
+                (
+                    a::copy("/tmp/dir", "/tmp")
+                )::merge.
+        """)
+        img = self.build(mf, "b")[Fact("b", ())]
+        self.assertEqual(img.read_file("/tmp/.hidden"), "content\n")
+
+    def test_copy_overwrite(self):
+        md = dedent("""\
+            a(X) :- from("alpine"), run(f"echo ${X} > /tmp/file").
+            b :-
+                from("alpine")::set_workdir("/tmp"),
+                (
+                    a("1")::copy("/tmp/file", "file"),
+                    a("2")::copy("/tmp/file", "file")
+                )::merge.
+        """)
+        img_b = self.build(md, "b")[Fact("b", ())]
+        self.assertEqual(img_b.read_file("/tmp/file"), "2\n")
+
+    def test_copy_overwrite_dir_content(self):
+        md = dedent("""\
+            a(X) :- from("alpine"), run(f"echo ${X} > /tmp/file").
+            b :-
+                from("alpine")::set_workdir("/tmp"),
+                (
+                    a("1")::copy("/tmp", "."),
+                    a("2")::copy("/tmp", ".")
+                ).
+        """)
+        img_b = self.build(md, "b")[Fact("b", ())]
+        self.assertEqual(img_b.read_file("/tmp/file"), "2\n")
+
+    def test_copy_failure(self):
+        mf = """a :- from("alpine"), from("alpine")::copy("/aaa", "/aaa")::merge."""
+        self.build(mf, "a", should_succeed=False)
+
+    def test_copy_failure_2(self):
+        mf = """a :- from("alpine"), (run("true"), from("alpine")::copy("/aaa", "/aaa"), run("true"))::merge."""
+        self.build(mf, "a", should_succeed=False)
+
+    def test_copy_local_failure(self):
+        mf = """a :- from("alpine"), copy("aaa", "/aaa")::merge."""
+        self.build(mf, "a", should_succeed=False)
+
+    def test_copy_local_failure_2(self):
+        mf = """a :- from("alpine"), (run("true"), copy("aaa", "/aaa"), run("true"))::merge."""
+        self.build(mf, "a", should_succeed=False)
 
     def test_merge_example(self):
         mf = dedent("""\
