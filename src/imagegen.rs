@@ -711,15 +711,10 @@ pub fn plan_from_modusfile(
                     "Operators in queries are currently unsupported.",
                 )])
             }
-            modusfile::Expression::And(_, true, e1, e2)
-            | modusfile::Expression::Or(_, true, e1, e2) => {
+            // There shouldn't be any issue with negation in queries.
+            modusfile::Expression::And(_, _, e1, e2) | modusfile::Expression::Or(_, _, e1, e2) => {
                 validate_query_expression(e1)?;
                 validate_query_expression(e2)
-            }
-            modusfile::Expression::And(_, false, ..) | modusfile::Expression::Or(_, false, ..) => {
-                Err(vec![Diagnostic::error().with_message(
-                    "Negation in queries is currently unsupported.", // TODO: check negation in queries
-                )])
             }
         }
     }
