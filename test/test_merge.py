@@ -173,7 +173,7 @@ class TestMerge(ModusTestCase):
         img = imgs[Fact("b", ())]
         self.assertEqual(img.read_file("/tmp/bbb/ccc"), "aaa\n")
         self.assertEqual(img.read_file("/tmp/ddd/eee"), "content\n")
-        self.assertEqual(img.read_file("/tmp/ddd/dir/file"), "content\n")
+        self.assertEqual(img.read_file("/tmp/ddd/file"), "content\n")
 
     def test_copy_dir_content(self):
         mf = dedent("""\
