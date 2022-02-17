@@ -54,7 +54,10 @@ pub enum ClauseId {
     Rule(RuleId),
     Query,
     Builtin(Literal<IRTerm>),
-    NegationCheck,
+
+    /// Stores the literal which we attempted to prove.
+    /// So it should be a positive literal.
+    NegationCheck(Literal<IRTerm>),
 }
 
 /// A literal origin can be uniquely identified through its source clause and its index in the clause body
@@ -151,7 +154,7 @@ impl Tree {
                         ClauseId::Rule(rid) => rules[*rid].head.to_string(),
                         ClauseId::Query => "query".to_string(),
                         ClauseId::Builtin(lit) => lit.to_string(),
-                        ClauseId::NegationCheck => "Negation check".to_string(),
+                        ClauseId::NegationCheck(lit) => format!("Check {lit}?"),
                     };
                     edges.push((curr_index, new_index, edge_label));
                 }
@@ -168,7 +171,6 @@ impl Tree {
     /// Returns a string explaining the SLD tree, using indentation, etc.
     pub fn explain(&self, rules: &[Clause]) -> StringItem {
         fn dfs(t: &Tree, rules: &[Clause], builder: &mut TreeBuilder) {
-
             let mut resolvent_pairs = t.resolvents().into_iter().collect::<Vec<_>>();
             resolvent_pairs.sort_by_key(|(k, _)| k.0);
 
@@ -190,8 +192,8 @@ impl Tree {
                         .join(", "),
                     ClauseId::Query => unimplemented!(),
                     ClauseId::Builtin(lit) => lit.substitute(&v.0).to_string(),
-                    ClauseId::NegationCheck => {
-                        format!("{} to have no proof", t.goal[*goal_id].literal.negated())
+                    ClauseId::NegationCheck(lit) => {
+                        format!("{} to have no proof", lit)
                     }
                 };
                 let curr_attempt = format!(
@@ -362,7 +364,7 @@ impl Proof {
                             }
                         }
                     },
-                    ClauseId::NegationCheck => todo!(),
+                    ClauseId::NegationCheck(_) => {} // negation checks are omitted from the proof tree
                 }
             }
         }
@@ -446,7 +448,9 @@ impl fmt::Display for ResolutionError {
                 "{} clause(s) have inconsistent signatures",
                 signatures.len()
             ),
-            ResolutionError::NegationProof(lit) => write!(f, "A proof was found for {}", lit.negated()),
+            ResolutionError::NegationProof(lit) => {
+                write!(f, "A proof was found for {}", lit.negated())
+            }
         }
     }
 }
@@ -664,7 +668,7 @@ pub fn sld(
             store_full_tree,
         );
 
-        let rid = ClauseId::NegationCheck;
+        let rid = ClauseId::NegationCheck(l.literal.negated());
         let mgu = HashMap::new();
         let renaming = HashMap::new();
 
@@ -1045,7 +1049,9 @@ pub fn proofs(tree: &Tree, rules: &[Clause], goal: &Goal) -> HashMap<Goal, Proof
             ClauseId::Query => assert_eq!(children_length, path[0].resolvent.len()),
             ClauseId::Rule(rid) => assert_eq!(children_length, rules[rid].body.len()),
             ClauseId::Builtin(_) => assert_eq!(children_length, 0),
-            ClauseId::NegationCheck => assert_eq!(children_length, 0), // TODO: double check
+            // There shouldn't be a subtree here since the tree is currently only stored
+            // if the negation check failed (i.e. we found a proof).
+            ClauseId::NegationCheck(_) => assert_eq!(children_length, 0),
         };
 
         let mut sublevels = Vec::<TreeLevel>::with_capacity(sublevels_map.len());
