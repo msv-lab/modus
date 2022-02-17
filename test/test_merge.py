@@ -174,3 +174,31 @@ class TestMerge(ModusTestCase):
         self.assertEqual(img.read_file("/tmp/bbb/ccc"), "aaa\n")
         self.assertEqual(img.read_file("/tmp/ddd/eee"), "content\n")
         self.assertEqual(img.read_file("/tmp/ddd/dir/file"), "content\n")
+
+    def test_merge_example(self):
+        mf = dedent("""\
+            image("merge") :-
+                from("alpine")::set_workdir("/tmp"),
+                inner::merge.
+
+            inner :-
+                run("dd if=/dev/urandom of=file bs=1M count=200"),
+                run("sha1sum file > file.sha1"),
+                run("rm file"),
+                other_image::copy("file", "file2"),
+                run("sha1sum file2 > file2.sha1"),
+                run("rm file2").
+
+            other_image :-
+                from("debian")::set_workdir("/tmp"),
+                run("dd if=/dev/urandom of=file bs=1M count=200").
+
+            image("no merge") :-
+                from("alpine")::set_workdir("/tmp"),
+                inner.
+        """)
+        imgs = self.build(mf, "image(X)")
+        merge_img = imgs[Fact("image", ("merge",))]
+        no_merge_img = imgs[Fact("image", ("no merge",))]
+        self.assertNotEqual(merge_img.read_file("/tmp/file.sha1"), no_merge_img.read_file("/tmp/file.sha1"))
+        self.assertEqual(merge_img.read_file("/tmp/file2.sha1"), no_merge_img.read_file("/tmp/file2.sha1"))
