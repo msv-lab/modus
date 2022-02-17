@@ -371,7 +371,7 @@ async fn handle_build_plan(
                     let _s = src.join(".");
                     let src_plus_dot = _s.to_str().unwrap();
                     script.push(format!(
-                        "echo COPY -> {dst} && (if [ -d {src} ]; then cp -r {src_plus_dot} {dst}; else cp -r {src} {dst}; fi)",
+                        "echo COPY '->' {dst} && (if [ -d {src} ]; then cp -r {src_plus_dot} {dst}; else cp -r {src} {dst}; fi)",
                         src=escape(src_str.into()),
                         dst=escape(dst.into()),
                         src_plus_dot=escape(src_plus_dot.into())
