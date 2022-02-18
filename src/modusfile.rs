@@ -19,12 +19,11 @@ use nom::character::complete::line_ending;
 use nom::character::complete::not_line_ending;
 use nom::error::convert_error;
 use nom::error::VerboseError;
-use rand::Rng;
+
 use std::collections::HashSet;
 use std::fmt;
 use std::str;
 
-use crate::dockerfile;
 use crate::logic;
 use crate::logic::parser::Span;
 use crate::logic::Predicate;
@@ -426,7 +425,7 @@ pub mod parser {
 
     use nom::bytes::complete::{escaped, is_a};
     use nom::character::complete::{multispace0, none_of, one_of};
-    use nom::combinator::{cut, fail, opt, recognize};
+    use nom::combinator::{cut, opt, recognize};
     use nom::error::context;
     use nom::multi::{many0_count, many1, separated_list1};
     use nom::sequence::{pair, tuple};
@@ -813,6 +812,7 @@ pub mod parser {
 
 #[cfg(test)]
 mod tests {
+    use rand::Rng;
     use serial_test::serial;
 
     use super::*;

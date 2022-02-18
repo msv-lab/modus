@@ -661,8 +661,8 @@ pub fn sld(
         let sld_res = inner(
             rules,
             &singleton_goal,
-            // TODO: replace max depth reduction with stratification check
-            maxdepth - 1,
+            // The stratifiability check should make it safe to use the same maxdepth.
+            maxdepth,
             0,
             grounded,
             store_full_tree,
@@ -1517,10 +1517,7 @@ mod tests {
         let solutions = solutions(&tree);
         assert_eq!(solutions.len(), 1);
 
-        assert!(contains_ignoring_position(
-            &solutions,
-            &goal
-        ));
+        assert!(contains_ignoring_position(&solutions, &goal));
     }
 
     #[test]
@@ -1531,7 +1528,10 @@ mod tests {
         let sld_res = sld(&clauses, &goal, 10, true);
 
         assert_eq!(sld_res.errors.len(), 1);
-        let is_match = matches!(sld_res.errors.iter().next(), Some(ResolutionError::UnknownPredicate(_)));
+        let is_match = matches!(
+            sld_res.errors.iter().next(),
+            Some(ResolutionError::UnknownPredicate(_))
+        );
         assert!(is_match);
     }
 }

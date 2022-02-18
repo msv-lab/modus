@@ -130,3 +130,11 @@ class TestSolver(ModusTestCase):
         images = self.build(md, '!is_windows(X, _), my_app(X)', should_succeed=True)
         self.assertEqual(len(images), 1)
         self.assertIn(Fact("my_app", ("alpine:3.15",)), images)
+
+    def test_enforces_stratification(self):
+        md = dedent("""\
+            foo(X) :- bar(X).
+            bar(X) :- !foo(X).
+        """)
+
+        images = self.build(md, 'foo(X)', should_succeed=False)
