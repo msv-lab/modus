@@ -48,7 +48,7 @@ use std::{
 
 use spawn_wait::{ProcessSet, SignalHandler};
 
-use crate::imagegen::{BuildNode, BuildPlan, Output};
+use modus_corelib::imagegen::{BuildNode, BuildPlan, Output};
 
 use colored::Colorize;
 use rand::{

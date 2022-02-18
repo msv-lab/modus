@@ -15,24 +15,8 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-mod analysis;
 mod buildkit;
-mod builtin;
-mod dockerfile;
-mod imagegen;
-mod logic;
-mod modusfile;
 mod reporting;
-mod sld;
-mod translate;
-mod transpiler;
-mod unification;
-mod wellformed;
-
-extern crate lazy_static;
-
-#[macro_use]
-extern crate fp_core;
 
 use clap::{crate_version, App, Arg};
 use codespan_reporting::{
@@ -43,13 +27,14 @@ use codespan_reporting::{
     },
 };
 use colored::Colorize;
+use modus_corelib::sld::tree_from_modusfile;
+use modus_corelib::transpiler::render_tree;
+use modus_corelib::*;
 use ptree::write_tree;
-use sld::tree_from_modusfile;
-use std::{convert::TryInto, ffi::OsStr, fs, path::Path};
+use std::{ffi::OsStr, fs, path::Path};
 use std::{io::Write, path::PathBuf};
-use transpiler::render_tree;
 
-use modusfile::Modusfile;
+use modus_corelib::modusfile::Modusfile;
 
 use crate::buildkit::{BuildOptions, DockerBuildOptions};
 

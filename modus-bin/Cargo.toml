@@ -1,0 +1,37 @@
+[package]
+name = "modus-bin"
+version = "0.1.0"
+authors = ["Sergey Mechtaev <mechtaev@gmail.com>"]
+edition = "2018"
+default-run = "modus"
+
+[[bin]]
+name = "modus"
+path = "src/main.rs"
+
+[[bin]]
+name = "buildkit-frontend"
+path = "src/buildkit_frontend.rs"
+
+[dependencies]
+modus-corelib = { path = "../corelib" }
+
+clap = "2.33.3"
+colored = "2"
+dot = "0.1.4" # graphviz library
+thiserror = "1.0"
+ptree = { version = "0.4", default-features = false, features = ["petgraph", "ansi", "value"] } # pretty-print trees
+petgraph = "0.6.0"
+codespan-reporting = "0.11.1"
+
+# For buildkit
+buildkit-frontend = "0.3.0"
+buildkit-llb = "0.2.0"
+tokio = { version = "^0.2", features = ["macros", "rt-core"] }
+async-trait = "0.1.51"
+failure = "^0.1"
+serde = "^1.0"
+serde_json = "^1.0"
+rand = "0.8"
+shell-escape = "0.1.5"
+spawn-wait = "0.2"
