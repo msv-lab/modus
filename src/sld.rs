@@ -40,7 +40,7 @@ use logic::{Clause, IRTerm, Literal};
 use ptree::{item::StringItem, print_tree, TreeBuilder};
 
 pub trait Auxiliary: Rename<Self> + Sized {
-    fn aux() -> Self;
+    fn aux(anonymous: bool) -> Self;
 }
 
 type RuleId = usize;
@@ -557,11 +557,18 @@ pub fn sld(
         for (id, lit) in goal.iter().enumerate() {
             let literal = &lit.literal;
 
-            // A negated literal with variables should never be selected (for now).
-            //
+            // A negated literal must have only constants or anonymous variables (which represent
+            // variables that will not equal any other).
             // Otherwise, something like !string_eq("constant", X) would be pointless, the
             // user very likely means X to be bound through some other literal.
-            if !literal.positive && !literal.args.iter().all(|arg| arg.is_constant()) {
+            // An alternative approach would be to check other variables in the goal.
+            // FIXME: this might obscure unknown predicate errors
+            if !literal.positive
+                && !literal
+                    .args
+                    .iter()
+                    .all(|arg| arg.is_constant() || arg.is_underlying_anonymous_variable())
+            {
                 continue;
             }
 

@@ -25,7 +25,7 @@ use crate::{
         parser::{modus_var, outside_format_expansion, process_raw_string},
         Expression, ModusClause, ModusTerm,
     },
-    sld::Auxiliary,
+    sld::{self, Auxiliary},
 };
 
 /// Takes the content of a format string.
@@ -37,7 +37,7 @@ fn convert_format_string(
 ) -> (Vec<logic::Literal>, IRTerm) {
     let concat_predicate = "string_concat";
     let mut curr_string = format_string_content;
-    let mut prev_variable: IRTerm = Auxiliary::aux();
+    let mut prev_variable: IRTerm = Auxiliary::aux(false);
     let mut new_literals = vec![logic::Literal {
         positive: true,
         // This initial literal is a no-op that makes the code simpler.
@@ -66,7 +66,7 @@ fn convert_format_string(
         let span_length = constant_str.len();
         if span_length > 0 {
             let constant_string = process_raw_string(constant_str.fragment()).replace("\\$", "$");
-            let new_var: IRTerm = Auxiliary::aux();
+            let new_var: IRTerm = Auxiliary::aux(false);
             let new_literal = logic::Literal {
                 positive: true,
                 position: Some(SpannedPosition {
@@ -88,7 +88,7 @@ fn convert_format_string(
         // this might fail, e.g. if we are at the end of the string
         let variable_res = delimited(tag("${"), modus_var, tag("}"))(i);
         if let Ok((rest, variable)) = variable_res {
-            let new_var: IRTerm = Auxiliary::aux();
+            let new_var: IRTerm = Auxiliary::aux(false);
             let span_length = 2 + variable.fragment().len() + 1; // the variable string surrounded by ${...}
             let new_literal = logic::Literal {
                 positive: true,
@@ -137,6 +137,7 @@ fn translate_term(t: &ModusTerm) -> (IRTerm, Vec<logic::Literal>) {
             (new_var, new_literals)
         }
         ModusTerm::UserVariable(v) => (IRTerm::UserVariable(v.to_owned()), Vec::new()),
+        ModusTerm::AnonymousVariable => (sld::Auxiliary::aux(true), Vec::new()),
     }
 }
 
@@ -496,5 +497,27 @@ mod tests {
             .iter()
             .zip(actual)
             .all(|(a, b)| a.eq_ignoring_position(&b)));
+    }
+
+    #[test]
+    #[serial]
+    fn translates_anonymous_variable() {
+        setup();
+
+        let modus_clause: ModusClause = "foo(\"bar\", _).".parse().unwrap();
+        let expected: Vec<logic::Clause> = vec![logic::Clause {
+            head: logic::Literal {
+                positive: true,
+                position: None,
+                predicate: Predicate("foo".into()),
+                args: vec![IRTerm::Constant("bar".to_string()), IRTerm::AnonymousVariable(0)],
+            },
+            body: vec![],
+        }];
+        let actual: Vec<logic::Clause> = (&modus_clause).into();
+
+        for (a, b) in expected.iter().zip(actual) {
+            assert!(a.eq_ignoring_position(&b), "{} {}", a, b);
+        }
     }
 }

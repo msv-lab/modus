@@ -117,3 +117,16 @@ class TestSolver(ModusTestCase):
         images = self.build(md, '!is_windows(X), my_app(X)', should_succeed=True)
         self.assertEqual(len(images), 1)
         self.assertIn(Fact("my_app", ("alpine:3.15",)), images)
+
+    def test_supports_negation_and_anonymous_in_queries(self):
+        md = dedent("""\
+            is_windows(variant, suffix) :- variant = f"windows/${suffix}".
+            my_app(X) :- base_image(X), from(X), run("echo hello-world").
+
+            base_image("windows/windowsservercore-ltsc2022").
+            base_image("alpine:3.15").
+        """)
+
+        images = self.build(md, '!is_windows(X, _), my_app(X)', should_succeed=True)
+        self.assertEqual(len(images), 1)
+        self.assertIn(Fact("my_app", ("alpine:3.15",)), images)

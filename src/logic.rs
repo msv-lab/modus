@@ -44,6 +44,7 @@ impl fmt::Display for IRTerm {
             // there may be aux variables after translating to IR
             IRTerm::AuxiliaryVariable(i) => write!(f, "__AUX_{}", i),
             IRTerm::RenamedVariable(i, t) => write!(f, "{}_{}", t, i),
+            IRTerm::AnonymousVariable(_) => write!(f, "_"),
         }
     }
 }
@@ -63,9 +64,13 @@ impl Rename<IRTerm> for IRTerm {
 }
 
 impl sld::Auxiliary for IRTerm {
-    fn aux() -> IRTerm {
+    fn aux(anonymous: bool) -> IRTerm {
         let index = AVAILABLE_VARIABLE_INDEX.fetch_add(1, Ordering::SeqCst);
-        IRTerm::AuxiliaryVariable(index)
+        if anonymous {
+            IRTerm::AnonymousVariable(index)
+        } else {
+            IRTerm::AuxiliaryVariable(index)
+        }
     }
 }
 
@@ -115,8 +120,15 @@ impl From<String> for Predicate {
 pub enum IRTerm {
     Constant(String),
     UserVariable(String),
+
+    /// Primarily used to establish f-string constraints.
     AuxiliaryVariable(u32),
+
     RenamedVariable(u32, Box<IRTerm>),
+
+    /// It should be safe to assume that a given AnonymousVariable(i) will not appear
+    /// again in the AST.
+    AnonymousVariable(u32),
 }
 
 impl IRTerm {
@@ -125,6 +137,18 @@ impl IRTerm {
     /// [`Constant`]: IRTerm::Constant
     pub fn is_constant(&self) -> bool {
         matches!(self, Self::Constant(..))
+    }
+
+    /// Returns `true` if the IRTerm is [`AnonymousVariable`] or it was
+    /// renamed from an [`AnonymousVariable`].
+    ///
+    /// [`AnonymousVariable`]: IRTerm::AnonymousVariable
+    pub fn is_underlying_anonymous_variable(&self) -> bool {
+        match self {
+            Self::AnonymousVariable(_) => true,
+            Self::RenamedVariable(_, t) => t.is_underlying_anonymous_variable(),
+            _ => false,
+        }
     }
 
     pub fn as_constant(&self) -> Option<&str> {
@@ -381,7 +405,7 @@ pub mod parser {
 
     use nom::{
         branch::alt,
-        bytes::complete::{tag, take_until},
+        bytes::complete::{is_a, tag, take_until},
         character::complete::{alpha1, alphanumeric1, multispace0},
         combinator::{cut, map, opt, recognize},
         error::VerboseError,
@@ -434,6 +458,7 @@ pub mod parser {
     pub fn term(i: Span) -> IResult<Span, IRTerm> {
         alt((
             map(constant, |s| IRTerm::Constant(s.fragment().to_string())),
+            map(is_a("_"), |_| sld::Auxiliary::aux(true)),
             map(variable, |s| IRTerm::UserVariable(s.fragment().to_string())),
         ))(i)
     }

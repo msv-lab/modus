@@ -29,6 +29,7 @@ use crate::logic;
 use crate::logic::parser::Span;
 use crate::logic::Predicate;
 use crate::logic::SpannedPosition;
+use crate::sld;
 
 /// Represents expressions that could be found in the body of a ModusClause.
 /// Each enum variant will have some notion of span and whether it's negated.
@@ -173,6 +174,7 @@ pub enum ModusTerm {
         format_string_literal: String,
     },
     UserVariable(String),
+    AnonymousVariable,
 }
 
 impl ModusTerm {
@@ -193,6 +195,7 @@ impl fmt::Display for ModusTerm {
                 position: _,
                 format_string_literal,
             } => write!(f, "\"{}\"", format_string_literal),
+            ModusTerm::AnonymousVariable => write!(f, "_"),
         }
     }
 }
@@ -208,6 +211,7 @@ impl From<ModusTerm> for logic::IRTerm {
                 format_string_literal: _,
             } => panic!("Cannot convert a format string to an IRTerm."),
             ModusTerm::UserVariable(v) => logic::IRTerm::UserVariable(v),
+            ModusTerm::AnonymousVariable => sld::Auxiliary::aux(true),
         }
     }
 }
@@ -420,7 +424,7 @@ pub mod parser {
 
     use super::*;
 
-    use nom::bytes::complete::escaped;
+    use nom::bytes::complete::{escaped, is_a};
     use nom::character::complete::{multispace0, none_of, one_of};
     use nom::combinator::{cut, fail, opt, recognize};
     use nom::error::context;
@@ -785,6 +789,7 @@ pub mod parser {
                     format_string_literal,
                 }
             }),
+            map(is_a("_"), |_| ModusTerm::AnonymousVariable),
             map(modus_var, |s| {
                 ModusTerm::UserVariable(s.fragment().to_string())
             }),
@@ -1064,6 +1069,21 @@ mod tests {
             r#"Testing \
                        multiline."#
         );
+    }
+
+    #[test]
+    fn anonymous_variables() {
+        let expected = Literal {
+            positive: true,
+            position: None,
+            predicate: Predicate("l".into()),
+            args: vec![
+                ModusTerm::Constant("foo".to_string()),
+                ModusTerm::AnonymousVariable,
+            ],
+        };
+        let actual: Literal = "l(\"foo\", _)".parse().unwrap();
+        assert!(expected.eq_ignoring_position(&actual));
     }
 
     #[test]

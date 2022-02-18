@@ -1,11 +1,11 @@
-is_windows(variant) :- variant = f"windows/${suffix}".
+is_windows(variant, suffix) :- variant = f"windows/${suffix}".
 
 app(X) :-
     (
-        is_windows(X),
+        is_windows(X, _),
         from("jturolla/failing-container")
     ;
-        !is_windows(X),
+        !is_windows(X, _),
         from(X),
         run("echo hello-world")
     ).
