@@ -562,18 +562,14 @@ pub fn sld(
             // Otherwise, something like !string_eq("constant", X) would be pointless, the
             // user very likely means X to be bound through some other literal.
             // An alternative approach would be to check other variables in the goal.
-            // FIXME: this might obscure unknown predicate errors
-            if !literal.positive
-                && !literal
+            let positive_or_grounded_negation = literal.positive
+                || literal
                     .args
                     .iter()
-                    .all(|arg| arg.is_constant() || arg.is_underlying_anonymous_variable())
-            {
-                continue;
-            }
+                    .all(|arg| arg.is_constant() || arg.is_underlying_anonymous_variable());
 
             let select_builtin_res = builtin::select_builtin(literal);
-            if select_builtin_res.0.is_match() {
+            if select_builtin_res.0.is_match() && positive_or_grounded_negation {
                 return Ok((id, lit.clone()));
             }
 
@@ -584,11 +580,12 @@ pub fn sld(
             let lit_grounded = grounded.get(&literal.signature());
             if let Some(lit_grounded) = lit_grounded {
                 debug_assert_eq!(lit_grounded.len(), literal.args.len());
-                if literal
-                    .args
-                    .iter()
-                    .zip(lit_grounded.iter())
-                    .all(|pair| matches!(pair, (_, true) | (IRTerm::Constant(_), false)))
+                if positive_or_grounded_negation
+                    && literal
+                        .args
+                        .iter()
+                        .zip(lit_grounded.iter())
+                        .all(|pair| matches!(pair, (_, true) | (IRTerm::Constant(_), false)))
                 {
                     return Ok((id, lit.clone()));
                 } else {
@@ -1504,5 +1501,37 @@ mod tests {
                 .parse::<logic::Literal>()
                 .unwrap()]
         ));
+    }
+
+    #[test]
+    #[serial]
+    fn negation_and_anonymous_variable() {
+        let goal: Goal<logic::IRTerm> = vec!["!is_alpine(\"notalpine3.15\", _)".parse().unwrap()];
+        let clauses: Vec<logic::Clause> = vec![
+            "is_alpine(variant, version) :- string_concat(\"alpine\", version, variant)."
+                .parse()
+                .unwrap(),
+        ];
+        let sld_res = sld(&clauses, &goal, 10, true);
+        let tree = sld_res.tree;
+        let solutions = solutions(&tree);
+        assert_eq!(solutions.len(), 1);
+
+        assert!(contains_ignoring_position(
+            &solutions,
+            &goal
+        ));
+    }
+
+    #[test]
+    #[serial]
+    fn negation_errors_when_unknown() {
+        let goal: Goal<logic::IRTerm> = vec!["!is_alpine(\"notalpine3.15\", _)".parse().unwrap()];
+        let clauses: Vec<logic::Clause> = vec![];
+        let sld_res = sld(&clauses, &goal, 10, true);
+
+        assert_eq!(sld_res.errors.len(), 1);
+        let is_match = matches!(sld_res.errors.iter().next(), Some(ResolutionError::UnknownPredicate(_)));
+        assert!(is_match);
     }
 }

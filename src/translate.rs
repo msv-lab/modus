@@ -510,7 +510,10 @@ mod tests {
                 positive: true,
                 position: None,
                 predicate: Predicate("foo".into()),
-                args: vec![IRTerm::Constant("bar".to_string()), IRTerm::AnonymousVariable(0)],
+                args: vec![
+                    IRTerm::Constant("bar".to_string()),
+                    IRTerm::AnonymousVariable(0),
+                ],
             },
             body: vec![],
         }];
