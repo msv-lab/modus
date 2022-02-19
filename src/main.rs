@@ -199,12 +199,25 @@ fn main() {
             App::new("proof")
                 .arg(
                     Arg::with_name("FILE")
-                        .required(true)
-                        .help("Sets the input Modusfile")
-                        .index(1),
+                        .required(false)
+                        .long_help("Specifies the input Modusfile\n\
+                                    The default is to look for a Modusfile in the context directory.")
+                        .help("Specify the input Modusfile")
+                        .value_name("FILE")
+                        .short("f")
+                        .long("modusfile")
+                )
+                .arg(
+                    Arg::with_name("CONTEXT")
+                        .long_help("Specify the directory that contains the Modusfile.\n\
+                                    This is for compatibility with the `build` subcommand.")
+                        .help("Specify the directory that contains the Modusfile.")
+                        .index(1)
+                        .required(true),
                 )
                 .arg(
                     Arg::with_name("QUERY")
+                        .required(true)
                         .help("Specifies the target to prove")
                         .index(2),
                 )
@@ -216,9 +229,21 @@ fn main() {
                 .about("Analyses a Modusfile and checks the predicate kinds.")
                 .arg(
                     Arg::with_name("FILE")
-                        .required(true)
-                        .help("Sets the input Modusfile")
-                        .index(1),
+                        .required(false)
+                        .long_help("Specifies the input Modusfile\n\
+                                    The default is to look for a Modusfile in the context directory.")
+                        .help("Specify the input Modusfile")
+                        .value_name("FILE")
+                        .short("f")
+                        .long("modusfile")
+                )
+                .arg(
+                    Arg::with_name("CONTEXT")
+                        .long_help("Specify the directory that contains the Modusfile.\n\
+                                    This is for compatibility with the `build` subcommand.")
+                        .help("Specify the directory that contains the Modusfile.")
+                        .index(1)
+                        .required(true),
                 )
                 .arg_from_usage("-v --verbose 'Displays the evaluated kinds for all the clauses.")
         )
@@ -407,16 +432,19 @@ fn main() {
             let should_output_graph = sub.is_present("graph");
             let should_explain = sub.is_present("explain");
 
-            let input_file = sub.value_of("FILE").unwrap();
-            let file = get_file_or_exit(Path::new(input_file));
+            let context_dir = sub.value_of_os("CONTEXT").unwrap();
+            let input_file = sub
+                .value_of_os("FILE")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| Path::new(context_dir).join("Modusfile"));
+            let file = get_file_or_exit(input_file.as_path());
             let query: Option<modusfile::Expression> =
                 sub.value_of("QUERY").map(|s| s.parse().unwrap());
             let query = query.map(|q| q.without_position());
 
             match (file.source().parse::<Modusfile>(), query) {
                 (Ok(modus_f), None) => println!(
-                    "Parsed {} successfully. Found {} clauses.",
-                    input_file,
+                    "Parsed successfully. Found {} clauses.",
                     modus_f.0.len()
                 ),
                 (Ok(modus_f), Some(e)) => {
@@ -466,16 +494,19 @@ fn main() {
                 }
                 (Err(error), _) => {
                     println!(
-                        "❌ Did not parse {} successfully. Error trace:\n{}",
-                        input_file.purple(),
+                        "❌ Did not parse Modusfile successfully. Error trace:\n{}",
                         error
                     )
                 }
             }
         }
         ("check", Some(sub)) => {
-            let input_file = sub.value_of("FILE").unwrap();
-            let file = get_file_or_exit(Path::new(input_file));
+            let context_dir = sub.value_of_os("CONTEXT").unwrap();
+            let input_file = sub
+                .value_of_os("FILE")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| Path::new(context_dir).join("Modusfile"));
+            let file = get_file_or_exit(input_file.as_path());
 
             let is_verbose = sub.is_present("verbose");
 
