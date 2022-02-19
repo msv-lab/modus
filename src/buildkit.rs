@@ -43,7 +43,7 @@ use std::{
     convert::TryInto,
     fs::OpenOptions,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Command, ExitStatus, Stdio},
 };
 
 use spawn_wait::{ProcessSet, SignalHandler};
@@ -75,9 +75,9 @@ pub enum BuildError {
     #[error("Unable to run docker build: {0}")]
     UnableToRunDockerBuild(#[source] spawn_wait::Error),
     #[error("docker build exited with code {0}.")]
-    DockerBuildFailed(i32),
+    DockerBuildFailed(ExitStatus),
     #[error("docker tag {0} {1} exited with code {2}.")]
-    DockerTagFailed(String, String, i32),
+    DockerTagFailed(String, String, ExitStatus),
     #[error("{0} contains invalid utf-8.")]
     FileHasInvalidUtf8(String),
     #[error("Unable to create temporary directory: {0}")]
@@ -86,8 +86,8 @@ pub enum BuildError {
     UnableToWriteTmpFile(String, #[source] std::io::Error),
     #[error("Unable to read {0}: {1}")]
     UnableToReadTmpFile(String, #[source] std::io::Error),
-    #[error("Could not resolve {0}")]
-    CouldNotResolveImage(String),
+    #[error("Could not resolve {0}: docker build returned {1}")]
+    CouldNotResolveImage(String, ExitStatus),
     #[error("{0}")]
     IOError(
         #[from]
@@ -446,7 +446,7 @@ fn resolve_froms(
                 let (_, exit_status) = child.unwrap();
                 if !exit_status.success() {
                     let _ = procs.sigint_all_and_wait(sh);
-                    return Err(DockerBuildFailed(exit_status.code().unwrap_or(-1)));
+                    return Err(CouldNotResolveImage(t.original_image_ref.clone(), exit_status));
                 }
                 nb_done += 1;
                 let resolved = std::fs::read_to_string(&t.iidfile)
@@ -459,11 +459,7 @@ fn resolve_froms(
                     .args(&["tag", &resolved, &tmp_tag])
                     .status()?;
                 if !st.success() {
-                    return Err(BuildError::DockerTagFailed(
-                        resolved,
-                        tmp_tag,
-                        st.code().unwrap(),
-                    ));
+                    return Err(BuildError::DockerTagFailed(resolved, tmp_tag, st));
                 }
                 image_cleanup.add(tmp_tag.clone());
 
@@ -566,7 +562,7 @@ pub fn build<P: AsRef<Path>>(
         Subprocess(_, res) => {
             let (_, exit_status) = res.map_err(|e| UnableToRunDockerBuild(e))?;
             if !exit_status.success() {
-                return Err(DockerBuildFailed(exit_status.code().unwrap_or(-1)));
+                return Err(DockerBuildFailed(exit_status));
             }
         }
         ReceivedTerminationSignal(_) => {
@@ -634,7 +630,7 @@ pub fn build<P: AsRef<Path>>(
                                 .red()
                             );
                             let _ = procs.sigint_all_and_wait(&mut sh);
-                            return Err(DockerBuildFailed(exit_status.code().unwrap_or(-1)));
+                            return Err(DockerBuildFailed(exit_status));
                         }
                         let iid = std::fs::read_to_string(iidfiles[i].name())
                             .map_err(|e| UnableToReadTmpFile(iidfiles[i].name().to_owned(), e))?;
