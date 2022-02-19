@@ -81,6 +81,17 @@ class TestCopyWithin(ModusTestCase):
         self.assertEqual(img_c.read_file("/tmp/copied2"), "content2\n")
         self.assertEqual(img_c.read_file("/tmp/copied3"), "content3\n")
 
+    def test_copy_dir_content(self):
+        mf = dedent("""\
+            a :-
+                from("alpine"),
+                run("mkdir -p /tmp/dir/subdir && echo content > /tmp/dir/subdir/file").
+            b :- from("alpine"),
+                a::copy("/tmp/dir", "/tmp").
+        """)
+        img_b = self.build(mf, "b")[Fact("b", ())]
+        self.assertEqual(img_b.read_file("/tmp/subdir/file"), "content\n")
+
 class TestCopyFromContext(ModusTestCase):
     def init_files(self):
         self.context.add_file("file", "content\n")
@@ -106,7 +117,7 @@ class TestCopyFromContext(ModusTestCase):
         self.assertEqual(img_a.read_file("/tmp/dir/file"), "content\n")
         self.assertEqual(img_b.read_file("/tmp/dir/file"), "content\n")
 
-    def test_test_inworkdir(self):
+    def test_inworkdir(self):
         self.init_files()
         md = dedent("""\
             a :-
@@ -115,7 +126,7 @@ class TestCopyFromContext(ModusTestCase):
         img_a = self.build(md, "a")[Fact("a", ())]
         self.assertEqual(img_a.read_file("/tmp/file"), "content\n")
 
-    def test_test_setworkdir(self):
+    def test_setworkdir(self):
         self.init_files()
         md = dedent("""\
             a :-
@@ -123,3 +134,33 @@ class TestCopyFromContext(ModusTestCase):
                 copy("file", "file").""")
         img_a = self.build(md, "a")[Fact("a", ())]
         self.assertEqual(img_a.read_file("/tmp/file"), "content\n")
+
+    def test_copy_dir_content(self):
+        self.init_files()
+        md = dedent("""\
+            a :- from("alpine"), copy("dir", "/tmp/").
+        """)
+        img = self.build(md, "a")[Fact("a", ())]
+        self.assertEqual(img.read_file("/tmp/file"), "content\n")
+
+    def test_overwrite(self):
+        md = dedent("""\
+            a(X) :- from("alpine"), run(f"echo ${X} > /tmp/file").
+            b :-
+                from("alpine")::set_workdir("/tmp"),
+                a("1")::copy("/tmp/file", "file"),
+                a("2")::copy("/tmp/file", "file").
+        """)
+        img_b = self.build(md, "b")[Fact("b", ())]
+        self.assertEqual(img_b.read_file("/tmp/file"), "2\n")
+
+    def test_overwrite_dir_content(self):
+        md = dedent("""\
+            a(X) :- from("alpine"), run(f"echo ${X} > /tmp/file").
+            b :-
+                from("alpine")::set_workdir("/tmp"),
+                a("1")::copy("/tmp", "."),
+                a("2")::copy("/tmp", ".").
+        """)
+        img_b = self.build(md, "b")[Fact("b", ())]
+        self.assertEqual(img_b.read_file("/tmp/file"), "2\n")

@@ -243,57 +243,42 @@ mod equality {
 mod number {
     use super::BuiltinPredicate;
 
-    pub struct NumberGt0;
-    impl BuiltinPredicate for NumberGt0 {
-        fn name(&self) -> &'static str {
-            "number_gt"
-        }
+    macro_rules! define_number_comparison {
+        ($name:ident, $cond:expr) => {
+            #[allow(non_camel_case_types)]
+            pub struct $name;
+            impl BuiltinPredicate for $name {
+                fn name(&self) -> &'static str {
+                    stringify!($name)
+                }
 
-        fn kind(&self) -> crate::analysis::Kind {
-            crate::analysis::Kind::Logic
-        }
+                fn kind(&self) -> crate::analysis::Kind {
+                    crate::analysis::Kind::Logic
+                }
 
-        fn arg_groundness(&self) -> &'static [bool] {
-            &[false, false]
-        }
+                fn arg_groundness(&self) -> &'static [bool] {
+                    &[false, false]
+                }
 
-        /// Parses and checks that arg1 > arg2.
-        fn apply(&self, lit: &crate::logic::Literal) -> Option<crate::logic::Literal> {
-            let a: f64 = lit.args[0].as_constant().and_then(|s| s.parse().ok())?;
-            let b: f64 = lit.args[1].as_constant().and_then(|s| s.parse().ok())?;
-            if a > b {
-                Some(lit.clone())
-            } else {
-                None
+                /// Parses and checks that arg1 > arg2.
+                fn apply(&self, lit: &crate::logic::Literal) -> Option<crate::logic::Literal> {
+                    let a: f64 = lit.args[0].as_constant().and_then(|s| s.parse().ok())?;
+                    let b: f64 = lit.args[1].as_constant().and_then(|s| s.parse().ok())?;
+                    if $cond(a, b) {
+                        Some(lit.clone())
+                    } else {
+                        None
+                    }
+                }
             }
-        }
+        };
     }
 
-    pub struct NumberGeq0;
-    impl BuiltinPredicate for NumberGeq0 {
-        fn name(&self) -> &'static str {
-            "number_geq"
-        }
-
-        fn kind(&self) -> crate::analysis::Kind {
-            crate::analysis::Kind::Logic
-        }
-
-        fn arg_groundness(&self) -> &'static [bool] {
-            &[false, false]
-        }
-
-        /// Parses and checks that arg1 >= arg2.
-        fn apply(&self, lit: &crate::logic::Literal) -> Option<crate::logic::Literal> {
-            let a: f64 = lit.args[0].as_constant().and_then(|s| s.parse().ok())?;
-            let b: f64 = lit.args[1].as_constant().and_then(|s| s.parse().ok())?;
-            if a >= b {
-                Some(lit.clone())
-            } else {
-                None
-            }
-        }
-    }
+    define_number_comparison!(number_eq, |a, b| a == b);
+    define_number_comparison!(number_gt, |a, b| a > b);
+    define_number_comparison!(number_lt, |a, b| a < b);
+    define_number_comparison!(number_geq, |a, b| a >= b);
+    define_number_comparison!(number_leq, |a, b| a <= b);
 }
 
 macro_rules! intrinsic_predicate {
@@ -418,7 +403,7 @@ intrinsic_predicate!(_operator_merge_end, crate::analysis::Kind::Layer, false);
 
 /// Convenience macro that returns Some(b) for the first b that can be selected.
 macro_rules! select_builtins {
-    ( $lit:expr, $( $x:expr ),+ ) => {{
+    ( $lit:expr, $( $x:expr ),+, ) => {{
         let mut has_ground_mismatch = false;
         $(
             match $x.select($lit) {
@@ -466,8 +451,11 @@ pub fn select_builtin<'a>(
         equality::StringEq2,
         _operator_merge_begin,
         _operator_merge_end,
-        number::NumberGt0,
-        number::NumberGeq0
+        number::number_eq,
+        number::number_gt,
+        number::number_lt,
+        number::number_geq,
+        number::number_leq,
     )
 }
 
@@ -572,44 +560,121 @@ mod test {
     }
 
     #[test]
-    pub fn test_number_gt() {
+    pub fn test_number_compare() {
         use crate::logic::{Literal, Predicate};
 
-        let lit = Literal {
-            positive: true,
-            position: None,
-            predicate: Predicate("number_gt".to_owned()),
-            args: vec![
-                IRTerm::Constant("42.0".to_owned()),
-                IRTerm::Constant("-273.15".to_owned()),
-            ],
-        };
-        let b = super::select_builtin(&lit);
-        assert!(b.0.is_match());
-        let b = b.1.unwrap();
-        assert_eq!(b.name(), "number_gt");
-        assert_eq!(b.kind(), Kind::Logic);
-        assert_eq!(b.apply(&lit), Some(lit));
-    }
+        let tests = vec![
+            (
+                "number_eq",
+                vec![
+                    ("1", "1"),
+                    ("1.0", "1"),
+                    ("0.0", "0.0"),
+                    ("0", "-0"),
+                    ("0.2", "0.2"),
+                    ("1e-10", "1e-10"),
+                    ("1e100", "1e100"),
+                    ("42.0", "42.0"),
+                ],
+                vec![
+                    ("0", "1"),
+                    ("0", "0.01"),
+                    ("1", "-1"),
+                    ("1e-10", "0"),
+                    ("42.0", "-273.15"),
+                    ("NaN", "NaN"),
+                ],
+            ),
+            (
+                "number_gt",
+                vec![
+                    ("1", "0"),
+                    ("1e-10", "0"),
+                    ("42.0", "-273.15"),
+                    ("1e100", "0"),
+                ],
+                vec![
+                    ("42.0", "42.0"),
+                    ("42.0", "42.1"),
+                    ("0", "1e-10"),
+                    ("NaN", "NaN"),
+                ],
+            ),
+            (
+                "number_lt",
+                vec![
+                    ("0", "1"),
+                    ("0", "1e-10"),
+                    ("-273.15", "42.0"),
+                    ("0", "1e100"),
+                ],
+                vec![
+                    ("42.0", "42.0"),
+                    ("42.1", "42.0"),
+                    ("1e-10", "0"),
+                    ("NaN", "NaN"),
+                ],
+            ),
+            (
+                "number_geq",
+                vec![
+                    ("1", "0"),
+                    ("1e-10", "0"),
+                    ("42.0", "-273.15"),
+                    ("1e100", "0"),
+                    ("42.0", "42.0"),
+                    ("42", "42.0"),
+                ],
+                vec![("42.0", "42.1"), ("0", "1e-10"), ("NaN", "NaN")],
+            ),
+            (
+                "number_leq",
+                vec![
+                    ("0", "1"),
+                    ("0", "1e-10"),
+                    ("-273.15", "42.0"),
+                    ("0", "1e100"),
+                    ("42.0", "42.0"),
+                ],
+                vec![("42.1", "42.0"), ("1e-10", "0"), ("NaN", "NaN")],
+            ),
+        ];
 
-    #[test]
-    pub fn test_number_geq() {
-        use crate::logic::{Literal, Predicate};
-
-        let lit = Literal {
-            positive: true,
-            position: None,
-            predicate: Predicate("number_geq".to_owned()),
-            args: vec![
-                IRTerm::Constant("42".to_owned()),
-                IRTerm::Constant("42.0".to_owned()),
-            ],
-        };
-        let b = super::select_builtin(&lit);
-        assert!(b.0.is_match());
-        let b = b.1.unwrap();
-        assert_eq!(b.name(), "number_geq");
-        assert_eq!(b.kind(), Kind::Logic);
-        assert_eq!(b.apply(&lit), Some(lit));
+        for (name, true_cases, false_cases) in tests.into_iter() {
+            for (left, right) in true_cases.into_iter() {
+                let lit = Literal {
+                    positive: true,
+                    position: None,
+                    predicate: Predicate(name.to_owned()),
+                    args: vec![
+                        IRTerm::Constant(left.to_owned()),
+                        IRTerm::Constant(right.to_owned()),
+                    ],
+                };
+                let b = super::select_builtin(&lit);
+                assert!(b.0.is_match());
+                let b = b.1.unwrap();
+                assert_eq!(b.name(), name);
+                assert_eq!(b.kind(), Kind::Logic);
+                assert_eq!(b.apply(&lit), Some(lit));
+            }
+            for (left, right) in false_cases.into_iter() {
+                let lit = Literal {
+                    positive: true,
+                    position: None,
+                    predicate: Predicate(name.to_owned()),
+                    args: vec![
+                        IRTerm::Constant(left.to_owned()),
+                        IRTerm::Constant(right.to_owned()),
+                    ],
+                };
+                let b = super::select_builtin(&lit);
+                assert!(b.0.is_match());
+                let b = b.1.unwrap();
+                assert_eq!(b.name(), name);
+                assert_eq!(b.kind(), Kind::Logic);
+                assert_eq!(b.apply(&lit), None);
+            }
+        }
     }
 }

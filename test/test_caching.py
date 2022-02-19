@@ -16,6 +16,32 @@ class TestCaching(ModusTestCase):
         b1 = imgs[Fact("b", ("1",))]
         self.assertEqual(b0.read_file("/tmp/file"), b1.read_file("/tmp/file"))
 
+    def test_subimage_noredo(self):
+        mf = dedent("""\
+            a(X) :-
+                from("alpine"),
+                run(f"echo ${X}"),
+                other_image::copy("/tmp/rand", "/tmp/rand").
+            b(X) :-
+                from("alpine"),
+                run(f"echo b ${X}"),
+                other_image::copy("/tmp/rand", "/tmp/rand").
+            other_image :-
+                from("alpine"),
+                run("dd if=/dev/urandom bs=100 count=1 | base64 > /tmp/rand").
+            final("a", X) :- (X = "1"; X = "2"), a(X).
+            final("b", X) :- (X = "1"; X = "2"), b(X).
+        """)
+        imgs = self.build(mf, "final(A, X)")
+        self.assertEqual(len(imgs), 4)
+        a1 = imgs[Fact("final", ("a", "1"))]
+        a2 = imgs[Fact("final", ("a", "2"))]
+        b1 = imgs[Fact("final", ("b", "1"))]
+        b2 = imgs[Fact("final", ("b", "2"))]
+        self.assertEqual(a1.read_file("/tmp/rand"), a2.read_file("/tmp/rand"))
+        self.assertEqual(b1.read_file("/tmp/rand"), b2.read_file("/tmp/rand"))
+        self.assertEqual(a1.read_file("/tmp/rand"), b1.read_file("/tmp/rand"))
+
     def test_merge_noredo(self):
         mf = dedent("""\
             a :-
