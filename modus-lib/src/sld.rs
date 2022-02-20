@@ -37,7 +37,7 @@ use crate::{
 use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
 use colored::Colorize;
 use logic::{Clause, IRTerm, Literal};
-use ptree::{item::StringItem, print_tree, TreeBuilder};
+use ptree::{item::StringItem, print_tree, TreeBuilder, TreeItem};
 
 pub trait Auxiliary: Rename<Self> + Sized {
     fn aux() -> Self;
@@ -300,7 +300,7 @@ impl Proof {
             .unwrap_or(0)
     }
 
-    pub fn pretty_print(&self, clauses: &Vec<Clause>) -> io::Result<()> {
+    pub fn get_tree(&self, clauses: &Vec<Clause>) -> impl TreeItem {
         fn dfs(p: &Proof, clauses: &Vec<Clause>, builder: &mut TreeBuilder) {
             for child in &p.children {
                 match &child.clause {
@@ -356,7 +356,11 @@ impl Proof {
         let mut builder = TreeBuilder::new("".to_string());
         dfs(self, clauses, &mut builder);
 
-        print_tree(&builder.build())
+        builder.build()
+    }
+
+    pub fn pretty_print(&self, clauses: &Vec<Clause>) -> io::Result<()> {
+        print_tree(&self.get_tree(clauses))
     }
 }
 

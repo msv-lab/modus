@@ -2,19 +2,10 @@
 #![allow(dead_code)]
 // (otherwise there will be a lot of warnings for functions that are only used in the main binary.)
 
-mod analysis;
 mod buildkit;
-mod builtin;
-mod dockerfile;
-mod imagegen;
-mod logic;
-mod modusfile;
 mod reporting;
-mod sld;
-mod translate;
-mod transpiler;
-mod unification;
-mod wellformed;
+
+use modus_lib::*;
 
 mod buildkit_llb_types;
 use buildkit_llb_types::OwnedOutput;
