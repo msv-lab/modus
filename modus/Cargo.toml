@@ -1,5 +1,5 @@
 [package]
-name = "modus-bin"
+name = "modus"
 version = "0.1.0"
 authors = ["Sergey Mechtaev <mechtaev@gmail.com>"]
 edition = "2018"
@@ -14,7 +14,7 @@ name = "buildkit-frontend"
 path = "src/buildkit_frontend.rs"
 
 [dependencies]
-modus-corelib = { path = "../corelib" }
+modus-lib = { path = "../modus-lib" }
 
 clap = "2.33.3"
 colored = "2"

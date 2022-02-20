@@ -27,14 +27,14 @@ use codespan_reporting::{
     },
 };
 use colored::Colorize;
-use modus_corelib::sld::tree_from_modusfile;
-use modus_corelib::transpiler::render_tree;
-use modus_corelib::*;
+use modus_lib::sld::tree_from_modusfile;
+use modus_lib::transpiler::render_tree;
+use modus_lib::*;
 use ptree::write_tree;
 use std::{ffi::OsStr, fs, path::Path};
 use std::{io::Write, path::PathBuf};
 
-use modus_corelib::modusfile::Modusfile;
+use modus_lib::modusfile::Modusfile;
 
 use crate::buildkit::{BuildOptions, DockerBuildOptions};
 

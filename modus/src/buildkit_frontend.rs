@@ -5,7 +5,7 @@
 mod buildkit;
 mod reporting;
 
-use modus_corelib::*;
+use modus_lib::*;
 
 mod buildkit_llb_types;
 use buildkit_llb_types::OwnedOutput;
