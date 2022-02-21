@@ -13,9 +13,14 @@ cargo_build("debug") :- run(f"cargo build").
 cargo_build("release") :- run(f"cargo build --release").
 
 build_deps(profile) :-
+  copy("modus-lib/Cargo.toml", "modus-lib/"),
+  copy("modus/Cargo.toml", "modus/"),
   copy("Cargo.toml", "."),
   copy("Cargo.lock", "."),
-  run("mkdir src && echo 'fn main () {}' > src/main.rs && echo 'fn main () {}' > src/buildkit_frontend.rs"),
+  run("mkdir modus-lib/src modus/src &&\
+       echo 'pub struct Nothing;' > modus-lib/src/lib.rs &&\
+       echo 'fn main () {}' > modus/src/main.rs &&\
+       echo 'fn main () {}' > modus/src/buildkit_frontend.rs"),
   cargo_build(profile).
 
 build(profile) :-
@@ -25,7 +30,7 @@ build(profile) :-
   # Since cargo use the timestamp of build artifact to determine if it needs to
   # rebuild, and the source file copied in will be older than the previous build
   # done by build_deps, we touch all the source files to force a re-build.
-  run("touch src/*"),
+  run("touch modus-lib/src/* modus/src/*"),
   cargo_build(profile).
 
 frontend_img(profile) :-

@@ -16,6 +16,6 @@ fn main() -> Result<(), String> {
         .trim();
     let short = &sha[0..10];
     println!("cargo:rustc-env=GIT_SHA={}", short);
-    println!("cargo:rerun-if-changed=.git");
+    println!("cargo:rerun-if-changed=../.git");
     Ok(())
 }
