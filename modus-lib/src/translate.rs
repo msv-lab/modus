@@ -340,19 +340,16 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
         /// Converts clauses like `_negate_id :- ...` into `_negate_id(X, Y) :- ...`.
         /// But doesn't expose anonymous variables.
         fn exposed_negate_clauses(ir_clauses: Vec<logic::Clause>) -> Vec<logic::Clause> {
-            let mut negated_lit_args: HashMap<&Predicate, HashSet<IRTerm>> = HashMap::new();
+            let mut negated_lit_args: HashMap<&Predicate, Vec<IRTerm>> = HashMap::new();
             for ir_clause in &ir_clauses {
                 if ir_clause.head.predicate.0.starts_with("_negate_") {
-                    // TODO: maybe just take the time penalty and use a vec to keep the order?
-                    let curr_args: HashSet<IRTerm> = negated_lit_args
-                        .get(&ir_clause.head.predicate)
-                        .unwrap_or(&HashSet::new())
-                        .clone();
+                    let curr_args = negated_lit_args.entry(&ir_clause.head.predicate).or_insert(Vec::new());
                     let new_args = ir_clause.variables(false);
-                    negated_lit_args.insert(
-                        &ir_clause.head.predicate,
-                        curr_args.union(&new_args).cloned().collect(),
-                    );
+                    for arg in new_args {
+                        if !curr_args.contains(&arg) {
+                            curr_args.push(arg);
+                        }
+                    }
                 }
             }
 
@@ -364,7 +361,7 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                         args: negated_lit_args
                             .get(&clause.head.predicate)
                             .map(|xs| {
-                                let mut v: Vec<logic::IRTerm> = xs.iter().cloned().collect();
+                                let mut v: Vec<logic::IRTerm> = xs.to_vec();
                                 v.sort();
                                 v
                             })
@@ -379,8 +376,7 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                             if let Some(args) = negated_lit_args.get(&lit.predicate) {
                                 logic::Literal {
                                     args: {
-                                        let mut v: Vec<logic::IRTerm> =
-                                            args.iter().cloned().collect();
+                                        let mut v: Vec<logic::IRTerm> = args.to_vec();
                                         v.sort();
                                         v
                                     },
