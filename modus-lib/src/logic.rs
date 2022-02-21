@@ -419,7 +419,7 @@ pub mod parser {
         combinator::{cut, map, opt, recognize},
         error::VerboseError,
         multi::{many0, many0_count, separated_list0, separated_list1},
-        sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
+        sequence::{delimited, pair, preceded, terminated, tuple},
         Offset, Slice,
     };
 

@@ -21,7 +21,6 @@ use std::{
 };
 
 use nom::{bytes::streaming::tag, sequence::delimited};
-use petgraph::visit::Walker;
 
 use crate::{
     logic::{self, parser::Span, IRTerm, Predicate, SpannedPosition},
@@ -189,7 +188,7 @@ fn handle_negation(modus_clause: &modusfile::ModusClause) -> Vec<modusfile::Modu
                     positive: true,
                     position: None,
                     predicate: Predicate(
-                        format!("_negate_{}", fetch_add_negation_literal_id()).into(),
+                        format!("_negate_{}", fetch_add_negation_literal_id()),
                     ),
                     args: vec![], // will need to expose the variables later
                 };
@@ -214,7 +213,7 @@ fn handle_negation(modus_clause: &modusfile::ModusClause) -> Vec<modusfile::Modu
         body: modus_clause
             .body
             .as_ref()
-            .map(|e| handle_expression(&e, &mut clauses)),
+            .map(|e| handle_expression(e, &mut clauses)),
     };
     clauses.push(new_clause);
     clauses
@@ -365,7 +364,7 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                         args: negated_lit_args
                             .get(&clause.head.predicate)
                             .map(|xs| {
-                                let mut v: Vec<logic::IRTerm> = xs.into_iter().cloned().collect();
+                                let mut v: Vec<logic::IRTerm> = xs.iter().cloned().collect();
                                 v.sort();
                                 v
                             })
@@ -381,7 +380,7 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                                 logic::Literal {
                                     args: {
                                         let mut v: Vec<logic::IRTerm> =
-                                            args.into_iter().cloned().collect();
+                                            args.iter().cloned().collect();
                                         v.sort();
                                         v
                                     },
@@ -400,7 +399,7 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
         let without_expr_negation = handle_negation(modus_clause);
         let ir_clauses: Vec<logic::Clause> = without_expr_negation
             .iter()
-            .flat_map(|c| handle_clause(c))
+            .flat_map(handle_clause)
             .collect();
 
         // We perform this exactly twice because of nested negation.

@@ -250,9 +250,6 @@ impl From<Literal> for logic::Literal {
     }
 }
 
-type Fact = ModusClause;
-type Rule = ModusClause;
-
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Operator {
     pub position: Option<SpannedPosition>,
@@ -816,6 +813,8 @@ mod tests {
     use serial_test::serial;
 
     use super::*;
+
+    type Rule = ModusClause;
 
     #[test]
     fn fact() {
