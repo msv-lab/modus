@@ -2,7 +2,7 @@ use std::{fmt::Display, io::Write};
 
 use serde::Serialize;
 
-use crate::{
+use modus_lib::{
     imagegen::BuildPlan,
     logic::{IRTerm, Literal},
 };

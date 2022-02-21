@@ -278,6 +278,68 @@ mod number {
     define_number_comparison!(number_leq, |a, b| a <= b);
 }
 
+mod semver {
+    use super::BuiltinPredicate;
+    use semver::{Comparator, Op, Version};
+
+    fn parse_partial_version(s: &str) -> Option<Version> {
+        if let Ok(v) = Version::parse(s) {
+            return Some(v);
+        }
+        let mut s = String::from(s);
+        s.push_str(".0");
+        if let Ok(v) = Version::parse(&s) {
+            return Some(v);
+        }
+        s.push_str(".0");
+        if let Ok(v) = Version::parse(&s) {
+            return Some(v);
+        }
+        return None;
+    }
+
+    macro_rules! define_semver_comparison {
+        ($name:ident, $cond:expr) => {
+            #[allow(non_camel_case_types)]
+            pub struct $name;
+            impl BuiltinPredicate for $name {
+                fn name(&self) -> &'static str {
+                    stringify!($name)
+                }
+
+                fn kind(&self) -> crate::analysis::Kind {
+                    crate::analysis::Kind::Logic
+                }
+
+                fn arg_groundness(&self) -> &'static [bool] {
+                    &[false, false]
+                }
+
+                /// Parses and checks that arg1 > arg2.
+                fn apply(&self, lit: &crate::logic::Literal) -> Option<crate::logic::Literal> {
+                    let a: Version = lit.args[0]
+                        .as_constant()
+                        .and_then(|s| parse_partial_version(s))?;
+                    let b: Comparator = lit.args[1]
+                        .as_constant()
+                        .and_then(|s| Comparator::parse(&format!("{}{}", $cond, s)).ok())?;
+                    if b.matches(&a) {
+                        Some(lit.clone())
+                    } else {
+                        None
+                    }
+                }
+            }
+        };
+    }
+
+    define_semver_comparison!(semver_exact, "=");
+    define_semver_comparison!(semver_gt, ">");
+    define_semver_comparison!(semver_lt, "<");
+    define_semver_comparison!(semver_geq, ">=");
+    define_semver_comparison!(semver_leq, "<=");
+}
+
 macro_rules! intrinsic_predicate {
     ($name:ident, $kind:expr, $($arg_groundness:expr),*) => {
         #[allow(non_camel_case_types)]
@@ -453,6 +515,11 @@ pub fn select_builtin<'a>(
         number::number_lt,
         number::number_geq,
         number::number_leq,
+        semver::semver_exact,
+        semver::semver_gt,
+        semver::semver_lt,
+        semver::semver_geq,
+        semver::semver_leq,
     )
 }
 
@@ -549,7 +616,7 @@ mod test {
     }
 
     #[test]
-    pub fn test_number_compare() {
+    pub fn test_number_and_semver_compare() {
         use crate::logic::{Literal, Predicate};
 
         let tests = vec![
@@ -627,6 +694,97 @@ mod test {
                 ],
                 vec![("42.1", "42.0"), ("1e-10", "0"), ("NaN", "NaN")],
             ),
+            (
+                "semver_exact",
+                vec![
+                    ("1.0.0", "1.0.0"),
+                    ("1.0.0", "1.0"),
+                    ("1.0.0", "1"),
+                    ("0.0.0", "0.0.0"),
+                    ("0.1.0-alpha", "0.1.0-alpha"),
+                    // TODO: do we want to allow things like this?
+                    ("1", "1"),
+                    ("1.0", "1"),
+                    ("1", "1.0"),
+                    ("0.2", "0.2"),
+                    ("1.0.1", "1.0"),
+                ],
+                vec![
+                    ("1.0.0", "1.0.1"),
+                    ("1.0.0", "1.1"),
+                    ("1.0.0", "2"),
+                    ("1.0.0", "0"),
+                    ("0.0.0", "0.0.1"),
+                    ("1", "1.2"),
+                    ("0", "-0"),
+                    ("0.1.0-beta", "0.1.0-alpha"),
+                ],
+            ),
+            (
+                "semver_gt",
+                vec![
+                    ("3.2.1", "1.2.3"),
+                    ("1.2.3", "1.2.1"),
+                    ("0.1.0-beta", "0.1.0-alpha"),
+                    ("1", "0"),
+                    ("1.1", "1.0"),
+                    ("1.0.1", "1.0.0"),
+                ],
+                vec![
+                    ("1.1", "1"),
+                    ("1.1", "1.2"),
+                    ("1.1", "1.1"),
+                    ("3.2.1", "3.4.1"),
+                ],
+            ),
+            (
+                "semver_lt",
+                vec![
+                    ("1.2.3", "3.2.1"),
+                    ("3.2.1", "3.4.1"),
+                    ("1.1", "1.2"),
+                    ("1.1", "1.1.1"),
+                ],
+                vec![
+                    ("1", "0"),
+                    ("1.1", "1.0"),
+                    ("1.1", "1"),
+                    ("1.1", "1"),
+                    ("1.1", "1.1"),
+                    ("1.1.0", "1.1.0"),
+                    ("1.1", "1.1.0"),
+                    ("1.1.1", "1.1.1"),
+                ],
+            ),
+            (
+                "semver_geq",
+                vec![
+                    ("1.0.1", "1.0.0"),
+                    ("1.0.1", "1.0"),
+                    ("1.2.3", "1.2.1"),
+                    ("1.1", "1.0"),
+                    ("1.1", "1"),
+                    ("1.1", "1.1"),
+                    ("1.1.0", "1.1.0"),
+                    ("1.1", "1.1.0"),
+                    ("1.1.1", "1.1.1"),
+                ],
+                vec![("1.2.3", "3.2.1"), ("1.1", "1.2"), ("1.1", "1.1.1")],
+            ),
+            (
+                "semver_leq",
+                vec![
+                    ("1.2.3", "3.2.1"),
+                    ("1.1", "1.2"),
+                    ("1.1", "1.1.1"),
+                    ("1.1", "1"),
+                    ("1.1", "1.1"),
+                    ("1.1.0", "1.1.0"),
+                    ("1.1", "1.1.0"),
+                    ("1.1.1", "1.1.1"),
+                ],
+                vec![("1", "0"), ("1.1", "1.0"), ("1.2.3", "1.2.1")],
+            ),
         ];
 
         for (name, true_cases, false_cases) in tests.into_iter() {
@@ -644,7 +802,9 @@ mod test {
                 let b = b.1.unwrap();
                 assert_eq!(b.name(), name);
                 assert_eq!(b.kind(), Kind::Logic);
-                assert_eq!(b.apply(&lit), Some(lit));
+                if b.apply(&lit).as_ref() != Some(&lit) {
+                    panic!("Expected {} to resolve (got false)", lit);
+                }
             }
             for (left, right) in false_cases.into_iter() {
                 let lit = Literal {
@@ -660,7 +820,9 @@ mod test {
                 let b = b.1.unwrap();
                 assert_eq!(b.name(), name);
                 assert_eq!(b.kind(), Kind::Logic);
-                assert_eq!(b.apply(&lit), None);
+                if b.apply(&lit) != None {
+                    panic!("Expected {} to fail (but resolved)", lit);
+                }
             }
         }
     }

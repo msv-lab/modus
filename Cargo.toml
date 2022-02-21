@@ -1,44 +1,5 @@
-[package]
-name = "modus"
-version = "0.1.0"
-authors = ["Sergey Mechtaev <mechtaev@gmail.com>"]
-edition = "2018"
-default-run = "modus"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[[bin]]
-name = "modus"
-path = "src/main.rs"
-
-[[bin]]
-name = "buildkit-frontend"
-path = "src/buildkit_frontend.rs"
-
-[dependencies]
-nom = { version = "7" }
-nom_locate = "4.0.0"
-codespan-reporting = "0.11.1"
-clap = "2.33.3"
-lazy_static = "1.4.0"
-fp-core = "0.1.9"
-colored = "2"
-dot = "0.1.4" # graphviz library
-thiserror = "1.0"
-ptree = "0.4" # pretty-print trees
-petgraph = "0.6.0"
-
-# For buildkit
-buildkit-frontend = "0.3.0"
-buildkit-llb = "0.2.0"
-tokio = { version = "^0.2", features = ["macros", "rt-core"] }
-async-trait = "0.1.51"
-failure = "^0.1"
-serde = "^1.0"
-serde_json = "^1.0"
-rand = "0.8"
-shell-escape = "0.1.5"
-spawn-wait = "0.2"
-
-[dev-dependencies]
-serial_test = "*"
+[workspace]
+members = [
+  "modus-lib",
+  "modus"
+]
