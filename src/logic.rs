@@ -216,7 +216,9 @@ pub struct Literal<T = IRTerm> {
 impl<T: PartialEq> Literal<T> {
     /// Checks for equality, ignoring the position fields.
     pub fn eq_ignoring_position(&self, other: &Literal<T>) -> bool {
-        self.predicate == other.predicate && self.args == other.args
+        self.positive == other.positive
+            && self.predicate == other.predicate
+            && self.args == other.args
     }
 }
 

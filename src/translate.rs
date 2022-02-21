@@ -338,6 +338,64 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
             }
         }
 
+        /// Converts clauses like `_negate_id :- ...` into `_negate_id(X, Y) :- ...`.
+        /// But doesn't expose anonymous variables.
+        fn exposed_negate_clauses(ir_clauses: Vec<logic::Clause>) -> Vec<logic::Clause> {
+            let mut negated_lit_args: HashMap<&Predicate, HashSet<IRTerm>> = HashMap::new();
+            for ir_clause in &ir_clauses {
+                if ir_clause.head.predicate.0.starts_with("_negate_") {
+                    // TODO: maybe just take the time penalty and use a vec to keep the order?
+                    let curr_args: HashSet<IRTerm> = negated_lit_args
+                        .get(&ir_clause.head.predicate)
+                        .unwrap_or(&HashSet::new())
+                        .clone();
+                    let new_args = ir_clause.variables(false);
+                    negated_lit_args.insert(
+                        &ir_clause.head.predicate,
+                        curr_args.union(&new_args).cloned().collect(),
+                    );
+                }
+            }
+
+            ir_clauses
+                .iter()
+                .cloned()
+                .map(|clause| logic::Clause {
+                    head: logic::Literal {
+                        args: negated_lit_args
+                            .get(&clause.head.predicate)
+                            .map(|xs| {
+                                let mut v: Vec<logic::IRTerm> = xs.into_iter().cloned().collect();
+                                v.sort();
+                                v
+                            })
+                            .unwrap_or(clause.head.args),
+                        ..clause.head
+                    },
+                    body: clause
+                        .body
+                        .iter()
+                        .cloned()
+                        .map(|lit| {
+                            if let Some(args) = negated_lit_args.get(&lit.predicate) {
+                                logic::Literal {
+                                    args: {
+                                        let mut v: Vec<logic::IRTerm> =
+                                            args.into_iter().cloned().collect();
+                                        v.sort();
+                                        v
+                                    },
+                                    ..lit
+                                }
+                            } else {
+                                lit
+                            }
+                        })
+                        .collect(),
+                })
+                .collect()
+        }
+
         // convert negated expressions into negated literals, then perform translation as normal
         let without_expr_negation = handle_negation(modus_clause);
         let ir_clauses: Vec<logic::Clause> = without_expr_negation
@@ -345,94 +403,11 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
             .flat_map(|c| handle_clause(c))
             .collect();
 
-        let mut negated_lit_args: HashMap<&Predicate, HashSet<IRTerm>> = HashMap::new();
-        for ir_clause in &ir_clauses {
-            if ir_clause.head.predicate.0.starts_with("_negate_") {
-                // TODO: maybe just take the time penalty and use a vec to keep the order
-                let curr_args: HashSet<IRTerm> = negated_lit_args
-                    .get(&ir_clause.head.predicate)
-                    .unwrap_or(&HashSet::new())
-                    .clone();
-                let new_args = ir_clause.variables(false);
-                negated_lit_args.insert(
-                    &ir_clause.head.predicate,
-                    curr_args.union(&new_args).cloned().collect(),
-                );
-            }
-        }
-
-        let ir_clauses: Vec<logic::Clause> = ir_clauses
-            .iter()
-            .cloned()
-            .map(|clause| logic::Clause {
-                head: logic::Literal {
-                    args: negated_lit_args
-                        .get(&clause.head.predicate)
-                        .map(|xs| { let mut v: Vec<logic::IRTerm> = xs.into_iter().cloned().collect(); v.sort(); v } )
-                        .unwrap_or(clause.head.args),
-                    ..clause.head
-                },
-                body: clause
-                    .body
-                    .iter()
-                    .cloned()
-                    .map(|lit| {
-                        if let Some(args) = negated_lit_args.get(&lit.predicate) {
-                            logic::Literal {
-                                args: { let mut v: Vec<logic::IRTerm> = args.into_iter().cloned().collect(); v.sort(); v } ,
-                                ..lit
-                            }
-                        } else {
-                            lit
-                        }
-                    })
-                    .collect(),
-            })
-            .collect();
-
-        // TODO: needs to be done twice, but rewrite - this code is verbose
-        for ir_clause in &ir_clauses {
-            if ir_clause.head.predicate.0.starts_with("_negate_") {
-                let curr_args: HashSet<IRTerm> = negated_lit_args
-                    .get(&ir_clause.head.predicate)
-                    .unwrap_or(&HashSet::new())
-                    .clone();
-                let new_args = ir_clause.variables(false);
-                negated_lit_args.insert(
-                    &ir_clause.head.predicate,
-                    curr_args.union(&new_args).cloned().collect(),
-                );
-            }
-        }
-
-        ir_clauses
-            .iter()
-            .cloned()
-            .map(|clause| logic::Clause {
-                head: logic::Literal {
-                    args: negated_lit_args
-                        .get(&clause.head.predicate)
-                        .map(|xs| { let mut v: Vec<logic::IRTerm> = xs.into_iter().cloned().collect(); v.sort(); v } )
-                        .unwrap_or(clause.head.args),
-                    ..clause.head
-                },
-                body: clause
-                    .body
-                    .iter()
-                    .cloned()
-                    .map(|lit| {
-                        if let Some(args) = negated_lit_args.get(&lit.predicate) {
-                            logic::Literal {
-                                args: { let mut v: Vec<logic::IRTerm> = args.into_iter().cloned().collect(); v.sort(); v } ,
-                                ..lit
-                            }
-                        } else {
-                            lit
-                        }
-                    })
-                    .collect(),
-            })
-            .collect()
+        // We perform this exactly twice because of nested negation.
+        // The second time would include variables that are newly exposed in _negate_id.
+        // This isn't a fixpoint, it should require exactly two calls.
+        let exposed_1 = exposed_negate_clauses(ir_clauses);
+        exposed_negate_clauses(exposed_1)
     }
 }
 
@@ -445,7 +420,8 @@ mod tests {
     /// Should be called if any tests rely on the variable index.
     /// Note that the code (currently) doesn't rely on the variable indexes, just the tests, for convenience.
     fn setup() {
-        logic::AVAILABLE_VARIABLE_INDEX.store(0, std::sync::atomic::Ordering::SeqCst)
+        logic::AVAILABLE_VARIABLE_INDEX.store(0, std::sync::atomic::Ordering::SeqCst);
+        reset_negation_literal_id();
     }
 
     #[test]
@@ -629,7 +605,7 @@ mod tests {
     #[test]
     #[serial]
     fn translates_negated_and() {
-        reset_negation_literal_id();
+        setup();
 
         let modus_clause: ModusClause = "foo :- !(a, b, c).".parse().unwrap();
         let expected: Vec<logic::Clause> = vec![
@@ -648,7 +624,7 @@ mod tests {
     #[test]
     #[serial]
     fn translates_negated_or() {
-        reset_negation_literal_id();
+        setup();
 
         let modus_clause: ModusClause = "foo :- !(a; b; c).".parse().unwrap();
         let expected: Vec<logic::Clause> = vec![
@@ -669,7 +645,7 @@ mod tests {
     #[test]
     #[serial]
     fn translated_negated_with_variable() {
-        reset_negation_literal_id();
+        setup();
 
         let modus_clause: ModusClause = "foo :- !(a(X), b(X)), x(X).".parse().unwrap();
         let expected: Vec<logic::Clause> = vec![
@@ -688,12 +664,22 @@ mod tests {
     #[test]
     #[serial]
     fn translation_negation_with_anonymous() {
-        reset_negation_literal_id();
+        setup();
 
-        // TODO: decent way to test with anon terms?
         let modus_clause: ModusClause = "foo :- !(a(X, _) ; b(X, Y)), x(X).".parse().unwrap();
         let expected: Vec<logic::Clause> = vec![
-            "_negate_0(X, Y) :- a(X, _).".parse().unwrap(),
+            logic::Clause {
+                head: "_negate_0(X, Y)".parse().unwrap(),
+                body: vec![logic::Literal {
+                    positive: true,
+                    position: None,
+                    predicate: Predicate("a".into()),
+                    args: vec![
+                        IRTerm::UserVariable("X".into()),
+                        IRTerm::AnonymousVariable(0),
+                    ],
+                }],
+            },
             "_negate_0(X, Y) :- b(X, Y).".parse().unwrap(),
             "foo :- !_negate_0(X, Y), x(X).".parse().unwrap(),
         ];
@@ -709,12 +695,14 @@ mod tests {
     #[test]
     #[serial]
     fn translation_nested_negation() {
-        reset_negation_literal_id();
+        setup();
 
         let modus_clause: ModusClause = "foo :- !(a(Z) , !(b(X), c(Y))), x(X).".parse().unwrap();
         let expected: Vec<logic::Clause> = vec![
             "_negate_1(X, Y) :- b(X), c(Y).".parse().unwrap(),
-            "_negate_0(X, Y, Z) :- a(Z), !_negate_1(X, Y).".parse().unwrap(),
+            "_negate_0(X, Y, Z) :- a(Z), !_negate_1(X, Y)."
+                .parse()
+                .unwrap(),
             "foo :- !_negate_0(X, Y, Z), x(X).".parse().unwrap(),
         ];
 

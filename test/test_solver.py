@@ -138,3 +138,15 @@ class TestSolver(ModusTestCase):
         """)
 
         images = self.build(md, 'foo(X)', should_succeed=False)
+
+    def test_supports_nested_negation_binding(self):
+        md = dedent("""\
+            foo(X) :- !(t(X), !p(X)), a(X).
+            a(X) :- from(X).
+            p("alpine:3.15").
+            t("alpine:3.15").
+        """)
+
+        images = self.build(md, 'foo("alpine:3.15")', should_succeed=True)
+        self.assertEqual(len(images), 1)
+        self.assertIn(Fact("foo", ("alpine:3.15",)), images)
