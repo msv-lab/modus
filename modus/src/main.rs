@@ -27,7 +27,7 @@ use codespan_reporting::{
     },
 };
 use colored::Colorize;
-use modus_lib::sld::tree_from_modusfile;
+use modus_lib::{analysis::ModusSemantics, sld::tree_from_modusfile};
 use modus_lib::transpiler::render_tree;
 use modus_lib::*;
 use ptree::write_tree;
@@ -171,14 +171,6 @@ fn main() {
                                     This flag allows you to use something other than the default, for example for development on Modus itself."))
                         .default_value(buildkit::FRONTEND_IMAGE),
                 )
-                .arg(
-                    Arg::with_name("IMPORT")
-                        .long("import")
-                        .short("i")
-                        .value_name("FILE")
-                        .takes_value(true)
-                        .help("Imports the given CSV file and includes the rows as ground facts.")
-                )
         )
         .subcommand(
             App::new("proof")
@@ -253,8 +245,9 @@ fn main() {
                     std::process::exit(1);
                 }
             };
+            let kind_res = mf.kinds();
             if !analysis::check_and_output_analysis(
-                &mf,
+                &kind_res,
                 false,
                 &mut err_writer.lock(),
                 &config,
@@ -294,19 +287,15 @@ fn main() {
                     std::process::exit(1);
                 }
             };
+            let kind_res = mf.kinds();
             if !analysis::check_and_output_analysis(
-                &mf,
+                &kind_res,
                 false,
                 &mut err_writer.lock(),
                 &config,
                 &file,
             ) {
                 std::process::exit(1)
-            }
-
-            if let Some(import_file) = sub.value_of("IMPORT") {
-                // TODO
-                unimplemented!()
             }
 
             let build_plan = match imagegen::plan_from_modusfile(mf, query) {
@@ -433,8 +422,9 @@ fn main() {
                     modus_f.0.len()
                 ),
                 (Ok(modus_f), Some(e)) => {
+                    let kind_res = modus_f.kinds();
                     if !analysis::check_and_output_analysis(
-                        &modus_f,
+                        &kind_res,
                         false,
                         &mut err_writer.lock(),
                         &config,
@@ -465,7 +455,7 @@ fn main() {
                                 );
 
                                 for (_, proof) in proofs {
-                                    proof.pretty_print(&clauses).expect("error when printing");
+                                    proof.pretty_print(&clauses, &kind_res.pred_kind).expect("error when printing");
                                 }
                             }
                             Err(e) => {
@@ -497,8 +487,9 @@ fn main() {
 
             match file.source().parse::<Modusfile>() {
                 Ok(mf) => {
+                    let kind_res = mf.kinds();
                     if !analysis::check_and_output_analysis(
-                        &mf,
+                        &kind_res,
                         is_verbose,
                         &mut err_writer.lock(),
                         &config,

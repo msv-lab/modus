@@ -391,15 +391,14 @@ pub fn check_and_output_analysis<
     W: Write + codespan_reporting::term::termcolor::WriteColor,
     F: Files<'files, FileId = ()>,
 >(
-    mf: &Modusfile,
+    kind_res: &KindResult,
     verbose: bool,
     out: &mut W,
     config: &Config,
     file: &'files F,
 ) -> bool {
-    let kind_res = mf.kinds();
     if verbose {
-        for msg in kind_res.messages {
+        for msg in &kind_res.messages {
             term::emit(out, config, file, &msg).expect("Error when writing to stderr.");
         }
     }
