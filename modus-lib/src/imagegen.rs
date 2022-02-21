@@ -6,6 +6,7 @@ use crate::analysis::{Kind, ModusSemantics};
 use crate::logic::{Clause, IRTerm, Literal, Predicate};
 use crate::modusfile::{self, Modusfile};
 use crate::sld::{self, ClauseId, Proof, ResolutionError};
+use crate::translate::translate_modusfile;
 use crate::unification::Substitute;
 
 use codespan_reporting::diagnostic::Diagnostic;
@@ -782,14 +783,7 @@ pub fn plan_from_modusfile(
     };
 
     let mf_with_query = Modusfile(mf.0.into_iter().chain(iter::once(user_clause)).collect());
-    let ir_clauses: Vec<Clause> = mf_with_query
-        .0
-        .iter()
-        .flat_map(|mc| {
-            let clauses: Vec<Clause> = mc.into();
-            clauses
-        })
-        .collect();
+    let ir_clauses: Vec<Clause> = translate_modusfile(&mf_with_query);
 
     let q_clause = ir_clauses
         .iter()

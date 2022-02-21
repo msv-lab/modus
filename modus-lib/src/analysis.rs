@@ -19,6 +19,7 @@ use crate::builtin::select_builtin;
 use crate::logic::{self, Literal, Predicate, SpannedPosition};
 use crate::modusfile::Modusfile;
 use crate::modusfile::{Expression, ModusClause};
+use crate::translate::translate_modusfile;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Kind {
@@ -428,6 +429,43 @@ impl PredicateDependency for Modusfile {
     }
 }
 
+fn check_negated_logic_kind(
+    ir_clauses: &Vec<logic::Clause>,
+    pred_kind: &HashMap<Predicate, Kind>,
+) -> Result<(), Vec<Diagnostic<()>>> {
+    let mut errs = Vec::new();
+    for c in ir_clauses {
+        for lit in &c.body {
+            let k = pred_kind.get(&lit.predicate);
+            // We move on if we don't know what kind this pred is.
+            if k.is_some() && k != Some(&Kind::Logic) && !lit.positive {
+                // We disallow negating non-logical predicate to encourage better written
+                // Modusfiles.
+                // Also, maybe SLDNF should be considered an implementation detail and
+                // so this would make it easier to switch to different negation semantics.
+                let mut diag = Diagnostic::error()
+                    .with_message("Negating a non-logical predicate is disallowed.")
+                    .with_notes(vec![format!(
+                        "{} was found to be of kind {:?}.",
+                        lit.predicate,
+                        k.unwrap()
+                    )]);
+                if let Some(s) = &lit.position {
+                    diag =
+                        diag.with_labels(vec![Label::primary((), s.offset..(s.offset + s.length))]);
+                }
+                errs.push(diag);
+            }
+        }
+    }
+
+    if errs.is_empty() {
+        Ok(())
+    } else {
+        Err(errs)
+    }
+}
+
 /// Returns true if the results of the check were satisfactory; we don't need to terminate.
 pub fn check_and_output_analysis<
     'files,
@@ -446,7 +484,19 @@ pub fn check_and_output_analysis<
             term::emit(out, config, file, &msg).expect("Error when writing to stderr.");
         }
     }
-    for err in &kind_res.errs {
+
+    let ir_clauses = translate_modusfile(mf);
+
+    let errs = kind_res
+        .errs
+        .into_iter()
+        .chain(
+            check_negated_logic_kind(&ir_clauses, &kind_res.pred_kind)
+                .err()
+                .unwrap_or(Vec::new()),
+        )
+        .collect::<Vec<_>>();
+    for err in &errs {
         term::emit(out, config, file, err).expect("Error when writing to stderr.");
     }
 
@@ -465,10 +515,7 @@ pub fn check_and_output_analysis<
         return false;
     }
 
-    kind_res
-        .errs
-        .iter()
-        .all(|err| err.severity != Severity::Error)
+    errs.iter().all(|err| err.severity != Severity::Error)
 }
 
 #[cfg(test)]

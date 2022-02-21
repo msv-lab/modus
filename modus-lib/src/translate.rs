@@ -187,9 +187,7 @@ fn handle_negation(modus_clause: &modusfile::ModusClause) -> Vec<modusfile::Modu
                 let new_negate_literal = logic::Literal {
                     positive: true,
                     position: None,
-                    predicate: Predicate(
-                        format!("_negate_{}", fetch_add_negation_literal_id()),
-                    ),
+                    predicate: Predicate(format!("_negate_{}", fetch_add_negation_literal_id())),
                     args: vec![], // will need to expose the variables later
                 };
                 let new_clause = modusfile::ModusClause {
@@ -343,7 +341,9 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
             let mut negated_lit_args: HashMap<&Predicate, Vec<IRTerm>> = HashMap::new();
             for ir_clause in &ir_clauses {
                 if ir_clause.head.predicate.0.starts_with("_negate_") {
-                    let curr_args = negated_lit_args.entry(&ir_clause.head.predicate).or_insert(Vec::new());
+                    let curr_args = negated_lit_args
+                        .entry(&ir_clause.head.predicate)
+                        .or_insert(Vec::new());
                     let new_args = ir_clause.variables(false);
                     for arg in new_args {
                         if !curr_args.contains(&arg) {
@@ -404,6 +404,10 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
         let exposed_1 = exposed_negate_clauses(ir_clauses);
         exposed_negate_clauses(exposed_1)
     }
+}
+
+pub fn translate_modusfile(mf: &modusfile::Modusfile) -> Vec<logic::Clause> {
+    mf.0.iter().flat_map(Vec::from).collect()
 }
 
 #[cfg(test)]

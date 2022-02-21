@@ -26,6 +26,7 @@ use crate::{
     builtin,
     logic::Predicate,
     modusfile::{self, Modusfile},
+    translate::translate_modusfile,
     unification::{compose_extend, compose_no_extend, Rename, Substitution},
 };
 use crate::{builtin::SelectBuiltinResult, unification::RenameWithSubstitution};
@@ -1131,14 +1132,9 @@ pub fn tree_from_modusfile(
         },
         body: Some(query),
     };
-    let clauses: Vec<Clause> =
-        mf.0.iter()
-            .chain(iter::once(&user_clause))
-            .flat_map(|mc| {
-                let clauses: Vec<Clause> = mc.into();
-                clauses
-            })
-            .collect();
+    let clauses: Vec<Clause> = translate_modusfile(&Modusfile(
+        mf.0.into_iter().chain(iter::once(user_clause)).collect(),
+    ));
 
     let q_clause = clauses
         .iter()
