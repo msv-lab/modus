@@ -1073,7 +1073,7 @@ pub fn proofs(tree: &Tree, rules: &[Clause], goal: &Goal) -> HashMap<Goal, Proof
     // assume lid of root is 0, as if it came from a clause "true :- goal" for query "true", but this is not used anyway
     let goal_vars = goal
         .iter()
-        .map(|l| l.variables())
+        .map(|l| l.variables(true))
         .reduce(|mut l, r| {
             l.extend(r);
             l

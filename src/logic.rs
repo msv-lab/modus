@@ -116,7 +116,7 @@ impl From<String> for Predicate {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
 pub enum IRTerm {
     Constant(String),
     UserVariable(String),
@@ -164,6 +164,13 @@ impl IRTerm {
             IRTerm::RenamedVariable(_, t) => t.get_original(),
             t => t,
         }
+    }
+
+    /// Returns `true` if the irterm is [`AnonymousVariable`].
+    ///
+    /// [`AnonymousVariable`]: IRTerm::AnonymousVariable
+    pub fn is_anonymous_variable(&self) -> bool {
+        matches!(self, Self::AnonymousVariable(..))
     }
 }
 
@@ -240,11 +247,11 @@ pub trait Ground {
 }
 
 impl IRTerm {
-    pub fn variables(&self) -> HashSet<IRTerm> {
+    pub fn variables(&self, include_anonymous: bool) -> HashSet<IRTerm> {
         // the 'variables' of an IRTerm is just itself, if it's not a constant
         let mut set = HashSet::<IRTerm>::new();
         if let IRTerm::Constant(_) = self {
-        } else {
+        } else if !self.is_anonymous_variable() || include_anonymous {
             set.insert(self.clone());
         }
         set
@@ -255,10 +262,10 @@ impl Literal {
     pub fn signature(&self) -> Signature {
         Signature(self.predicate.clone(), self.args.len().try_into().unwrap())
     }
-    pub fn variables(&self) -> HashSet<IRTerm> {
+    pub fn variables(&self, include_anonymous: bool) -> HashSet<IRTerm> {
         self.args
             .iter()
-            .map(|r| r.variables())
+            .map(|r| r.variables(include_anonymous))
             .reduce(|mut l, r| {
                 l.extend(r);
                 l
@@ -295,17 +302,17 @@ impl<T> Literal<T> {
 }
 
 impl Clause {
-    pub fn variables(&self) -> HashSet<IRTerm> {
+    pub fn variables(&self, include_anonymous: bool) -> HashSet<IRTerm> {
         let mut body = self
             .body
             .iter()
-            .map(|r| r.variables())
+            .map(|r| r.variables(include_anonymous))
             .reduce(|mut l, r| {
                 l.extend(r);
                 l
             })
             .unwrap_or_default();
-        body.extend(self.head.variables());
+        body.extend(self.head.variables(include_anonymous));
         body
     }
 }
@@ -318,13 +325,13 @@ impl Ground for IRTerm {
 
 impl Ground for Literal {
     fn is_ground(&self) -> bool {
-        self.variables().is_empty()
+        self.variables(true).is_empty()
     }
 }
 
 impl Ground for Clause {
     fn is_ground(&self) -> bool {
-        self.variables().is_empty()
+        self.variables(true).is_empty()
     }
 }
 
@@ -466,7 +473,7 @@ pub mod parser {
     //TODO: I need to think more carefully how to connect this to stage name
     pub fn literal_identifier(i: Span) -> IResult<Span, Span> {
         recognize(pair(
-            alpha1,
+            alt((alpha1, tag("_"))),
             many0(alt((alphanumeric1, tag("_"), tag("-")))),
         ))(i)
     }

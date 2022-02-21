@@ -15,13 +15,18 @@
 // You should have received a copy of the GNU General Public License
 // along with Modus.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::sync::atomic::AtomicUsize;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::atomic::AtomicUsize,
+};
 
 use nom::{bytes::streaming::tag, sequence::delimited};
+use petgraph::visit::Walker;
 
 use crate::{
     logic::{self, parser::Span, IRTerm, Predicate, SpannedPosition},
     modusfile::{
+        self,
         parser::{modus_var, outside_format_expansion, process_raw_string},
         Expression, ModusClause, ModusTerm,
     },
@@ -121,6 +126,18 @@ pub(crate) fn reset_operator_pair_id() {
     OPERATOR_PAIR_ID.store(0, std::sync::atomic::Ordering::SeqCst);
 }
 
+/// Used to generate unique predicate names in literals that replace negated expressions.
+static NEGATION_LITERAL_ID: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) fn fetch_add_negation_literal_id() -> usize {
+    NEGATION_LITERAL_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+}
+
+#[cfg(test)]
+pub(crate) fn reset_negation_literal_id() {
+    NEGATION_LITERAL_ID.store(0, std::sync::atomic::Ordering::SeqCst);
+}
+
 /// Takes a ModusTerm and converts it to an IRTerm.
 ///
 /// If any additional constraints are needed, such as when the term is a format
@@ -141,37 +158,97 @@ fn translate_term(t: &ModusTerm) -> (IRTerm, Vec<logic::Literal>) {
     }
 }
 
+/// Replaces negation on expressions with literals and new clauses.
+fn handle_negation(modus_clause: &modusfile::ModusClause) -> Vec<modusfile::ModusClause> {
+    fn handle_expression(
+        expr: &modusfile::Expression,
+        clauses: &mut Vec<modusfile::ModusClause>,
+    ) -> modusfile::Expression {
+        match expr {
+            Expression::Literal(l) => Expression::Literal(l.clone()),
+            Expression::OperatorApplication(s, e, op) => Expression::OperatorApplication(
+                s.clone(),
+                Box::new(handle_expression(e, clauses)),
+                op.clone(),
+            ),
+            Expression::And(s, true, e1, e2) => Expression::And(
+                s.clone(),
+                true,
+                Box::new(handle_expression(e1, clauses)),
+                Box::new(handle_expression(e2, clauses)),
+            ),
+            Expression::Or(s, true, e1, e2) => Expression::Or(
+                s.clone(),
+                true,
+                Box::new(handle_expression(e1, clauses)),
+                Box::new(handle_expression(e2, clauses)),
+            ),
+
+            Expression::And(s, false, _, _) | Expression::Or(s, false, _, _) => {
+                let new_negate_literal = logic::Literal {
+                    positive: true,
+                    position: None,
+                    predicate: Predicate(
+                        format!("_negate_{}", fetch_add_negation_literal_id()).into(),
+                    ),
+                    args: vec![], // will need to expose the variables later
+                };
+                let new_clause = modusfile::ModusClause {
+                    head: new_negate_literal.clone(),
+                    body: Some(expr.negate_current()),
+                };
+
+                clauses.extend(handle_negation(&new_clause));
+                Expression::Literal(logic::Literal {
+                    positive: false,
+                    position: s.clone(),
+                    ..new_negate_literal
+                })
+            }
+        }
+    }
+
+    let mut clauses = Vec::new();
+    let new_clause = modusfile::ModusClause {
+        head: modus_clause.head.clone(),
+        body: modus_clause
+            .body
+            .as_ref()
+            .map(|e| handle_expression(&e, &mut clauses)),
+    };
+    clauses.push(new_clause);
+    clauses
+}
+
 impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
     /// Convert a ModusClause into one supported by the IR.
     /// It converts logical or/; into multiple rules, which should be equivalent.
     fn from(modus_clause: &crate::modusfile::ModusClause) -> Self {
-        let mut clauses: Vec<logic::Clause> = Vec::new();
+        fn handle_clause(modus_clause: &modusfile::ModusClause) -> Vec<logic::Clause> {
+            match &modus_clause.body {
+                Some(Expression::Literal(l)) => {
+                    let mut literals: Vec<logic::Literal> = Vec::new();
+                    let mut new_literal_args: Vec<logic::IRTerm> = Vec::new();
 
-        // REVIEW: lots of cloning going on below, double check if this is necessary.
-        match &modus_clause.body {
-            Some(Expression::Literal(l)) => {
-                let mut literals: Vec<logic::Literal> = Vec::new();
-                let mut new_literal_args: Vec<logic::IRTerm> = Vec::new();
+                    for arg in &l.args {
+                        let (translated_arg, new_literals) = translate_term(arg);
+                        new_literal_args.push(translated_arg);
+                        literals.extend_from_slice(&new_literals);
+                    }
+                    literals.push(logic::Literal {
+                        positive: l.positive,
+                        position: l.position.clone(),
+                        predicate: l.predicate.clone(),
+                        args: new_literal_args,
+                    });
 
-                for arg in &l.args {
-                    let (translated_arg, new_literals) = translate_term(arg);
-                    new_literal_args.push(translated_arg);
-                    literals.extend_from_slice(&new_literals);
+                    vec![logic::Clause {
+                        head: modus_clause.head.clone().into(),
+                        body: literals,
+                    }]
                 }
-                literals.push(logic::Literal {
-                    positive: l.positive,
-                    position: l.position.clone(),
-                    predicate: l.predicate.clone(),
-                    args: new_literal_args,
-                });
-                clauses.push(logic::Clause {
-                    head: modus_clause.head.clone().into(),
-                    body: literals,
-                });
-            }
 
-            Some(Expression::OperatorApplication(_, expr, op)) => clauses.extend(
-                Self::from(&ModusClause {
+                Some(Expression::OperatorApplication(_, expr, op)) => handle_clause(&ModusClause {
                     head: modus_clause.head.clone(),
                     body: Some(*expr.clone()),
                 })
@@ -203,79 +280,159 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
                         head: c.head.clone(),
                         body,
                     }
-                }),
-            ),
+                })
+                .collect(),
 
-            Some(Expression::And(_, true, expr1, expr2)) => {
-                let c1 = Self::from(&ModusClause {
-                    head: modus_clause.head.clone(),
-                    body: Some(*expr1.clone()),
-                });
-                let c2 = Self::from(&ModusClause {
-                    head: modus_clause.head.clone(),
-                    body: Some(*expr2.clone()),
-                });
+                Some(Expression::And(_, true, expr1, expr2)) => {
+                    let c1 = handle_clause(&ModusClause {
+                        head: modus_clause.head.clone(),
+                        body: Some(*expr1.clone()),
+                    });
+                    let c2 = handle_clause(&ModusClause {
+                        head: modus_clause.head.clone(),
+                        body: Some(*expr2.clone()),
+                    });
 
-                // If we have the possible rules for left and right sub expressions,
-                // consider the cartesian product of them.
-                for clause1 in &c1 {
-                    for clause2 in &c2 {
-                        clauses.push(logic::Clause {
-                            head: clause1.head.clone(),
-                            body: clause1
-                                .body
-                                .clone()
-                                .into_iter()
-                                .chain(clause2.body.clone().into_iter())
-                                .collect(),
-                        })
+                    let mut clauses = Vec::new();
+                    // If we have the possible rules for left and right sub expressions,
+                    // consider the cartesian product of them.
+                    for clause1 in &c1 {
+                        for clause2 in &c2 {
+                            clauses.push(logic::Clause {
+                                head: clause1.head.clone(),
+                                body: clause1
+                                    .body
+                                    .clone()
+                                    .into_iter()
+                                    .chain(clause2.body.clone().into_iter())
+                                    .collect(),
+                            })
+                        }
                     }
+                    clauses
                 }
-            }
-            Some(Expression::Or(_, true, expr1, expr2)) => {
-                let c1 = Self::from(&ModusClause {
-                    head: modus_clause.head.clone(),
-                    body: Some(*expr1.clone()),
-                });
-                let c2 = Self::from(&ModusClause {
-                    head: modus_clause.head.clone(),
-                    body: Some(*expr2.clone()),
-                });
 
-                clauses.extend(c1);
-                clauses.extend(c2);
-            }
+                Some(Expression::Or(_, true, expr1, expr2)) => {
+                    let mut c1 = handle_clause(&ModusClause {
+                        head: modus_clause.head.clone(),
+                        body: Some(*expr1.clone()),
+                    });
+                    let mut c2 = handle_clause(&ModusClause {
+                        head: modus_clause.head.clone(),
+                        body: Some(*expr2.clone()),
+                    });
 
-            // If this is a negated expression, apply De Morgan's laws and translate that instead.
-            Some(Expression::And(s, false, expr1, expr2)) => {
-                return Self::from(&ModusClause {
-                    head: modus_clause.head.clone(),
-                    body: Some(Expression::Or(
-                        s.clone(),
-                        true,
-                        Box::new(expr1.negate_current()),
-                        Box::new(expr2.negate_current()),
-                    )),
-                })
-            }
-            Some(Expression::Or(s, false, expr1, expr2)) => {
-                return Self::from(&ModusClause {
-                    head: modus_clause.head.clone(),
-                    body: Some(Expression::And(
-                        s.clone(),
-                        true,
-                        Box::new(expr1.negate_current()),
-                        Box::new(expr2.negate_current()),
-                    )),
-                })
-            }
+                    c1.append(&mut c2);
+                    c1
+                }
 
-            None => clauses.push(logic::Clause {
-                head: modus_clause.head.clone().into(),
-                body: Vec::new(),
-            }),
+                // negated expression pairs should be handled in a separate pass
+                Some(Expression::And(_, false, _, _)) | Some(Expression::Or(_, false, _, _)) => {
+                    unreachable!()
+                }
+
+                None => vec![logic::Clause {
+                    head: modus_clause.head.clone().into(),
+                    body: Vec::new(),
+                }],
+            }
         }
-        clauses
+
+        // convert negated expressions into negated literals, then perform translation as normal
+        let without_expr_negation = handle_negation(modus_clause);
+        let ir_clauses: Vec<logic::Clause> = without_expr_negation
+            .iter()
+            .flat_map(|c| handle_clause(c))
+            .collect();
+
+        let mut negated_lit_args: HashMap<&Predicate, HashSet<IRTerm>> = HashMap::new();
+        for ir_clause in &ir_clauses {
+            if ir_clause.head.predicate.0.starts_with("_negate_") {
+                // TODO: maybe just take the time penalty and use a vec to keep the order
+                let curr_args: HashSet<IRTerm> = negated_lit_args
+                    .get(&ir_clause.head.predicate)
+                    .unwrap_or(&HashSet::new())
+                    .clone();
+                let new_args = ir_clause.variables(false);
+                negated_lit_args.insert(
+                    &ir_clause.head.predicate,
+                    curr_args.union(&new_args).cloned().collect(),
+                );
+            }
+        }
+
+        let ir_clauses: Vec<logic::Clause> = ir_clauses
+            .iter()
+            .cloned()
+            .map(|clause| logic::Clause {
+                head: logic::Literal {
+                    args: negated_lit_args
+                        .get(&clause.head.predicate)
+                        .map(|xs| { let mut v: Vec<logic::IRTerm> = xs.into_iter().cloned().collect(); v.sort(); v } )
+                        .unwrap_or(clause.head.args),
+                    ..clause.head
+                },
+                body: clause
+                    .body
+                    .iter()
+                    .cloned()
+                    .map(|lit| {
+                        if let Some(args) = negated_lit_args.get(&lit.predicate) {
+                            logic::Literal {
+                                args: { let mut v: Vec<logic::IRTerm> = args.into_iter().cloned().collect(); v.sort(); v } ,
+                                ..lit
+                            }
+                        } else {
+                            lit
+                        }
+                    })
+                    .collect(),
+            })
+            .collect();
+
+        // TODO: needs to be done twice, but rewrite - this code is verbose
+        for ir_clause in &ir_clauses {
+            if ir_clause.head.predicate.0.starts_with("_negate_") {
+                let curr_args: HashSet<IRTerm> = negated_lit_args
+                    .get(&ir_clause.head.predicate)
+                    .unwrap_or(&HashSet::new())
+                    .clone();
+                let new_args = ir_clause.variables(false);
+                negated_lit_args.insert(
+                    &ir_clause.head.predicate,
+                    curr_args.union(&new_args).cloned().collect(),
+                );
+            }
+        }
+
+        ir_clauses
+            .iter()
+            .cloned()
+            .map(|clause| logic::Clause {
+                head: logic::Literal {
+                    args: negated_lit_args
+                        .get(&clause.head.predicate)
+                        .map(|xs| { let mut v: Vec<logic::IRTerm> = xs.into_iter().cloned().collect(); v.sort(); v } )
+                        .unwrap_or(clause.head.args),
+                    ..clause.head
+                },
+                body: clause
+                    .body
+                    .iter()
+                    .cloned()
+                    .map(|lit| {
+                        if let Some(args) = negated_lit_args.get(&lit.predicate) {
+                            logic::Literal {
+                                args: { let mut v: Vec<logic::IRTerm> = args.into_iter().cloned().collect(); v.sort(); v } ,
+                                ..lit
+                            }
+                        } else {
+                            lit
+                        }
+                    })
+                    .collect(),
+            })
+            .collect()
     }
 }
 
@@ -470,12 +627,14 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn translates_negated_and() {
+        reset_negation_literal_id();
+
         let modus_clause: ModusClause = "foo :- !(a, b, c).".parse().unwrap();
         let expected: Vec<logic::Clause> = vec![
-            "foo :- !a.".parse().unwrap(),
-            "foo :- !b.".parse().unwrap(),
-            "foo :- !c.".parse().unwrap(),
+            "_negate_0 :- a, b, c.".parse().unwrap(),
+            "foo :- !_negate_0.".parse().unwrap(),
         ];
 
         let actual: Vec<logic::Clause> = (&modus_clause).into();
@@ -487,9 +646,77 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn translates_negated_or() {
+        reset_negation_literal_id();
+
         let modus_clause: ModusClause = "foo :- !(a; b; c).".parse().unwrap();
-        let expected: Vec<logic::Clause> = vec!["foo :- !a, !b, !c.".parse().unwrap()];
+        let expected: Vec<logic::Clause> = vec![
+            "_negate_0 :- a.".parse().unwrap(),
+            "_negate_0 :- b.".parse().unwrap(),
+            "_negate_0 :- c.".parse().unwrap(),
+            "foo :- !_negate_0.".parse().unwrap(),
+        ];
+
+        let actual: Vec<logic::Clause> = (&modus_clause).into();
+        assert_eq!(expected.len(), actual.len());
+        assert!(expected
+            .iter()
+            .zip(actual)
+            .all(|(a, b)| a.eq_ignoring_position(&b)));
+    }
+
+    #[test]
+    #[serial]
+    fn translated_negated_with_variable() {
+        reset_negation_literal_id();
+
+        let modus_clause: ModusClause = "foo :- !(a(X), b(X)), x(X).".parse().unwrap();
+        let expected: Vec<logic::Clause> = vec![
+            "_negate_0(X) :- a(X), b(X).".parse().unwrap(),
+            "foo :- !_negate_0(X), x(X).".parse().unwrap(),
+        ];
+
+        let actual: Vec<logic::Clause> = (&modus_clause).into();
+        assert_eq!(expected.len(), actual.len());
+        assert!(expected
+            .iter()
+            .zip(actual)
+            .all(|(a, b)| a.eq_ignoring_position(&b)));
+    }
+
+    #[test]
+    #[serial]
+    fn translation_negation_with_anonymous() {
+        reset_negation_literal_id();
+
+        // TODO: decent way to test with anon terms?
+        let modus_clause: ModusClause = "foo :- !(a(X, _) ; b(X, Y)), x(X).".parse().unwrap();
+        let expected: Vec<logic::Clause> = vec![
+            "_negate_0(X, Y) :- a(X, _).".parse().unwrap(),
+            "_negate_0(X, Y) :- b(X, Y).".parse().unwrap(),
+            "foo :- !_negate_0(X, Y), x(X).".parse().unwrap(),
+        ];
+
+        let actual: Vec<logic::Clause> = (&modus_clause).into();
+        assert_eq!(expected.len(), actual.len());
+        assert!(expected
+            .iter()
+            .zip(actual)
+            .all(|(a, b)| a.eq_ignoring_position(&b)));
+    }
+
+    #[test]
+    #[serial]
+    fn translation_nested_negation() {
+        reset_negation_literal_id();
+
+        let modus_clause: ModusClause = "foo :- !(a(Z) , !(b(X), c(Y))), x(X).".parse().unwrap();
+        let expected: Vec<logic::Clause> = vec![
+            "_negate_1(X, Y) :- b(X), c(Y).".parse().unwrap(),
+            "_negate_0(X, Y, Z) :- a(Z), !_negate_1(X, Y).".parse().unwrap(),
+            "foo :- !_negate_0(X, Y, Z), x(X).".parse().unwrap(),
+        ];
 
         let actual: Vec<logic::Clause> = (&modus_clause).into();
         assert_eq!(expected.len(), actual.len());

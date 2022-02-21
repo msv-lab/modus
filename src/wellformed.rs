@@ -54,7 +54,7 @@ pub fn check_grounded_variables(
         let body_vars = c
             .body
             .iter()
-            .map(|r| r.variables())
+            .map(|r| r.variables(true))
             .reduce(|mut l, r| {
                 l.extend(r);
                 l
