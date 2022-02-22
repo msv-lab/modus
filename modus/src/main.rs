@@ -17,7 +17,7 @@
 mod buildkit;
 mod reporting;
 
-use clap::{crate_version, Command, Arg};
+use clap::{crate_version, Command, Arg, arg};
 use codespan_reporting::{
     files::SimpleFile,
     term::{
@@ -191,8 +191,8 @@ fn main() {
                         .help("Specify the target query to prove")
                         .index(2),
                 )
-                .arg_from_usage("-e --explain 'Prints out an explanation of the steps taken in resolution.'")
-                .arg_from_usage("-g --graph 'Outputs a (DOT) graph that of the SLD tree traversed in resolution.'"),
+                .arg(arg!(-e --explain "Prints out an explanation of the steps taken in resolution."))
+                .arg(arg!(-g --graph "Outputs a (DOT) graph that of the SLD tree traversed in resolution.")),
         )
         .subcommand(
             Command::new("check")
@@ -217,7 +217,7 @@ fn main() {
                         .required(true)
                         .allow_invalid_utf8(true),
                 )
-                .arg_from_usage("-v --verbose 'Displays the evaluated kinds for all the clauses.")
+                .arg(arg!(-v --verbose "display the evaluated kinds for all the clauses"))
         )
         .get_matches();
 
@@ -243,6 +243,7 @@ fn main() {
             let kind_res = mf.kinds();
             if !analysis::check_and_output_analysis(
                 &kind_res,
+                &mf,
                 false,
                 &mut err_writer.lock(),
                 &config,
@@ -285,6 +286,7 @@ fn main() {
             let kind_res = mf.kinds();
             if !analysis::check_and_output_analysis(
                 &kind_res,
+                &mf,
                 false,
                 &mut err_writer.lock(),
                 &config,
@@ -420,6 +422,7 @@ fn main() {
                     let kind_res = modus_f.kinds();
                     if !analysis::check_and_output_analysis(
                         &kind_res,
+                        &modus_f,
                         false,
                         &mut err_writer.lock(),
                         &config,
@@ -470,19 +473,13 @@ fn main() {
                 }
             }
         }
-<<<<<<< HEAD
-        ("check", Some(sub)) => {
+        ("check", sub) => {
             let context_dir = sub.value_of_os("CONTEXT").unwrap();
             let input_file = sub
                 .value_of_os("FILE")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| Path::new(context_dir).join("Modusfile"));
             let file = get_file_or_exit(input_file.as_path());
-=======
-        ("check", sub) => {
-            let input_file = sub.value_of("FILE").unwrap();
-            let file = get_file_or_exit(Path::new(input_file));
->>>>>>> main
 
             let is_verbose = sub.is_present("verbose");
 
@@ -491,6 +488,7 @@ fn main() {
                     let kind_res = mf.kinds();
                     if !analysis::check_and_output_analysis(
                         &kind_res,
+                        &mf,
                         is_verbose,
                         &mut err_writer.lock(),
                         &config,

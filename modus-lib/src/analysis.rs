@@ -489,6 +489,7 @@ pub fn check_and_output_analysis<
     F: Files<'files, FileId = ()>,
 >(
     kind_res: &KindResult,
+    mf: &Modusfile,
     verbose: bool,
     out: &mut W,
     config: &Config,
@@ -501,15 +502,14 @@ pub fn check_and_output_analysis<
     }
 
     let ir_clauses = translate_modusfile(mf);
+    let negation_errors = check_negated_logic_kind(&ir_clauses, &kind_res.pred_kind)
+        .err()
+        .unwrap_or(Vec::new());
 
     let errs = kind_res
         .errs
-        .into_iter()
-        .chain(
-            check_negated_logic_kind(&ir_clauses, &kind_res.pred_kind)
-                .err()
-                .unwrap_or(Vec::new()),
-        )
+        .iter()
+        .chain(&negation_errors)
         .collect::<Vec<_>>();
     for err in &errs {
         term::emit(out, config, file, err).expect("Error when writing to stderr.");
