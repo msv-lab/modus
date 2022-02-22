@@ -1,3 +1,19 @@
+// Modus, a language for building container images
+// Copyright (C) 2022 University College London
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 //! This module exist because the buildkit_llb crate doesn't provide a way to
 //! say something like Arc<dyn Trait> where Trait is implemented for any T
 //! such that Arc<T>: SingleOwnedOutput or (Arc<T>, u32): MultiOwnedOutput.
