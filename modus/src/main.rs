@@ -86,12 +86,14 @@ fn main() {
                         .value_name("FILE")
                         .short('f')
                         .long("modusfile")
+                        .allow_invalid_utf8(true)
                 )
                 .arg(
                     Arg::new("CONTEXT")
                         .help("Specify the build context directory")
                         .index(1)
-                        .required(true),
+                        .required(true)
+                        .allow_invalid_utf8(true),
                 )
                 .arg(
                     Arg::new("QUERY")
@@ -110,6 +112,7 @@ fn main() {
                         .help("Output build result as JSON")
                         .long_help("Output build result as JSON\n\
                                     If this flag is specified without providing a file name, output is written to stdout.")
+                        .allow_invalid_utf8(true)
                 )
                 .arg(
                     Arg::new("VERBOSE")
