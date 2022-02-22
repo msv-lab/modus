@@ -1,8 +1,15 @@
 [package]
 name = "modus-lib"
 version = "0.1.0"
-authors = ["Sergey Mechtaev <mechtaev@gmail.com>"]
+authors = ["University College London"]
 edition = "2018"
+license = "AGPL-3.0"
+description = "A language for building container images"
+homepage = "https://modus-continens.com"
+documentation = "https://docs.modus-continens.com"
+repository = "https://github.com/modus-continens/modus"
+readme = "../README.md"
+keywords = ["docker", "language", "dockerfile", "datalog", "build-system", "reproducible-builds"]
 
 [lib]
 path = "src/lib.rs"
