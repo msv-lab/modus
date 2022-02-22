@@ -23,7 +23,7 @@ path = "src/buildkit_frontend.rs"
 [dependencies]
 modus-lib = { path = "../modus-lib" }
 
-clap = "2.33.3"
+clap = { version = "3", features = ["cargo"] }
 colored = "2"
 dot = "0.1.4" # graphviz library
 thiserror = "1.0"
