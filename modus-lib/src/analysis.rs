@@ -1,3 +1,19 @@
+// Modus, a language for building container images
+// Copyright (C) 2022 University College London
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 //! This module provides helpers to perform (semantic) analysis over Modusfile ASTs.
 //!
 //! We use a fixpoint approach to evaluate predicate kinds, which deals with the issue of recursion.
@@ -13,11 +29,13 @@ use std::ops::Range;
 use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
 use codespan_reporting::files::Files;
 use codespan_reporting::term::{self, Config};
+use petgraph::algo::find_negative_cycle;
 
 use crate::builtin::select_builtin;
 use crate::logic::{self, Literal, Predicate, SpannedPosition};
 use crate::modusfile::Modusfile;
 use crate::modusfile::{Expression, ModusClause};
+use crate::translate::translate_modusfile;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Kind {
@@ -140,7 +158,7 @@ impl ModusSemantics for Modusfile {
                         Ok(expr_kind)
                     }
                 }
-                Expression::And(span, e1, e2) => {
+                Expression::And(span, true, e1, e2) => {
                     // Could propogate multiple errors up instead of terminating early with '?'
                     let sem1 = evaluate_expression(e1, pred_kind, clauses)?;
                     let sem2 = evaluate_expression(e2, pred_kind, clauses)?;
@@ -162,7 +180,7 @@ impl ModusSemantics for Modusfile {
                         Err(generate_err_diagnostic(span, e1, e2, &sem1, &sem2))
                     }
                 }
-                Expression::Or(span, e1, e2) => {
+                Expression::Or(span, true, e1, e2) => {
                     let sem1 = evaluate_expression(e1, pred_kind, clauses)?;
                     let sem2 = evaluate_expression(e2, pred_kind, clauses)?;
 
@@ -173,6 +191,9 @@ impl ModusSemantics for Modusfile {
                         Err(generate_err_diagnostic(span, e1, e2, &sem1, &sem2))
                     }
                 }
+                // A negated expression is a check for whether we can prove the expression,
+                // so `!foo` is always a logical kind, regardless of foo.
+                &Expression::And(_, false, ..) | Expression::Or(_, false, ..) => Ok(Kind::Logic),
             }
         }
 
@@ -184,6 +205,7 @@ impl ModusSemantics for Modusfile {
             (
                 from_pred.clone(),
                 select_builtin(&Literal {
+                    positive: true,
                     position: None,
                     predicate: from_pred,
                     args: vec![logic::IRTerm::Constant("".to_string())],
@@ -195,6 +217,7 @@ impl ModusSemantics for Modusfile {
             (
                 run_pred.clone(),
                 select_builtin(&Literal {
+                    positive: true,
                     position: None,
                     predicate: run_pred,
                     args: vec![logic::IRTerm::Constant("".to_string())],
@@ -206,6 +229,7 @@ impl ModusSemantics for Modusfile {
             (
                 copy_pred.clone(),
                 select_builtin(&Literal {
+                    positive: true,
                     position: None,
                     predicate: copy_pred,
                     args: vec![
@@ -321,29 +345,41 @@ trait PredicateDependency {
     ///
     /// This uses the assumption that predicate names refer to a unique groundness
     /// signature.
-    fn compute_dependency(&self) -> petgraph::Graph<&str, &str>;
+    fn compute_dependency(
+        &self,
+    ) -> (
+        petgraph::Graph<&str, f32>,
+        HashMap<&str, petgraph::graph::NodeIndex>,
+    );
+
+    fn stratifiable(&self) -> Result<(), Vec<&str>>;
 }
 
 impl PredicateDependency for Modusfile {
-    fn compute_dependency(&self) -> petgraph::Graph<&str, &str> {
-        fn get_predicate_names(expr: &Expression) -> Vec<&str> {
+    fn compute_dependency(
+        &self,
+    ) -> (
+        petgraph::Graph<&str, f32>,
+        HashMap<&str, petgraph::graph::NodeIndex>,
+    ) {
+        fn get_predicate_positivity(expr: &Expression) -> Vec<(&str, bool)> {
             match expr {
-                Expression::Literal(lit) => vec![&lit.predicate.0],
-                Expression::OperatorApplication(_, expr, _) => get_predicate_names(expr),
-                Expression::And(_, e1, e2) => {
-                    let mut pred1 = get_predicate_names(e1);
-                    pred1.append(&mut get_predicate_names(e2));
+                Expression::Literal(lit) => vec![(&lit.predicate.0, lit.positive)],
+                Expression::OperatorApplication(_, expr, _) => get_predicate_positivity(expr),
+                Expression::And(_, _, e1, e2) => {
+                    let mut pred1 = get_predicate_positivity(e1);
+                    pred1.append(&mut get_predicate_positivity(e2));
                     pred1
                 }
-                Expression::Or(_, e1, e2) => {
-                    let mut pred1 = get_predicate_names(e1);
-                    pred1.append(&mut get_predicate_names(e2));
+                Expression::Or(_, _, e1, e2) => {
+                    let mut pred1 = get_predicate_positivity(e1);
+                    pred1.append(&mut get_predicate_positivity(e2));
                     pred1
                 }
             }
         }
 
-        let mut predicate_to_dependency: HashMap<&str, HashSet<&str>> = HashMap::new();
+        let mut predicate_to_dependency: HashMap<&str, HashSet<(&str, bool)>> = HashMap::new();
         for clause in &self.0 {
             let head_pred = clause.head.predicate.0.as_str();
             if !predicate_to_dependency.contains_key(head_pred) {
@@ -351,8 +387,8 @@ impl PredicateDependency for Modusfile {
             }
 
             if let Some(expr) = &clause.body {
-                let preds = get_predicate_names(expr);
-                for pred in &preds {
+                let preds = get_predicate_positivity(expr);
+                for (pred, _) in &preds {
                     if !predicate_to_dependency.contains_key(pred) {
                         predicate_to_dependency.insert(pred, HashSet::new());
                     }
@@ -366,22 +402,83 @@ impl PredicateDependency for Modusfile {
         // there may be a better way to init a petgraph, but for now use another map to
         // store indices
         let mut label_to_idx: HashMap<&str, petgraph::graph::NodeIndex> = HashMap::new();
-        let mut g = petgraph::Graph::<&str, &str>::new();
+        let mut g = petgraph::Graph::<&str, f32>::new();
         for (k, v) in predicate_to_dependency.iter() {
             if !label_to_idx.contains_key(k) {
                 let idx = g.add_node(k);
                 label_to_idx.insert(k, idx);
             }
 
-            for pred in v.iter() {
+            for &(pred, positivity) in v {
                 if !label_to_idx.contains_key(pred) {
                     label_to_idx.insert(pred, g.add_node(pred));
                 }
-                g.update_edge(label_to_idx[k], label_to_idx[pred], "");
+                g.add_edge(
+                    label_to_idx[k],
+                    label_to_idx[pred],
+                    // this allows us to find *a cycle with a negative edge* using
+                    // an algorithm for *negative cycles*
+                    if positivity { 0.0 } else { -1.0 },
+                );
             }
         }
 
-        g
+        (g, label_to_idx)
+    }
+
+    /// "A logic program is stratified iff the dependency graph contains no cycles
+    /// containing a negative edge."
+    /// - https://core.ac.uk/download/pdf/228424655.pdf
+    fn stratifiable(&self) -> Result<(), Vec<&str>> {
+        let (g, node_indices) = self.compute_dependency();
+
+        for id in node_indices.values() {
+            if let Some(ids) = find_negative_cycle(&g, *id) {
+                return Err(ids
+                    .into_iter()
+                    .map(|id| *node_indices.iter().find(|&(_, v)| *v == id).unwrap().0)
+                    .collect());
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn check_negated_logic_kind(
+    ir_clauses: &Vec<logic::Clause>,
+    pred_kind: &HashMap<Predicate, Kind>,
+) -> Result<(), Vec<Diagnostic<()>>> {
+    let mut errs = Vec::new();
+    for c in ir_clauses {
+        for lit in &c.body {
+            let k = pred_kind.get(&lit.predicate);
+            // We move on if we don't know what kind this pred is.
+            if k.is_some() && k != Some(&Kind::Logic) && !lit.positive {
+                // We disallow negating non-logical predicate to encourage better written
+                // Modusfiles.
+                // Also, maybe SLDNF should be considered an implementation detail and
+                // so this would make it easier to switch to different negation semantics.
+                let mut diag = Diagnostic::error()
+                    .with_message("Negating a non-logical predicate is disallowed.")
+                    .with_notes(vec![format!(
+                        "{} was found to be of kind {:?}.",
+                        lit.predicate,
+                        k.unwrap()
+                    )]);
+                if let Some(s) = &lit.position {
+                    diag =
+                        diag.with_labels(vec![Label::primary((), s.offset..(s.offset + s.length))]);
+                }
+                errs.push(diag);
+            }
+        }
+    }
+
+    if errs.is_empty() {
+        Ok(())
+    } else {
+        Err(errs)
     }
 }
 
@@ -402,14 +499,38 @@ pub fn check_and_output_analysis<
             term::emit(out, config, file, &msg).expect("Error when writing to stderr.");
         }
     }
-    for err in &kind_res.errs {
+
+    let ir_clauses = translate_modusfile(mf);
+
+    let errs = kind_res
+        .errs
+        .into_iter()
+        .chain(
+            check_negated_logic_kind(&ir_clauses, &kind_res.pred_kind)
+                .err()
+                .unwrap_or(Vec::new()),
+        )
+        .collect::<Vec<_>>();
+    for err in &errs {
         term::emit(out, config, file, err).expect("Error when writing to stderr.");
     }
 
-    kind_res
-        .errs
-        .iter()
-        .all(|err| err.severity != Severity::Error)
+    let is_stratifiable = mf.stratifiable();
+    if let Err(path) = is_stratifiable {
+        let path_string = path
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<_>>()
+            .join(" -> ");
+        let path_string = "Cycle: ... -> ".to_string() + &path_string + " -> ...";
+        let diag = Diagnostic::error()
+            .with_message("Program is not stratifiable. Recursive dependency on negation found.")
+            .with_notes(vec![path_string]);
+        term::emit(out, config, file, &diag).expect("Error when writing to stderr.");
+        return false;
+    }
+
+    errs.iter().all(|err| err.severity != Severity::Error)
 }
 
 #[cfg(test)]
@@ -429,7 +550,7 @@ mod tests {
         let bz = expected_dep.add_node("baz");
         expected_dep.extend_with_edges(&[(f, b), (b, bz)]);
 
-        let actual_dep = mf.compute_dependency();
+        let (actual_dep, _) = mf.compute_dependency();
         assert!(is_isomorphic(&expected_dep, &actual_dep)); // isomorphism check may be expensive
         assert!(!is_cyclic_directed(&actual_dep));
     }
@@ -449,9 +570,29 @@ mod tests {
         let ba = expected_dep.add_node("bar");
         expected_dep.extend_with_edges(&[(f, fr), (f, ru), (f, ba), (ba, f)]);
 
-        let actual_dep = mf.compute_dependency();
+        let (actual_dep, _) = mf.compute_dependency();
         assert!(is_isomorphic(&expected_dep, &actual_dep));
         assert!(is_cyclic_directed(&actual_dep));
+    }
+
+    #[test]
+    fn stratifiable_program() {
+        let clauses = vec![
+            "foo(X) :- from(\"ubuntu\"), run(\"apt-get update\"), bar(X).",
+            "bar(X) :- foo(X).",
+        ];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+        assert!(mf.stratifiable().is_ok());
+    }
+
+    #[test]
+    fn unstratifiable_program() {
+        let clauses = vec![
+            "foo(X) :- from(\"ubuntu\"), run(\"apt-get update\"), bar(X).",
+            "bar(X) :- !foo(X).",
+        ];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+        assert!(mf.stratifiable().is_err());
     }
 
     #[test]

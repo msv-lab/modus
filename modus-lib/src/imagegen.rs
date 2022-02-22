@@ -1,3 +1,19 @@
+// Modus, a language for building container images
+// Copyright (C) 2022 University College London
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 use std::collections::{HashMap, HashSet};
 use std::iter::{self, FromIterator};
 use std::path::{Path, PathBuf};
@@ -6,6 +22,7 @@ use crate::analysis::{Kind, ModusSemantics};
 use crate::logic::{Clause, IRTerm, Literal, Predicate};
 use crate::modusfile::{self, Modusfile};
 use crate::sld::{self, ClauseId, Proof, ResolutionError};
+use crate::translate::translate_modusfile;
 use crate::unification::Substitute;
 
 use codespan_reporting::diagnostic::Diagnostic;
@@ -309,6 +326,7 @@ pub fn build_dag_from_proofs(
                         // an image anyway, so just dfs as normal.
                     }
                 }
+                ClauseId::NegationCheck(_) => {}
             }
 
             process_children(
@@ -710,7 +728,8 @@ pub fn plan_from_modusfile(
                     "Operators in queries are currently unsupported.",
                 )])
             }
-            modusfile::Expression::And(_, e1, e2) | modusfile::Expression::Or(_, e1, e2) => {
+            // There shouldn't be any issue with negation in queries.
+            modusfile::Expression::And(_, _, e1, e2) | modusfile::Expression::Or(_, _, e1, e2) => {
                 validate_query_expression(e1)?;
                 validate_query_expression(e2)
             }
@@ -771,6 +790,7 @@ pub fn plan_from_modusfile(
     let goal_pred = Predicate("_query".to_owned());
     let user_clause = modusfile::ModusClause {
         head: Literal {
+            positive: true,
             position: None,
             predicate: goal_pred.clone(),
             args: Vec::new(),
@@ -779,14 +799,7 @@ pub fn plan_from_modusfile(
     };
 
     let mf_with_query = Modusfile(mf.0.into_iter().chain(iter::once(user_clause)).collect());
-    let ir_clauses: Vec<Clause> = mf_with_query
-        .0
-        .iter()
-        .flat_map(|mc| {
-            let clauses: Vec<Clause> = mc.into();
-            clauses
-        })
-        .collect();
+    let ir_clauses: Vec<Clause> = translate_modusfile(&mf_with_query);
 
     let q_clause = ir_clauses
         .iter()

@@ -1,34 +1,37 @@
-// Copyright 2021 Sergey Mechtaev
+// Modus, a language for building container images
+// Copyright (C) 2022 University College London
 
-// This file is part of Modus.
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
 
-// Modus is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-
-// Modus is distributed in the hope that it will be useful,
+// This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// GNU Affero General Public License for more details.
 
-// You should have received a copy of the GNU General Public License
-// along with Modus.  If not, see <https://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use nom::character::complete::line_ending;
 use nom::character::complete::not_line_ending;
 use nom::error::convert_error;
 use nom::error::VerboseError;
-use rand::Rng;
+
 use std::collections::HashSet;
 use std::fmt;
 use std::str;
 
-use crate::dockerfile;
 use crate::logic;
 use crate::logic::parser::Span;
+use crate::logic::Predicate;
 use crate::logic::SpannedPosition;
+use crate::sld;
 
+/// Represents expressions that could be found in the body of a ModusClause.
+/// Each enum variant will have some notion of span and whether it's negated.
+/// False would mean it is negated.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Expression {
     Literal(Literal),
@@ -37,10 +40,20 @@ pub enum Expression {
     OperatorApplication(Option<SpannedPosition>, Box<Expression>, Operator),
 
     // A conjunction of expressions.
-    And(Option<SpannedPosition>, Box<Expression>, Box<Expression>),
+    And(
+        Option<SpannedPosition>,
+        bool,
+        Box<Expression>,
+        Box<Expression>,
+    ),
 
     // A disjunction of expressions.
-    Or(Option<SpannedPosition>, Box<Expression>, Box<Expression>),
+    Or(
+        Option<SpannedPosition>,
+        bool,
+        Box<Expression>,
+        Box<Expression>,
+    ),
 }
 
 impl Expression {
@@ -49,12 +62,12 @@ impl Expression {
         match (self, other) {
             (Expression::Literal(l), Expression::Literal(r)) => l.eq_ignoring_position(&r),
             (
-                Expression::OperatorApplication(_, l, _),
-                Expression::OperatorApplication(_, r, _),
-            ) => l.eq_ignoring_position(r),
-            (Expression::And(_, l1, l2), Expression::And(_, r1, r2))
-            | (Expression::Or(_, l1, l2), Expression::Or(_, r1, r2)) => {
-                l1.eq_ignoring_position(r1) && l2.eq_ignoring_position(r2)
+                Expression::OperatorApplication(_, e1, op1),
+                Expression::OperatorApplication(_, e2, op2),
+            ) => e1.eq_ignoring_position(e2) && op1.eq_ignoring_position(op2),
+            (Expression::And(_, p1, l1, r1), Expression::And(_, p2, l2, r2))
+            | (Expression::Or(_, p1, l1, r1), Expression::Or(_, p2, l2, r2)) => {
+                p1 == p2 && l1.eq_ignoring_position(l2) && r1.eq_ignoring_position(r2)
             }
             (s, o) => s.eq(o),
         }
@@ -63,9 +76,9 @@ impl Expression {
     pub fn get_spanned_position(&self) -> &Option<SpannedPosition> {
         match self {
             Expression::Literal(lit) => &lit.position,
-            Expression::OperatorApplication(s, _, _) => &s,
-            Expression::And(s, _, _) => &s,
-            Expression::Or(s, _, _) => &s,
+            Expression::OperatorApplication(s, ..) => &s,
+            Expression::And(s, ..) => &s,
+            Expression::Or(s, ..) => &s,
         }
     }
 
@@ -80,13 +93,15 @@ impl Expression {
                 Box::new(e.without_position()),
                 op.clone().with_position(None),
             ),
-            Expression::And(_, e1, e2) => Expression::And(
+            Expression::And(_, positive, e1, e2) => Expression::And(
                 None,
+                positive.clone(),
                 Box::new(e1.without_position()),
                 Box::new(e2.without_position()),
             ),
-            Expression::Or(_, e1, e2) => Expression::Or(
+            Expression::Or(_, positive, e1, e2) => Expression::Or(
                 None,
+                positive.clone(),
                 Box::new(e1.without_position()),
                 Box::new(e2.without_position()),
             ),
@@ -97,11 +112,31 @@ impl Expression {
         match self {
             Expression::Literal(lit) => vec![lit.clone()].into_iter().collect(),
             Expression::OperatorApplication(_, e, _) => e.literals(),
-            Expression::And(_, e1, e2) | Expression::Or(_, e1, e2) => e1
+            Expression::And(_, _, e1, e2) | Expression::Or(_, _, e1, e2) => e1
                 .literals()
                 .into_iter()
                 .chain(e2.literals().into_iter())
                 .collect(),
+        }
+    }
+
+    /// Negates at the current expression level.
+    /// So, does not apply De Morgan's laws.
+    pub fn negate_current(&self) -> Expression {
+        match &self {
+            Expression::Literal(lit) => Expression::Literal(Literal {
+                positive: !lit.positive,
+                ..lit.clone()
+            }),
+            Expression::And(s, curr_p, l, r) => {
+                Expression::And(s.clone(), !curr_p, l.clone(), r.clone())
+            }
+            Expression::Or(s, curr_p, l, r) => {
+                Expression::Or(s.clone(), !curr_p, l.clone(), r.clone())
+            }
+            Expression::OperatorApplication(..) => {
+                panic!("Attempted to negate at operator application level.")
+            }
         }
     }
 }
@@ -137,6 +172,7 @@ pub enum ModusTerm {
         format_string_literal: String,
     },
     UserVariable(String),
+    AnonymousVariable,
 }
 
 impl ModusTerm {
@@ -157,6 +193,7 @@ impl fmt::Display for ModusTerm {
                 position: _,
                 format_string_literal,
             } => write!(f, "\"{}\"", format_string_literal),
+            ModusTerm::AnonymousVariable => write!(f, "_"),
         }
     }
 }
@@ -172,6 +209,7 @@ impl From<ModusTerm> for logic::IRTerm {
                 format_string_literal: _,
             } => panic!("Cannot convert a format string to an IRTerm."),
             ModusTerm::UserVariable(v) => logic::IRTerm::UserVariable(v),
+            ModusTerm::AnonymousVariable => sld::Auxiliary::aux(true),
         }
     }
 }
@@ -199,6 +237,7 @@ type Literal = logic::Literal<ModusTerm>;
 impl From<Literal> for logic::Literal {
     fn from(modus_literal: Literal) -> Self {
         Self {
+            positive: modus_literal.positive,
             position: modus_literal.position,
             predicate: modus_literal.predicate,
             args: modus_literal
@@ -210,9 +249,41 @@ impl From<Literal> for logic::Literal {
     }
 }
 
-type Fact = ModusClause;
-type Rule = ModusClause;
-pub type Operator = Literal;
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Operator {
+    pub position: Option<SpannedPosition>,
+    pub predicate: Predicate,
+    pub args: Vec<ModusTerm>,
+}
+
+impl Operator {
+    #[cfg(test)]
+    pub fn eq_ignoring_position(&self, other: &Operator) -> bool {
+        self.predicate == other.predicate && self.args == other.args
+    }
+
+    pub fn with_position(self, position: Option<SpannedPosition>) -> Operator {
+        Operator { position, ..self }
+    }
+}
+
+impl fmt::Display for Operator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &*self.args {
+            [] => write!(f, "{}", self.predicate),
+            _ => write!(
+                f,
+                "{}({})",
+                self.predicate,
+                self.args
+                    .iter()
+                    .map(|t| t.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }
+    }
+}
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Modusfile(pub Vec<ModusClause>);
@@ -277,13 +348,25 @@ impl fmt::Display for Expression {
                 write!(f, "({})::{}", expr.to_string(), op)
             }
             Expression::Literal(l) => write!(f, "{}", l.to_string()),
-            Expression::And(_, expr1, expr2) => {
+            Expression::And(_, positive, expr1, expr2) => {
                 // Explicit parenthesization when printing to output, looks a bit
                 // verbose but shouldn't affect user code.
-                write!(f, "({}, {})", expr1, expr2)
+                write!(
+                    f,
+                    "{}({}, {})",
+                    if *positive { "" } else { "!" },
+                    expr1,
+                    expr2
+                )
             }
-            Expression::Or(_, expr1, expr2) => {
-                write!(f, "({}; {})", expr1, expr2)
+            Expression::Or(_, positive, expr1, expr2) => {
+                write!(
+                    f,
+                    "{}({}; {})",
+                    if *positive { "" } else { "!" },
+                    expr1,
+                    expr2
+                )
             }
         }
     }
@@ -336,18 +419,17 @@ pub mod parser {
 
     use super::*;
 
-    use nom::bytes::complete::escaped;
+    use nom::bytes::complete::{escaped, is_a};
     use nom::character::complete::{multispace0, none_of, one_of};
     use nom::combinator::{cut, opt, recognize};
     use nom::error::context;
-    use nom::multi::{many1, separated_list1};
-    use nom::sequence::pair;
+    use nom::multi::{many0_count, many1, separated_list1};
+    use nom::sequence::{pair, tuple};
     use nom::{
         branch::alt,
         bytes::complete::tag,
-        character::complete::space0,
         combinator::{eof, map},
-        multi::{many0, separated_list0},
+        multi::many0,
         sequence::{delimited, preceded, separated_pair, terminated},
     };
 
@@ -419,43 +501,80 @@ pub mod parser {
     }
 
     /// Parses `<term1> = <term2>` into a builtin call, `string_eq(term1, term2)`.
+    /// Supports the negated version with `!=`.
     fn unification_sugar(i: Span) -> IResult<Span, Literal> {
-        let (i, (spanned_pos, (t1, t2))) = recognized_span(separated_pair(
-            modus_term,
-            delimited(token_sep0, tag("="), token_sep0),
-            cut(modus_term),
-        ))(i)?;
-
-        Ok((
-            i,
-            Literal {
+        map(
+            recognized_span(tuple((
+                modus_term,
+                delimited(token_sep0, alt((tag("!="), tag("="))), token_sep0),
+                cut(modus_term),
+            ))),
+            |(spanned_pos, (t1, op, t2))| Literal {
+                positive: op.fragment().len() == 1,
                 position: Some(spanned_pos),
                 predicate: Predicate("string_eq".to_owned()),
                 args: vec![t1, t2],
             },
-        ))
+        )(i)
     }
 
     fn modus_literal(i: Span) -> IResult<Span, Expression> {
         map(literal(modus_term, token_sep0), Expression::Literal)(i)
     }
 
-    fn expression_inner(i: Span) -> IResult<Span, Expression> {
+    /// Parses a parenthesized expression, taking into account any preceding negation.
+    fn parenthesized_expr(i: Span) -> IResult<Span, Expression> {
         let l_paren_with_comments = |i| terminated(tag("("), comments)(i);
         let r_paren_with_comments = |i| preceded(comments, cut(tag(")")))(i);
 
+        map(
+            pair(
+                many0_count(terminated(nom::character::complete::char('!'), token_sep0)),
+                delimited(l_paren_with_comments, body, r_paren_with_comments),
+            ),
+            |(neg_count, expr)| {
+                if neg_count % 2 == 0 {
+                    expr
+                } else {
+                    // negate the expression
+                    expr.negate_current()
+                }
+            },
+        )(i)
+    }
+
+    /// Parses an operator based on a literal, failing if negation is encountered.
+    fn operator(i: Span) -> IResult<Span, Operator> {
+        map(
+            recognized_span(pair(
+                terminated(literal_identifier, token_sep0),
+                opt(delimited(
+                    terminated(tag("("), token_sep0),
+                    separated_list1(
+                        terminated(tag(","), token_sep0),
+                        terminated(modus_term, token_sep0),
+                    ),
+                    cut(terminated(tag(")"), token_sep0)),
+                )),
+            )),
+            |(spanned_pos, (name, args))| Operator {
+                position: Some(spanned_pos),
+                predicate: Predicate(name.fragment().to_string()),
+                args: args.unwrap_or(Vec::new()),
+            },
+        )(i)
+    }
+
+    fn expression_inner(i: Span) -> IResult<Span, Expression> {
         let unification_expr_parser = map(unification_sugar, Expression::Literal);
         // These inner expression parsers can fully recurse.
         let op_application_parser = map(
             pair(
-                alt((
-                    modus_literal,
-                    delimited(l_paren_with_comments, body, r_paren_with_comments),
-                )),
+                alt((modus_literal, parenthesized_expr)),
                 // :: separated list of operators
                 many1(recognized_span(preceded(
                     delimited(token_sep0, tag("::"), token_sep0),
-                    cut(literal(modus_term, token_sep0)),
+                    cut(operator),
                 ))),
             ),
             |(expr, ops_with_span)| {
@@ -472,7 +591,6 @@ pub mod parser {
                 })
             },
         );
-        let parenthesized_expr = delimited(l_paren_with_comments, body, r_paren_with_comments);
         alt((
             unification_expr_parser,
             op_application_parser,
@@ -496,7 +614,7 @@ pub mod parser {
                             offset: s1.offset,
                             length: s2.offset + s2.length - s1.offset,
                         };
-                        Expression::And(Some(computed_span), Box::new(e1), Box::new(e2))
+                        Expression::And(Some(computed_span), true, Box::new(e1), Box::new(e2))
                     })
                     .expect("Converting list to expression pairs.")
             },
@@ -516,7 +634,7 @@ pub mod parser {
                             offset: s1.offset,
                             length: s2.offset + s2.length - s1.offset,
                         };
-                        Expression::Or(Some(computed_span), Box::new(e1), Box::new(e2))
+                        Expression::Or(Some(computed_span), true, Box::new(e1), Box::new(e2))
                     })
                     .expect("Converting list to expression pairs.")
             },
@@ -666,6 +784,7 @@ pub mod parser {
                     format_string_literal,
                 }
             }),
+            map(is_a("_"), |_| ModusTerm::AnonymousVariable),
             map(modus_var, |s| {
                 ModusTerm::UserVariable(s.fragment().to_string())
             }),
@@ -689,15 +808,17 @@ pub mod parser {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
+    use rand::Rng;
     use serial_test::serial;
 
     use super::*;
 
+    type Rule = ModusClause;
+
     #[test]
     fn fact() {
         let l1 = Literal {
+            positive: true,
             position: None,
             predicate: logic::Predicate("l1".into()),
             args: Vec::new(),
@@ -716,23 +837,26 @@ mod tests {
     #[test]
     fn rule() {
         let l1 = Literal {
+            positive: true,
             position: None,
             predicate: logic::Predicate("l1".into()),
             args: Vec::new(),
         };
         let l2 = Literal {
+            positive: true,
             position: None,
             predicate: logic::Predicate("l2".into()),
             args: Vec::new(),
         };
         let l3 = Literal {
+            positive: true,
             position: None,
             predicate: logic::Predicate("l3".into()),
             args: Vec::new(),
         };
         let c = Rule {
             head: l1,
-            body: Expression::And(None, Box::new(l2.into()), Box::new(l3.into())).into(),
+            body: Expression::And(None, true, Box::new(l2.into()), Box::new(l3.into())).into(),
         };
 
         assert_eq!("l1 :- (l2, l3).", c.to_string());
@@ -749,7 +873,7 @@ mod tests {
         let l2: Literal = "l2".parse().unwrap();
         let c = Rule {
             head: "foo".parse().unwrap(),
-            body: Expression::Or(None, Box::new(l1.into()), Box::new(l2.into())).into(),
+            body: Expression::Or(None, true, Box::new(l1.into()), Box::new(l2.into())).into(),
         };
 
         assert_eq!("foo :- (l1; l2).", c.to_string());
@@ -761,16 +885,19 @@ mod tests {
     #[test]
     fn rule_with_operator() {
         let foo = Literal {
+            positive: true,
             position: None,
             predicate: logic::Predicate("foo".into()),
             args: Vec::new(),
         };
         let a = Literal {
+            positive: true,
             position: None,
             predicate: logic::Predicate("a".into()),
             args: Vec::new(),
         };
         let b = Literal {
+            positive: true,
             position: None,
             predicate: logic::Predicate("b".into()),
             args: Vec::new(),
@@ -784,7 +911,7 @@ mod tests {
             head: foo.clone(),
             body: Expression::OperatorApplication(
                 None,
-                Expression::And(None, Box::new(a.clone().into()), Box::new(b.into())).into(),
+                Expression::And(None, true, Box::new(a.clone().into()), Box::new(b.into())).into(),
                 merge.clone(),
             )
             .into(),
@@ -813,16 +940,19 @@ mod tests {
     fn modusclause_to_clause() {
         crate::translate::reset_operator_pair_id();
         let foo = Literal {
+            positive: true,
             position: None,
             predicate: logic::Predicate("foo".into()),
             args: Vec::new(),
         };
         let a = Literal {
+            positive: true,
             position: None,
             predicate: logic::Predicate("a".into()),
             args: Vec::new(),
         };
         let b = Literal {
+            positive: true,
             position: None,
             predicate: logic::Predicate("b".into()),
             args: Vec::new(),
@@ -836,7 +966,7 @@ mod tests {
             head: foo,
             body: Expression::OperatorApplication(
                 None,
-                Expression::And(None, Box::new(a.into()), Box::new(b.into())).into(),
+                Expression::And(None, true, Box::new(a.into()), Box::new(b.into())).into(),
                 merge,
             )
             .into(),
@@ -868,7 +998,13 @@ mod tests {
             head: foo.clone(),
             body: Expression::OperatorApplication(
                 None,
-                Expression::Or(None, Box::new(a.clone().into()), Box::new(b.clone().into())).into(),
+                Expression::Or(
+                    None,
+                    true,
+                    Box::new(a.clone().into()),
+                    Box::new(b.clone().into()),
+                )
+                .into(),
                 merge,
             )
             .into(),
@@ -877,12 +1013,15 @@ mod tests {
             head: foo.clone(),
             body: Expression::And(
                 None,
+                true,
                 Box::new(a.clone().into()),
                 Box::new(Expression::And(
                     None,
+                    true,
                     Box::new(b.clone().into()),
                     Box::new(Expression::Or(
                         None,
+                        true,
                         Box::new(a.clone().into()),
                         Box::new(b.clone().into()),
                     )),
@@ -931,6 +1070,21 @@ mod tests {
     }
 
     #[test]
+    fn anonymous_variables() {
+        let expected = Literal {
+            positive: true,
+            position: None,
+            predicate: Predicate("l".into()),
+            args: vec![
+                ModusTerm::Constant("foo".to_string()),
+                ModusTerm::AnonymousVariable,
+            ],
+        };
+        let actual: Literal = "l(\"foo\", _)".parse().unwrap();
+        assert!(expected.eq_ignoring_position(&actual));
+    }
+
+    #[test]
     fn modus_expression() {
         let a: Literal = "a".parse().unwrap();
         let b: Literal = "b".parse().unwrap();
@@ -939,18 +1093,20 @@ mod tests {
 
         let e1 = Expression::And(
             None,
+            true,
             Expression::Literal(a).into(),
             Expression::Literal(b).into(),
         );
         let e2 = Expression::And(
             None,
+            true,
             Expression::Literal(c).into(),
             Expression::Literal(d).into(),
         );
 
-        let expr = Expression::Or(None, e1.into(), e2.into());
+        let expr = Expression::Or(None, false, e1.into(), e2.into());
 
-        let expr_str = "((a, b); (c, d))";
+        let expr_str = "!((a, b); (c, d))";
         assert_eq!(expr_str, expr.to_string());
 
         let rule: ModusClause = format!("foo :- {}.", expr_str).parse().unwrap();
@@ -959,9 +1115,20 @@ mod tests {
 
     #[test]
     fn modus_unification() {
-        let inp = "foo(X, Y) :- X = Y.";
+        let modus_clause: ModusClause = "foo(X, Y, A, B) :- X = Y, A != B.".parse().unwrap();
+        let expected_body = Expression::And(
+            None,
+            true,
+            Box::new(Expression::Literal("string_eq(X, Y)".parse().unwrap())),
+            Box::new(Expression::Literal("!string_eq(A, B)".parse().unwrap())),
+        );
+        assert!(expected_body.eq_ignoring_position(&modus_clause.body.unwrap()));
+    }
 
-        let expected_lit: Literal = "string_eq(X, Y)".parse().unwrap();
+    #[test]
+    fn modus_negated_unification() {
+        let inp = "foo(X, Y) :- X != Y.";
+        let expected_lit: Literal = "!string_eq(X, Y)".parse().unwrap();
         let actual: Expression = inp.parse().map(|r: ModusClause| r.body).unwrap().unwrap();
         assert!(Expression::Literal(expected_lit).eq_ignoring_position(&actual));
     }
@@ -969,32 +1136,38 @@ mod tests {
     #[test]
     fn multiple_clause_with_different_ops() {
         let foo = Literal {
+            positive: true,
             position: None,
             predicate: logic::Predicate("foo".into()),
             args: vec![ModusTerm::UserVariable("x".to_owned())],
         };
         let bar = Literal {
+            positive: true,
             position: None,
             predicate: logic::Predicate("bar".into()),
             args: Vec::new(),
         };
         let baz = Literal {
+            positive: true,
             position: None,
             predicate: logic::Predicate("baz".into()),
             args: Vec::new(),
         };
         let a = Rule {
             head: logic::Literal {
+                positive: true,
                 position: None,
                 predicate: logic::Predicate("a".to_owned()),
                 args: vec![],
             },
             body: Some(Expression::And(
                 None,
+                true,
                 Box::new(Expression::OperatorApplication(
                     None,
                     Box::new(Expression::And(
                         None,
+                        true,
                         Box::new(foo.into()),
                         Box::new(bar.into()),
                     )),
@@ -1036,6 +1209,7 @@ mod tests {
 
         let expected = Rule {
             head: logic::Literal {
+                positive: true,
                 position: None,
                 predicate: logic::Predicate("a".to_owned()),
                 args: vec![],
@@ -1045,6 +1219,7 @@ mod tests {
                 Box::new(Expression::OperatorApplication(
                     None,
                     Box::new(Expression::Literal(logic::Literal {
+                        positive: true,
                         position: None,
                         predicate: logic::Predicate("foo".into()),
                         args: Vec::new(),

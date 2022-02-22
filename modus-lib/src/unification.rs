@@ -1,19 +1,18 @@
-// Copyright 2021 Sergey Mechtaev
+// Modus, a language for building container images
+// Copyright (C) 2022 University College London
 
-// This file is part of Modus.
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
 
-// Modus is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-
-// Modus is distributed in the hope that it will be useful,
+// This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// GNU Affero General Public License for more details.
 
-// You should have received a copy of the GNU General Public License
-// along with Modus.  If not, see <https://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use std::collections::HashMap;
 
@@ -55,7 +54,7 @@ impl RenameWithSubstitution<IRTerm> for IRTerm {
     type Output = IRTerm;
     fn rename_with_sub(&self) -> (Self::Output, Substitution<IRTerm>) {
         let s: Substitution<IRTerm> = self
-            .variables()
+            .variables(true)
             .iter()
             .map(|r| {
                 [(r.clone(), r.rename())]
@@ -76,6 +75,7 @@ impl Substitute<IRTerm> for Literal<IRTerm> {
     type Output = Literal;
     fn substitute(&self, s: &Substitution<IRTerm>) -> Self::Output {
         Literal {
+            positive: self.positive,
             position: self.position.clone(),
             predicate: self.predicate.clone(),
             args: self.args.iter().map(|t| t.substitute(s)).collect(),
@@ -87,7 +87,7 @@ impl RenameWithSubstitution<IRTerm> for Literal<IRTerm> {
     type Output = Literal<IRTerm>;
     fn rename_with_sub(&self) -> (Self::Output, Substitution<IRTerm>) {
         let s: Substitution = self
-            .variables()
+            .variables(true)
             .iter()
             .map(|r| {
                 [(r.clone(), r.rename())]
@@ -116,7 +116,7 @@ impl RenameWithSubstitution<IRTerm> for Vec<Literal<IRTerm>> {
     fn rename_with_sub(&self) -> (Self::Output, Substitution<IRTerm>) {
         let s: Substitution<IRTerm> = self
             .iter()
-            .flat_map(|e| e.variables())
+            .flat_map(|e| e.variables(true))
             .map(|r| {
                 [(r.clone(), r.rename())]
                     .iter()
@@ -146,7 +146,7 @@ impl RenameWithSubstitution<IRTerm> for Clause<IRTerm> {
     type Output = Clause<IRTerm>;
     fn rename_with_sub(&self) -> (Self::Output, Substitution<IRTerm>) {
         let s: Substitution<IRTerm> = self
-            .variables()
+            .variables(true)
             .iter()
             .map(|r| {
                 [(r.clone(), r.rename())]

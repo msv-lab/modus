@@ -1,24 +1,23 @@
-// Copyright 2021 Sergey Mechtaev
+// Modus, a language for building container images
+// Copyright (C) 2022 University College London
 
-// This file is part of Modus.
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
 
-// Modus is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-
-// Modus is distributed in the hope that it will be useful,
+// This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// GNU Affero General Public License for more details.
 
-// You should have received a copy of the GNU General Public License
-// along with Modus.  If not, see <https://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 mod buildkit;
 mod reporting;
 
-use clap::{crate_version, App, Arg};
+use clap::{crate_version, Command, Arg};
 use codespan_reporting::{
     files::SimpleFile,
     term::{
@@ -56,64 +55,54 @@ fn get_file_or_exit(path: &Path) -> SimpleFile<&str, String> {
 }
 
 fn main() {
-    let matches = App::new("modus")
+    let matches = Command::new("modus")
         .version(crate_version!())
-        .about("Datalog-based container build system")
+        .about("A language for building container images")
         .subcommand(
-            App::new("transpile")
+            Command::new("transpile")
+                .hide(true)
                 .arg(
-                    Arg::with_name("FILE")
+                    Arg::new("FILE")
                         .required(true)
-                        .help("Sets the input Modusfile")
+                        .help("Set the input Modusfile")
                         .index(1),
                 )
                 .arg(
-                    Arg::with_name("QUERY")
+                    Arg::new("QUERY")
                         .required(true)
-                        .help("Specifies the build target(s)")
+                        .help("Specify the build target(s)")
                         .index(2),
                 )
-                .arg(
-                    Arg::with_name("proof")
-                        .short("p")
-                        .long("proof")
-                        .help("Prints the proof tree of the target image"),
-                )
-                .arg(
-                    Arg::with_name("output")
-                        .short("o")
-                        .value_name("FILE")
-                        .long("output")
-                        .help("Sets the output Dockerfile")
-                        .takes_value(true),
-                ),
         )
         .subcommand(
-            App::new("build")
+            Command::new("build")
+                .about("Build images.")
                 .arg(
-                    Arg::with_name("FILE")
+                    Arg::new("FILE")
                         .required(false)
-                        .long_help("Specifies the input Modusfile\n\
+                        .long_help("Specify the input Modusfile\n\
                                     The default is to look for a Modusfile in the context directory.")
                         .help("Specify the input Modusfile")
                         .value_name("FILE")
-                        .short("f")
+                        .short('f')
                         .long("modusfile")
+                        .allow_invalid_utf8(true)
                 )
                 .arg(
-                    Arg::with_name("CONTEXT")
+                    Arg::new("CONTEXT")
                         .help("Specify the build context directory")
                         .index(1)
-                        .required(true),
+                        .required(true)
+                        .allow_invalid_utf8(true),
                 )
                 .arg(
-                    Arg::with_name("QUERY")
+                    Arg::new("QUERY")
                         .required(true)
                         .help("Specify the target query to build")
                         .index(2),
                 )
                 .arg(
-                    Arg::with_name("JSON_OUTPUT")
+                    Arg::new("JSON_OUTPUT")
                         .value_name("FILE")
                         .required(false)
                         .min_values(0)
@@ -123,48 +112,49 @@ fn main() {
                         .help("Output build result as JSON")
                         .long_help("Output build result as JSON\n\
                                     If this flag is specified without providing a file name, output is written to stdout.")
+                        .allow_invalid_utf8(true)
                 )
                 .arg(
-                    Arg::with_name("VERBOSE")
-                        .short("v")
+                    Arg::new("VERBOSE")
+                        .short('v')
                         .long("verbose")
                         .help("Tell docker to print all the output"),
                 )
                 .arg(
-                    Arg::with_name("NO_CACHE")
+                    Arg::new("NO_CACHE")
                         .long("--no-cache")
                         .help("Ignore all existing build cache"),
                 )
                 .arg(
-                    Arg::with_name("ADDITIONAL_OPTS")
+                    Arg::new("ADDITIONAL_OPTS")
                         .long("docker-flags")
                         .takes_value(true)
-                        .multiple(true)
+                        .multiple_values(true)
                         .required(false)
                         .help("Pass additional options to docker build")
                 )
                 .arg(
-                    Arg::with_name("RESOLVE_CONCURRENCY")
+                    Arg::new("RESOLVE_CONCURRENCY")
                         .long("image-resolve-concurrency")
                         .takes_value(true)
-                        .required(true)
+                        .required(false)
                         .default_value("3")
                         .value_name("NUM")
                 )
                 .arg(
-                    Arg::with_name("EXPORT_CONCURRENCY")
+                    Arg::new("EXPORT_CONCURRENCY")
                         .long("image-export-concurrency")
                         .takes_value(true)
-                        .required(true)
+                        .required(false)
                         .default_value("8")
                         .value_name("NUM")
                 )
                 .arg(
-                    Arg::with_name("CUSTOM_FRONTEND")
+                    Arg::new("CUSTOM_FRONTEND")
                         .long("custom-buildkit-frontend")
                         .value_name("IMAGE_REF")
                         .takes_value(true)
-                        .required(true)
+                        .required(false)
                         .help("Specify a custom buildkit buildkit frontend to use")
                         .long_help(concat!("Specify a custom frontend to use for buildkit. It must parse a JSON Modus build plan, and invoke relevant buildkit calls.\n\
                                     The default is to use a pre-built one hosted on ghcr.io, with commit id ", env!("GIT_SHA"), ".\n\
@@ -173,54 +163,59 @@ fn main() {
                 )
         )
         .subcommand(
-            App::new("proof")
+            Command::new("proof")
+                .about("Print proof tree of a given query.")
                 .arg(
-                    Arg::with_name("FILE")
+                    Arg::new("FILE")
                         .required(false)
-                        .long_help("Specifies the input Modusfile\n\
+                        .long_help("Specify the input Modusfile\n\
                                     The default is to look for a Modusfile in the context directory.")
                         .help("Specify the input Modusfile")
                         .value_name("FILE")
-                        .short("f")
+                        .short('f')
                         .long("modusfile")
+                        .allow_invalid_utf8(true),
                 )
                 .arg(
-                    Arg::with_name("CONTEXT")
+                    Arg::new("CONTEXT")
                         .long_help("Specify the directory that contains the Modusfile.\n\
                                     This is for compatibility with the `build` subcommand.")
                         .help("Specify the directory that contains the Modusfile.")
                         .index(1)
-                        .required(true),
+                        .required(true)
+                        .allow_invalid_utf8(true),
                 )
                 .arg(
-                    Arg::with_name("QUERY")
+                    Arg::new("QUERY")
                         .required(true)
-                        .help("Specifies the target to prove")
+                        .help("Specify the target query to prove")
                         .index(2),
                 )
                 .arg_from_usage("-e --explain 'Prints out an explanation of the steps taken in resolution.'")
                 .arg_from_usage("-g --graph 'Outputs a (DOT) graph that of the SLD tree traversed in resolution.'"),
         )
         .subcommand(
-            App::new("check")
-                .about("Analyses a Modusfile and checks the predicate kinds.")
+            Command::new("check")
+                .about("Analyse a Modusfile and checks the predicate kinds.")
                 .arg(
-                    Arg::with_name("FILE")
+                    Arg::new("FILE")
                         .required(false)
-                        .long_help("Specifies the input Modusfile\n\
+                        .long_help("Specify the input Modusfile\n\
                                     The default is to look for a Modusfile in the context directory.")
                         .help("Specify the input Modusfile")
                         .value_name("FILE")
-                        .short("f")
+                        .short('f')
                         .long("modusfile")
+                        .allow_invalid_utf8(true),
                 )
                 .arg(
-                    Arg::with_name("CONTEXT")
+                    Arg::new("CONTEXT")
                         .long_help("Specify the directory that contains the Modusfile.\n\
                                     This is for compatibility with the `build` subcommand.")
                         .help("Specify the directory that contains the Modusfile.")
                         .index(1)
-                        .required(true),
+                        .required(true)
+                        .allow_invalid_utf8(true),
                 )
                 .arg_from_usage("-v --verbose 'Displays the evaluated kinds for all the clauses.")
         )
@@ -230,8 +225,8 @@ fn main() {
     let err_writer = StandardStream::stderr(codespan_reporting::term::termcolor::ColorChoice::Auto);
     let config = codespan_reporting::term::Config::default();
 
-    match matches.subcommand() {
-        ("transpile", Some(sub)) => {
+    match matches.subcommand().unwrap() {
+        ("transpile", sub) => {
             let input_file = sub.value_of("FILE").unwrap();
             let file = get_file_or_exit(Path::new(input_file));
             let query: modusfile::Expression =
@@ -269,7 +264,7 @@ fn main() {
                 }
             }
         }
-        ("build", Some(sub)) => {
+        ("build", sub) => {
             let context_dir = sub.value_of_os("CONTEXT").unwrap();
             let input_file = sub
                 .value_of_os("FILE")
@@ -402,7 +397,7 @@ fn main() {
                 }
             }
         }
-        ("proof", Some(sub)) => {
+        ("proof", sub) => {
             let should_output_graph = sub.is_present("graph");
             let should_explain = sub.is_present("explain");
 
@@ -475,6 +470,7 @@ fn main() {
                 }
             }
         }
+<<<<<<< HEAD
         ("check", Some(sub)) => {
             let context_dir = sub.value_of_os("CONTEXT").unwrap();
             let input_file = sub
@@ -482,6 +478,11 @@ fn main() {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| Path::new(context_dir).join("Modusfile"));
             let file = get_file_or_exit(input_file.as_path());
+=======
+        ("check", sub) => {
+            let input_file = sub.value_of("FILE").unwrap();
+            let file = get_file_or_exit(Path::new(input_file));
+>>>>>>> main
 
             let is_verbose = sub.is_present("verbose");
 

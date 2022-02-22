@@ -1,19 +1,18 @@
-// Copyright 2021 Sergey Mechtaev
+// Modus, a language for building container images
+// Copyright (C) 2022 University College London
 
-// This file is part of Modus.
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
 
-// Modus is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-
-// Modus is distributed in the hope that it will be useful,
+// This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// GNU Affero General Public License for more details.
 
-// You should have received a copy of the GNU General Public License
-// along with Modus.  If not, see <https://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{
     analysis::Kind,
@@ -94,6 +93,7 @@ mod string_concat {
         pos: &Option<SpannedPosition>,
     ) -> Option<Literal> {
         Some(Literal {
+            positive: true,
             position: pos.clone(),
             predicate: Predicate("string_concat".to_owned()),
             args: vec![
@@ -199,6 +199,7 @@ mod equality {
         fn apply(&self, lit: &crate::logic::Literal) -> Option<crate::logic::Literal> {
             let a = lit.args[0].as_constant()?;
             Some(Literal {
+                positive: true,
                 position: lit.position.clone(),
                 predicate: Predicate("string_eq".to_owned()),
                 args: vec![
@@ -226,6 +227,7 @@ mod equality {
         fn apply(&self, lit: &crate::logic::Literal) -> Option<crate::logic::Literal> {
             let b = lit.args[1].as_constant()?;
             Some(Literal {
+                positive: true,
                 position: lit.position.clone(),
                 predicate: Predicate("string_eq".to_owned()),
                 args: vec![
@@ -532,6 +534,7 @@ mod test {
         use crate::logic::{Literal, Predicate};
 
         let lit = Literal {
+            positive: true,
             position: None,
             predicate: Predicate("run".to_owned()),
             args: vec![IRTerm::Constant("hello".to_owned())],
@@ -544,6 +547,7 @@ mod test {
         assert_eq!(b.apply(&lit), Some(lit));
 
         let lit = Literal {
+            positive: true,
             position: None,
             predicate: Predicate("string_concat".to_owned()),
             args: vec![
@@ -560,6 +564,7 @@ mod test {
         assert_eq!(
             b.apply(&lit),
             Some(Literal {
+                positive: true,
                 position: None,
                 predicate: Predicate("string_concat".to_owned()),
                 args: vec![
@@ -571,6 +576,7 @@ mod test {
         );
 
         let lit = Literal {
+            positive: true,
             position: None,
             predicate: Predicate("xxx".to_owned()),
             args: vec![IRTerm::Constant("hello".to_owned())],
@@ -585,17 +591,20 @@ mod test {
 
         let rules = vec![Clause {
             head: Literal {
+                positive: true,
                 position: None,
                 predicate: Predicate("a".to_owned()),
                 args: vec![],
             },
             body: vec![
                 Literal {
+                    positive: true,
                     position: None,
                     predicate: Predicate("from".to_owned()),
                     args: vec![IRTerm::Constant("ubuntu".to_owned())],
                 },
                 Literal {
+                    positive: true,
                     position: None,
                     predicate: Predicate("run".to_owned()),
                     args: vec![IRTerm::Constant("rm -rf /".to_owned())],
@@ -603,6 +612,7 @@ mod test {
             ],
         }];
         let goals = vec![Literal {
+            positive: true,
             position: None,
             predicate: Predicate("a".to_owned()),
             args: vec![],
@@ -790,6 +800,7 @@ mod test {
         for (name, true_cases, false_cases) in tests.into_iter() {
             for (left, right) in true_cases.into_iter() {
                 let lit = Literal {
+                    positive: true,
                     position: None,
                     predicate: Predicate(name.to_owned()),
                     args: vec![
@@ -808,6 +819,7 @@ mod test {
             }
             for (left, right) in false_cases.into_iter() {
                 let lit = Literal {
+                    positive: true,
                     position: None,
                     predicate: Predicate(name.to_owned()),
                     args: vec![

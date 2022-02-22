@@ -1,19 +1,18 @@
-// Copyright 2021 Sergey Mechtaev
+// Modus, a language for building container images
+// Copyright (C) 2022 University College London
 
-// This file is part of Modus.
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
 
-// Modus is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-
-// Modus is distributed in the hope that it will be useful,
+// This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// GNU Affero General Public License for more details.
 
-// You should have received a copy of the GNU General Public License
-// along with Modus.  If not, see <https://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 //! This module contains logical structures that define the intermediate language used by Modus.
 //!
@@ -44,6 +43,7 @@ impl fmt::Display for IRTerm {
             // there may be aux variables after translating to IR
             IRTerm::AuxiliaryVariable(i) => write!(f, "__AUX_{}", i),
             IRTerm::RenamedVariable(i, t) => write!(f, "{}_{}", t, i),
+            IRTerm::AnonymousVariable(_) => write!(f, "_"),
         }
     }
 }
@@ -63,9 +63,13 @@ impl Rename<IRTerm> for IRTerm {
 }
 
 impl sld::Auxiliary for IRTerm {
-    fn aux() -> IRTerm {
+    fn aux(anonymous: bool) -> IRTerm {
         let index = AVAILABLE_VARIABLE_INDEX.fetch_add(1, Ordering::SeqCst);
-        IRTerm::AuxiliaryVariable(index)
+        if anonymous {
+            IRTerm::AnonymousVariable(index)
+        } else {
+            IRTerm::AuxiliaryVariable(index)
+        }
     }
 }
 
@@ -111,15 +115,41 @@ impl From<String> for Predicate {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
 pub enum IRTerm {
     Constant(String),
     UserVariable(String),
+
+    /// Primarily used to establish f-string constraints.
     AuxiliaryVariable(u32),
+
     RenamedVariable(u32, Box<IRTerm>),
+
+    /// It should be safe to assume that a given AnonymousVariable(i) will not appear
+    /// again in the AST.
+    AnonymousVariable(u32),
 }
 
 impl IRTerm {
+    /// Returns `true` if the IRTerm is [`Constant`].
+    ///
+    /// [`Constant`]: IRTerm::Constant
+    pub fn is_constant(&self) -> bool {
+        matches!(self, Self::Constant(..))
+    }
+
+    /// Returns `true` if the IRTerm is [`AnonymousVariable`] or it was
+    /// renamed from an [`AnonymousVariable`].
+    ///
+    /// [`AnonymousVariable`]: IRTerm::AnonymousVariable
+    pub fn is_underlying_anonymous_variable(&self) -> bool {
+        match self {
+            Self::AnonymousVariable(_) => true,
+            Self::RenamedVariable(_, t) => t.is_underlying_anonymous_variable(),
+            _ => false,
+        }
+    }
+
     pub fn as_constant(&self) -> Option<&str> {
         match self {
             IRTerm::Constant(c) => Some(&c[..]),
@@ -133,6 +163,13 @@ impl IRTerm {
             IRTerm::RenamedVariable(_, t) => t.get_original(),
             t => t,
         }
+    }
+
+    /// Returns `true` if the irterm is [`AnonymousVariable`].
+    ///
+    /// [`AnonymousVariable`]: IRTerm::AnonymousVariable
+    pub fn is_anonymous_variable(&self) -> bool {
+        matches!(self, Self::AnonymousVariable(..))
     }
 }
 
@@ -165,6 +202,10 @@ impl From<Span<'_>> for SpannedPosition {
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Literal<T = IRTerm> {
+    /// True if if this is a positive literal, else it's a negated literal.
+    /// Double negations should be collapsed, if any.
+    pub positive: bool,
+
     pub position: Option<SpannedPosition>,
     pub predicate: Predicate,
     pub args: Vec<T>,
@@ -174,7 +215,9 @@ pub struct Literal<T = IRTerm> {
 impl<T: PartialEq> Literal<T> {
     /// Checks for equality, ignoring the position fields.
     pub fn eq_ignoring_position(&self, other: &Literal<T>) -> bool {
-        self.predicate == other.predicate && self.args == other.args
+        self.positive == other.positive
+            && self.predicate == other.predicate
+            && self.args == other.args
     }
 }
 
@@ -189,8 +232,9 @@ pub struct Clause<T = IRTerm> {
 
 #[cfg(test)]
 impl<T: PartialEq> Clause<T> {
-    fn eq_ignoring_position(&self, other: &Clause<T>) -> bool {
+    pub fn eq_ignoring_position(&self, other: &Clause<T>) -> bool {
         self.head.eq_ignoring_position(&other.head)
+            && self.body.len() == other.body.len()
             && self
                 .body
                 .iter()
@@ -204,11 +248,11 @@ pub trait Ground {
 }
 
 impl IRTerm {
-    pub fn variables(&self) -> HashSet<IRTerm> {
+    pub fn variables(&self, include_anonymous: bool) -> HashSet<IRTerm> {
         // the 'variables' of an IRTerm is just itself, if it's not a constant
         let mut set = HashSet::<IRTerm>::new();
         if let IRTerm::Constant(_) = self {
-        } else {
+        } else if !self.is_anonymous_variable() || include_anonymous {
             set.insert(self.clone());
         }
         set
@@ -219,10 +263,10 @@ impl Literal {
     pub fn signature(&self) -> Signature {
         Signature(self.predicate.clone(), self.args.len().try_into().unwrap())
     }
-    pub fn variables(&self) -> HashSet<IRTerm> {
+    pub fn variables(&self, include_anonymous: bool) -> HashSet<IRTerm> {
         self.args
             .iter()
-            .map(|r| r.variables())
+            .map(|r| r.variables(include_anonymous))
             .reduce(|mut l, r| {
                 l.extend(r);
                 l
@@ -243,6 +287,13 @@ impl Literal {
             self
         }
     }
+
+    pub fn negated(&self) -> Literal {
+        Literal {
+            positive: !self.positive,
+            ..self.clone()
+        }
+    }
 }
 
 impl<T> Literal<T> {
@@ -252,17 +303,17 @@ impl<T> Literal<T> {
 }
 
 impl Clause {
-    pub fn variables(&self) -> HashSet<IRTerm> {
+    pub fn variables(&self, include_anonymous: bool) -> HashSet<IRTerm> {
         let mut body = self
             .body
             .iter()
-            .map(|r| r.variables())
+            .map(|r| r.variables(include_anonymous))
             .reduce(|mut l, r| {
                 l.extend(r);
                 l
             })
             .unwrap_or_default();
-        body.extend(self.head.variables());
+        body.extend(self.head.variables(include_anonymous));
         body
     }
 }
@@ -275,13 +326,13 @@ impl Ground for IRTerm {
 
 impl Ground for Literal {
     fn is_ground(&self) -> bool {
-        self.variables().is_empty()
+        self.variables(true).is_empty()
     }
 }
 
 impl Ground for Clause {
     fn is_ground(&self) -> bool {
-        self.variables().is_empty()
+        self.variables(true).is_empty()
     }
 }
 
@@ -308,8 +359,19 @@ fn display_sep<T: fmt::Display>(seq: &[T], sep: &str) -> String {
 impl fmt::Display for Literal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &*self.args {
-            [] => write!(f, "{}", self.predicate),
-            _ => write!(f, "{}({})", self.predicate, display_sep(&self.args, ", ")),
+            [] => write!(
+                f,
+                "{}{}",
+                if self.positive { "" } else { "!" },
+                self.predicate
+            ),
+            _ => write!(
+                f,
+                "{}{}({})",
+                if self.positive { "" } else { "!" },
+                self.predicate,
+                display_sep(&self.args, ", ")
+            ),
         }
     }
 }
@@ -351,12 +413,12 @@ pub mod parser {
 
     use nom::{
         branch::alt,
-        bytes::complete::{tag, take_until},
-        character::complete::{alpha1, alphanumeric1, multispace0, space0},
+        bytes::complete::{is_a, tag, take_until},
+        character::complete::{alpha1, alphanumeric1, multispace0},
         combinator::{cut, map, opt, recognize},
         error::VerboseError,
-        multi::{many0, separated_list0, separated_list1},
-        sequence::{delimited, pair, preceded, separated_pair, terminated},
+        multi::{many0, many0_count, separated_list0, separated_list1},
+        sequence::{delimited, pair, preceded, terminated, tuple},
         Offset, Slice,
     };
 
@@ -404,6 +466,7 @@ pub mod parser {
     pub fn term(i: Span) -> IResult<Span, IRTerm> {
         alt((
             map(constant, |s| IRTerm::Constant(s.fragment().to_string())),
+            map(is_a("_"), |_| sld::Auxiliary::aux(true)),
             map(variable, |s| IRTerm::UserVariable(s.fragment().to_string())),
         ))(i)
     }
@@ -411,7 +474,7 @@ pub mod parser {
     //TODO: I need to think more carefully how to connect this to stage name
     pub fn literal_identifier(i: Span) -> IResult<Span, Span> {
         recognize(pair(
-            alpha1,
+            alt((alpha1, tag("_"))),
             many0(alt((alphanumeric1, tag("_"), tag("-")))),
         ))(i)
     }
@@ -426,7 +489,12 @@ pub mod parser {
         S: FnMut(Span<'a>) -> IResult<Span<'a>, Any> + Clone,
     {
         move |i| {
-            let (i, (spanned_pos, (name, args))) = recognized_span(pair(
+            let (i, (spanned_pos, (neg_count, name, args))) = recognized_span(tuple((
+                // allow whitespace between '!'
+                many0_count(terminated(
+                    nom::character::complete::char('!'),
+                    space0.clone(),
+                )),
                 terminated(literal_identifier, space0.clone()),
                 opt(delimited(
                     terminated(tag("("), space0.clone()),
@@ -436,20 +504,17 @@ pub mod parser {
                     ),
                     cut(terminated(tag(")"), space0.clone())),
                 )),
-            ))(i)?;
+            )))(i)?;
 
             Ok((
                 i,
-                match args {
-                    Some(args) => Literal {
-                        position: Some(spanned_pos),
-                        predicate: Predicate(name.fragment().to_string()),
-                        args,
-                    },
-                    None => Literal {
-                        position: Some(spanned_pos),
-                        predicate: Predicate(name.fragment().to_string()),
-                        args: Vec::new(),
+                Literal {
+                    positive: neg_count % 2 == 0,
+                    position: Some(spanned_pos),
+                    predicate: Predicate(name.fragment().to_string()),
+                    args: match args {
+                        Some(args) => args,
+                        None => Vec::new(),
                     },
                 },
             ))
@@ -461,12 +526,17 @@ pub mod parser {
         FT: FnMut(Span) -> IResult<Span, T> + Clone,
     {
         map(
-            separated_pair(
+            pair(
                 literal(term.clone(), multispace0),
-                ws(tag(":-")),
-                separated_list0(ws(tag(",")), literal(term, multispace0)),
+                opt(preceded(
+                    ws(tag(":-")),
+                    separated_list0(ws(tag(",")), literal(term, multispace0)),
+                )),
             ),
-            |(head, body)| Clause { head, body },
+            |(head, body)| Clause {
+                head,
+                body: body.unwrap_or(Vec::new()),
+            },
         )
     }
 }
@@ -488,6 +558,7 @@ mod tests {
     #[test]
     fn literals() {
         let l1 = Literal {
+            positive: true,
             position: None,
             predicate: Predicate("l1".into()),
             args: vec![IRTerm::Constant("c".into()), IRTerm::Constant("d".into())],
@@ -504,6 +575,7 @@ mod tests {
     #[test]
     fn literal_with_variable() {
         let l1 = Literal {
+            positive: true,
             position: None,
             predicate: Predicate("l1".into()),
             args: vec![
@@ -515,6 +587,24 @@ mod tests {
         assert_eq!("l1(\"\", X)", l1.to_string());
 
         let actual: Literal = "l1(\"\", X)".parse().unwrap();
+        assert!(l1.eq_ignoring_position(&actual));
+    }
+
+    #[test]
+    fn negated_literal() {
+        let l1 = Literal {
+            positive: false,
+            position: None,
+            predicate: Predicate("l1".into()),
+            args: vec![
+                IRTerm::Constant("".into()),
+                IRTerm::UserVariable("X".into()),
+            ],
+        };
+
+        assert_eq!("!l1(\"\", X)", l1.to_string());
+
+        let actual: Literal = "!!!l1(\"\", X)".parse().unwrap();
         assert!(l1.eq_ignoring_position(&actual));
     }
 
@@ -535,16 +625,19 @@ mod tests {
         let va = IRTerm::UserVariable("A".into());
         let vb = IRTerm::UserVariable("B".into());
         let l1 = Literal {
+            positive: true,
             position: None,
             predicate: Predicate("l1".into()),
             args: vec![va.clone(), vb.clone()],
         };
         let l2 = Literal {
+            positive: true,
             position: None,
             predicate: Predicate("l2".into()),
             args: vec![va.clone(), c.clone()],
         };
         let l3 = Literal {
+            positive: true,
             position: None,
             predicate: Predicate("l3".into()),
             args: vec![vb.clone(), c.clone()],
@@ -564,11 +657,13 @@ mod tests {
     fn nullary_predicate() {
         let va = IRTerm::UserVariable("A".into());
         let l1 = Literal {
+            positive: true,
             position: None,
             predicate: Predicate("l1".into()),
             args: Vec::new(),
         };
         let l2 = Literal {
+            positive: true,
             position: None,
             predicate: Predicate("l2".into()),
             args: vec![va.clone()],
