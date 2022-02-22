@@ -55,7 +55,7 @@ impl RenameWithSubstitution<IRTerm> for IRTerm {
     type Output = IRTerm;
     fn rename_with_sub(&self) -> (Self::Output, Substitution<IRTerm>) {
         let s: Substitution<IRTerm> = self
-            .variables()
+            .variables(true)
             .iter()
             .map(|r| {
                 [(r.clone(), r.rename())]
@@ -76,6 +76,7 @@ impl Substitute<IRTerm> for Literal<IRTerm> {
     type Output = Literal;
     fn substitute(&self, s: &Substitution<IRTerm>) -> Self::Output {
         Literal {
+            positive: self.positive,
             position: self.position.clone(),
             predicate: self.predicate.clone(),
             args: self.args.iter().map(|t| t.substitute(s)).collect(),
@@ -87,7 +88,7 @@ impl RenameWithSubstitution<IRTerm> for Literal<IRTerm> {
     type Output = Literal<IRTerm>;
     fn rename_with_sub(&self) -> (Self::Output, Substitution<IRTerm>) {
         let s: Substitution = self
-            .variables()
+            .variables(true)
             .iter()
             .map(|r| {
                 [(r.clone(), r.rename())]
@@ -116,7 +117,7 @@ impl RenameWithSubstitution<IRTerm> for Vec<Literal<IRTerm>> {
     fn rename_with_sub(&self) -> (Self::Output, Substitution<IRTerm>) {
         let s: Substitution<IRTerm> = self
             .iter()
-            .flat_map(|e| e.variables())
+            .flat_map(|e| e.variables(true))
             .map(|r| {
                 [(r.clone(), r.rename())]
                     .iter()
@@ -146,7 +147,7 @@ impl RenameWithSubstitution<IRTerm> for Clause<IRTerm> {
     type Output = Clause<IRTerm>;
     fn rename_with_sub(&self) -> (Self::Output, Substitution<IRTerm>) {
         let s: Substitution<IRTerm> = self
-            .variables()
+            .variables(true)
             .iter()
             .map(|r| {
                 [(r.clone(), r.rename())]

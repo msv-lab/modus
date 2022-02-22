@@ -85,3 +85,68 @@ class TestSolver(ModusTestCase):
         images = self.build(md, 'number_gt(version, "3.14"), foo(f"alpine:${version}")', should_succeed=True)
         self.assertEqual(len(images), 1)
         self.assertIn(Fact("foo", ("alpine:3.15",)), images)
+
+    def test_supports_negation(self):
+        md = dedent("""\
+            is_windows(variant) :- variant = f"windows/${suffix}".
+
+            app(X) :-
+                (
+                    is_windows(X),
+                    from("jturolla/failing-container")
+                ;
+                    !is_windows(X),
+                    from(X),
+                    run("echo hello-world")
+                ).
+        """)
+
+        images = self.build(md, 'app("alpine:3.15")', should_succeed=True)
+        self.assertEqual(len(images), 1)
+        self.assertIn(Fact("app", ("alpine:3.15",)), images)
+
+    def test_supports_negation_in_queries(self):
+        md = dedent("""\
+            is_windows(variant) :- variant = f"windows/${suffix}".
+            my_app(X) :- base_image(X), from(X), run("echo hello-world").
+
+            base_image("windows/windowsservercore-ltsc2022").
+            base_image("alpine:3.15").
+        """)
+
+        images = self.build(md, '!is_windows(X), my_app(X)', should_succeed=True)
+        self.assertEqual(len(images), 1)
+        self.assertIn(Fact("my_app", ("alpine:3.15",)), images)
+
+    def test_supports_negation_and_anonymous_in_queries(self):
+        md = dedent("""\
+            is_windows(variant, suffix) :- variant = f"windows/${suffix}".
+            my_app(X) :- base_image(X), from(X), run("echo hello-world").
+
+            base_image("windows/windowsservercore-ltsc2022").
+            base_image("alpine:3.15").
+        """)
+
+        images = self.build(md, '!is_windows(X, _), my_app(X)', should_succeed=True)
+        self.assertEqual(len(images), 1)
+        self.assertIn(Fact("my_app", ("alpine:3.15",)), images)
+
+    def test_enforces_stratification(self):
+        md = dedent("""\
+            foo(X) :- bar(X).
+            bar(X) :- !foo(X).
+        """)
+
+        images = self.build(md, 'foo(X)', should_succeed=False)
+
+    def test_supports_nested_negation_binding(self):
+        md = dedent("""\
+            foo(X) :- !(t(X), !p(X)), a(X).
+            a(X) :- from(X).
+            p("alpine:3.15").
+            t("alpine:3.15").
+        """)
+
+        images = self.build(md, 'foo("alpine:3.15")', should_succeed=True)
+        self.assertEqual(len(images), 1)
+        self.assertIn(Fact("foo", ("alpine:3.15",)), images)
