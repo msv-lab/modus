@@ -42,3 +42,7 @@ serde_json = "^1.0"
 rand = "0.8"
 shell-escape = "0.1.5"
 spawn-wait = "0.2"
+
+[build-dependencies]
+serde = "^1.0"
+serde_json = "^1.0"
