@@ -168,9 +168,9 @@ fn main() {
                 .arg(
                     Arg::new("FILE")
                         .required(false)
-                        .long_help("Specify the input Modusfile\n\
+                        .long_help("Set the input Modusfile\n\
                                     The default is to look for a Modusfile in the context directory.")
-                        .help("Specify the input Modusfile")
+                        .help("Set the input Modusfile")
                         .value_name("FILE")
                         .short('f')
                         .long("modusfile")
@@ -188,7 +188,7 @@ fn main() {
                 .arg(
                     Arg::new("QUERY")
                         .required(true)
-                        .help("Specify the target query to prove")
+                        .help("Specify the target to prove")
                         .index(2),
                 )
                 .arg(arg!(-e --explain "Prints out an explanation of the steps taken in resolution."))
@@ -200,9 +200,9 @@ fn main() {
                 .arg(
                     Arg::new("FILE")
                         .required(false)
-                        .long_help("Specify the input Modusfile\n\
+                        .long_help("Set the input Modusfile\n\
                                     The default is to look for a Modusfile in the context directory.")
-                        .help("Specify the input Modusfile")
+                        .help("Set the input Modusfile")
                         .value_name("FILE")
                         .short('f')
                         .long("modusfile")
@@ -236,7 +236,10 @@ fn main() {
             let mf: Modusfile = match file.source().parse() {
                 Ok(mf) => mf,
                 Err(e) => {
-                    eprintln!("{}", e);
+                    eprintln!(
+                        "❌ Did not parse Modusfile successfully. Error trace:\n{}",
+                        e
+                    );
                     std::process::exit(1);
                 }
             };
@@ -279,7 +282,10 @@ fn main() {
             let mf: Modusfile = match file.source().parse() {
                 Ok(mf) => mf,
                 Err(e) => {
-                    eprintln!("{}", e);
+                    eprintln!(
+                        "❌ Did not parse Modusfile successfully. Error trace:\n{}",
+                        e
+                    );
                     std::process::exit(1);
                 }
             };
@@ -466,10 +472,11 @@ fn main() {
                     }
                 }
                 (Err(error), _) => {
-                    println!(
+                    eprintln!(
                         "❌ Did not parse Modusfile successfully. Error trace:\n{}",
                         error
-                    )
+                    );
+                    std::process::exit(1);
                 }
             }
         }
@@ -497,7 +504,13 @@ fn main() {
                         std::process::exit(1)
                     }
                 }
-                Err(e) => eprintln!("{}", e),
+                Err(e) => {
+                    eprintln!(
+                        "❌ Did not parse Modusfile successfully. Error trace:\n{}",
+                        e
+                    );
+                    std::process::exit(1);
+                }
             }
         }
         _ => (),
