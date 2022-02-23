@@ -22,7 +22,7 @@ use std::{
 };
 
 use crate::{
-    builtin,
+    analysis, builtin,
     logic::Predicate,
     modusfile::{self, Modusfile},
     translate::translate_modusfile,
@@ -308,20 +308,32 @@ impl Proof {
             .unwrap_or(0)
     }
 
-    pub fn get_tree(&self, clauses: &Vec<Clause>) -> impl TreeItem {
-        fn dfs(p: &Proof, clauses: &Vec<Clause>, builder: &mut TreeBuilder) {
+    pub fn get_tree(
+        &self,
+        clauses: &Vec<Clause>,
+        pred_kind: &HashMap<Predicate, analysis::Kind>,
+    ) -> impl TreeItem {
+        fn dfs(
+            p: &Proof,
+            clauses: &Vec<Clause>,
+            builder: &mut TreeBuilder,
+            pred_kind: &HashMap<Predicate, analysis::Kind>,
+        ) {
             for child in &p.children {
                 match &child.clause {
                     ClauseId::Rule(rid) => {
+                        let s = clauses[*rid].head.substitute(&p.valuation).to_string();
                         builder.begin_child(format!(
                             "{}",
-                            clauses[*rid]
-                                .head
-                                .substitute(&p.valuation)
-                                .to_string()
-                                .dimmed()
+                            if pred_kind.get(&clauses[*rid].head.predicate)
+                                == Some(&analysis::Kind::Image)
+                            {
+                                s.cyan()
+                            } else {
+                                s.normal()
+                            },
                         ));
-                        dfs(&child, clauses, builder);
+                        dfs(&child, clauses, builder, pred_kind);
                         builder.end_child();
                     }
                     ClauseId::Query => {
@@ -337,7 +349,7 @@ impl Proof {
                         crate::analysis::Kind::Layer => {
                             builder.add_empty_child(format!(
                                 "{}",
-                                b.substitute(&p.valuation).to_string().bright_blue()
+                                b.substitute(&p.valuation).to_string()
                             ));
                         }
                         crate::analysis::Kind::Logic => {
@@ -351,7 +363,7 @@ impl Proof {
                                     //       but may not make sense as a DAG.
                                     builder.add_empty_child(format!(
                                         ")::{}",
-                                        b.substitute(&p.valuation).unmangle().to_string().italic()
+                                        b.substitute(&p.valuation).unmangle().to_string()
                                     ));
                                 }
                             }
@@ -363,13 +375,17 @@ impl Proof {
         }
 
         let mut builder = TreeBuilder::new("".to_string());
-        dfs(self, clauses, &mut builder);
+        dfs(self, clauses, &mut builder, pred_kind);
 
         builder.build()
     }
 
-    pub fn pretty_print(&self, clauses: &Vec<Clause>) -> io::Result<()> {
-        print_tree(&self.get_tree(clauses))
+    pub fn pretty_print(
+        &self,
+        clauses: &Vec<Clause>,
+        pred_kind: &HashMap<Predicate, analysis::Kind>,
+    ) -> io::Result<()> {
+        print_tree(&self.get_tree(clauses, pred_kind))
     }
 }
 

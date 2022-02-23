@@ -17,7 +17,7 @@
 mod buildkit;
 mod reporting;
 
-use clap::{crate_version, Command, Arg};
+use clap::{crate_version, Command, Arg, arg};
 use codespan_reporting::{
     files::SimpleFile,
     term::{
@@ -26,7 +26,7 @@ use codespan_reporting::{
     },
 };
 use colored::Colorize;
-use modus_lib::sld::tree_from_modusfile;
+use modus_lib::{analysis::ModusSemantics, sld::tree_from_modusfile};
 use modus_lib::transpiler::render_tree;
 use modus_lib::*;
 use ptree::write_tree;
@@ -161,42 +161,63 @@ fn main() {
                                     This flag allows you to use something other than the default, for example for development on Modus itself."))
                         .default_value(buildkit::FRONTEND_IMAGE),
                 )
-                .arg(
-                    Arg::new("IMPORT")
-                        .long("import")
-                        .short('i')
-                        .value_name("FILE")
-                        .takes_value(true)
-                        .help("Import the given CSV file and includes the rows as ground facts.")
-                )
         )
         .subcommand(
             Command::new("proof")
                 .about("Print proof tree of a given query.")
                 .arg(
                     Arg::new("FILE")
-                        .required(true)
+                        .required(false)
+                        .long_help("Set the input Modusfile\n\
+                                    The default is to look for a Modusfile in the context directory.")
                         .help("Set the input Modusfile")
-                        .index(1),
+                        .value_name("FILE")
+                        .short('f')
+                        .long("modusfile")
+                        .allow_invalid_utf8(true),
+                )
+                .arg(
+                    Arg::new("CONTEXT")
+                        .long_help("Specify the directory that contains the Modusfile.\n\
+                                    This is for compatibility with the `build` subcommand.")
+                        .help("Specify the directory that contains the Modusfile.")
+                        .index(1)
+                        .required(true)
+                        .allow_invalid_utf8(true),
                 )
                 .arg(
                     Arg::new("QUERY")
+                        .required(true)
                         .help("Specify the target to prove")
                         .index(2),
                 )
-                .arg_from_usage("-e --explain 'Prints out an explanation of the steps taken in resolution.'")
-                .arg_from_usage("-g --graph 'Outputs a (DOT) graph that of the SLD tree traversed in resolution.'"),
+                .arg(arg!(-e --explain "Prints out an explanation of the steps taken in resolution."))
+                .arg(arg!(-g --graph "Outputs a (DOT) graph that of the SLD tree traversed in resolution.")),
         )
         .subcommand(
             Command::new("check")
                 .about("Analyse a Modusfile and checks the predicate kinds.")
                 .arg(
                     Arg::new("FILE")
-                        .required(true)
+                        .required(false)
+                        .long_help("Set the input Modusfile\n\
+                                    The default is to look for a Modusfile in the context directory.")
                         .help("Set the input Modusfile")
-                        .index(1),
+                        .value_name("FILE")
+                        .short('f')
+                        .long("modusfile")
+                        .allow_invalid_utf8(true),
                 )
-                .arg_from_usage("-v --verbose 'Displays the evaluated kinds for all the clauses.")
+                .arg(
+                    Arg::new("CONTEXT")
+                        .long_help("Specify the directory that contains the Modusfile.\n\
+                                    This is for compatibility with the `build` subcommand.")
+                        .help("Specify the directory that contains the Modusfile.")
+                        .index(1)
+                        .required(true)
+                        .allow_invalid_utf8(true),
+                )
+                .arg(arg!(-v --verbose "display the evaluated kinds for all the clauses"))
         )
         .get_matches();
 
@@ -215,11 +236,16 @@ fn main() {
             let mf: Modusfile = match file.source().parse() {
                 Ok(mf) => mf,
                 Err(e) => {
-                    eprintln!("{}", e);
+                    eprintln!(
+                        "❌ Did not parse Modusfile successfully. Error trace:\n{}",
+                        e
+                    );
                     std::process::exit(1);
                 }
             };
+            let kind_res = mf.kinds();
             if !analysis::check_and_output_analysis(
+                &kind_res,
                 &mf,
                 false,
                 &mut err_writer.lock(),
@@ -256,11 +282,16 @@ fn main() {
             let mf: Modusfile = match file.source().parse() {
                 Ok(mf) => mf,
                 Err(e) => {
-                    eprintln!("{}", e);
+                    eprintln!(
+                        "❌ Did not parse Modusfile successfully. Error trace:\n{}",
+                        e
+                    );
                     std::process::exit(1);
                 }
             };
+            let kind_res = mf.kinds();
             if !analysis::check_and_output_analysis(
+                &kind_res,
                 &mf,
                 false,
                 &mut err_writer.lock(),
@@ -268,11 +299,6 @@ fn main() {
                 &file,
             ) {
                 std::process::exit(1)
-            }
-
-            if let Some(import_file) = sub.value_of("IMPORT") {
-                // TODO
-                unimplemented!()
             }
 
             let build_plan = match imagegen::plan_from_modusfile(mf, query) {
@@ -383,20 +409,25 @@ fn main() {
             let should_output_graph = sub.is_present("graph");
             let should_explain = sub.is_present("explain");
 
-            let input_file = sub.value_of("FILE").unwrap();
-            let file = get_file_or_exit(Path::new(input_file));
+            let context_dir = sub.value_of_os("CONTEXT").unwrap();
+            let input_file = sub
+                .value_of_os("FILE")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| Path::new(context_dir).join("Modusfile"));
+            let file = get_file_or_exit(input_file.as_path());
             let query: Option<modusfile::Expression> =
                 sub.value_of("QUERY").map(|s| s.parse().unwrap());
             let query = query.map(|q| q.without_position());
 
             match (file.source().parse::<Modusfile>(), query) {
                 (Ok(modus_f), None) => println!(
-                    "Parsed {} successfully. Found {} clauses.",
-                    input_file,
+                    "Parsed successfully. Found {} clauses.",
                     modus_f.0.len()
                 ),
                 (Ok(modus_f), Some(e)) => {
+                    let kind_res = modus_f.kinds();
                     if !analysis::check_and_output_analysis(
+                        &kind_res,
                         &modus_f,
                         false,
                         &mut err_writer.lock(),
@@ -428,7 +459,7 @@ fn main() {
                                 );
 
                                 for (_, proof) in proofs {
-                                    proof.pretty_print(&clauses).expect("error when printing");
+                                    proof.pretty_print(&clauses, &kind_res.pred_kind).expect("error when printing");
                                 }
                             }
                             Err(e) => {
@@ -441,23 +472,29 @@ fn main() {
                     }
                 }
                 (Err(error), _) => {
-                    println!(
-                        "❌ Did not parse {} successfully. Error trace:\n{}",
-                        input_file.purple(),
+                    eprintln!(
+                        "❌ Did not parse Modusfile successfully. Error trace:\n{}",
                         error
-                    )
+                    );
+                    std::process::exit(1);
                 }
             }
         }
         ("check", sub) => {
-            let input_file = sub.value_of("FILE").unwrap();
-            let file = get_file_or_exit(Path::new(input_file));
+            let context_dir = sub.value_of_os("CONTEXT").unwrap();
+            let input_file = sub
+                .value_of_os("FILE")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| Path::new(context_dir).join("Modusfile"));
+            let file = get_file_or_exit(input_file.as_path());
 
             let is_verbose = sub.is_present("verbose");
 
             match file.source().parse::<Modusfile>() {
                 Ok(mf) => {
+                    let kind_res = mf.kinds();
                     if !analysis::check_and_output_analysis(
+                        &kind_res,
                         &mf,
                         is_verbose,
                         &mut err_writer.lock(),
@@ -467,7 +504,13 @@ fn main() {
                         std::process::exit(1)
                     }
                 }
-                Err(e) => eprintln!("{}", e),
+                Err(e) => {
+                    eprintln!(
+                        "❌ Did not parse Modusfile successfully. Error trace:\n{}",
+                        e
+                    );
+                    std::process::exit(1);
+                }
             }
         }
         _ => (),
