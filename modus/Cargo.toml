@@ -10,7 +10,7 @@ homepage = "https://modus-continens.com"
 documentation = "https://docs.modus-continens.com"
 repository = "https://github.com/modus-continens/modus"
 readme = "../README.md"
-keywords = ["docker", "language", "dockerfile", "datalog", "build-system", "reproducible-builds"]
+keywords = ["docker", "language", "dockerfile", "datalog", "build-system"]
 
 [[bin]]
 name = "modus"
