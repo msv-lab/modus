@@ -1,6 +1,6 @@
 [package]
 name = "modus"
-version = "0.1.0"
+version = "0.1.0-alpha1"
 authors = ["University College London"]
 edition = "2018"
 default-run = "modus"
@@ -21,7 +21,7 @@ name = "buildkit-frontend"
 path = "src/buildkit_frontend.rs"
 
 [dependencies]
-modus-lib = { version = "0.1.0", path = "../modus-lib" }
+modus-lib = { version = "=0.1.0-alpha", path = "../modus-lib" }
 
 clap = { version = "3", features = ["cargo"] }
 colored = "2"
@@ -42,3 +42,7 @@ serde_json = "^1.0"
 rand = "0.8"
 shell-escape = "0.1.5"
 spawn-wait = "0.2"
+
+[build-dependencies]
+serde = "^1.0"
+serde_json = "^1.0"
