@@ -771,8 +771,16 @@ pub mod parser {
         literal_identifier(i)
     }
 
-    pub fn modus_var(i: Span) -> IResult<Span, Span> {
+    fn modus_var(i: Span) -> IResult<Span, Span> {
         context(stringify!(modus_var), variable_identifier)(i)
+    }
+
+    pub fn string_interpolation(i: Span) -> IResult<Span, Span> {
+        delimited(
+            terminated(tag("${"), token_sep0),
+            modus_var,
+            cut(preceded(token_sep0, tag("}"))),
+        )(i)
     }
 
     pub fn modus_term(i: Span) -> IResult<Span, ModusTerm> {
