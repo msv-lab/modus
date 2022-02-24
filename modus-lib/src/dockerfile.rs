@@ -218,12 +218,13 @@ pub mod parser {
 
     use nom::{
         branch::alt,
-        bytes::complete::{is_not, tag, tag_no_case},
+        bytes::complete::{is_not, tag_no_case},
         character::complete::{alpha1, alphanumeric1, char, line_ending, one_of, space0, space1},
         combinator::{eof, map, opt, peek, recognize, value},
         multi::{many0, many1, separated_list1},
         sequence::{delimited, pair, preceded, terminated, tuple},
     };
+    use nom_supreme::tag::complete::tag;
 
     //TODO: need to double-check
     pub fn alias_identifier(i: &str) -> IResult<&str, &str> {
@@ -582,8 +583,8 @@ mod tests {
             tag: "7.3-53".into(),
         };
         assert_eq!(
-            Ok(("", i)),
-            parser::image("registry.access.redhat.com/rhel7/rhel:7.3-53")
+            ("", i),
+            parser::image("registry.access.redhat.com/rhel7/rhel:7.3-53").unwrap()
         );
     }
 
@@ -595,6 +596,6 @@ mod tests {
             repo: "r".into(),
             tag: "".into(),
         };
-        assert_eq!(Ok(("", i)), parser::image("a/b/c/r"));
+        assert_eq!(("", i), parser::image("a/b/c/r").unwrap());
     }
 }
