@@ -1,3 +1,6 @@
+[![Crates.io Version](https://img.shields.io/crates/v/modus.svg)](https://crates.io/crates/modus)
+[![Crates.io Licence](https://img.shields.io/crates/l/modus.svg)](https://crates.io/crates/modus)
+
 Modus is a language for building OCI/Docker container images. Modus uses logic programming to solve key pain points of Dockerfiles - no way to express interaction among parameters, inability to specify complex build workflows, difficult and inefficient parallelisation, bloated images, and costly maintenance. For more information, please follow these links:
 
 - [Modus website](https://modus-continens.com)
