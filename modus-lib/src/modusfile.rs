@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use codespan_reporting::diagnostic::Diagnostic;
+use codespan_reporting::diagnostic::Label;
 use nom::character::complete::line_ending;
 use nom::character::complete::not_line_ending;
 use nom::error::convert_error;
@@ -297,23 +299,32 @@ pub struct Version {
     build: String,
 }
 
+fn better_convert_error(e: VerboseError<Span>) -> Vec<Diagnostic<()>> {
+    // TODO: improve
+    let mut diags = Vec::new();
+    for (_, (span, verbose_error)) in e.errors.iter().enumerate() {
+        let length = span.fragment().len();
+        let labels = vec![
+            Label::primary((), span.location_offset()..span.location_offset() + length)
+        ];
+        diags.push(match verbose_error {
+            nom::error::VerboseErrorKind::Context(s) => Diagnostic::note().with_message(format!("in {s}")),
+            nom::error::VerboseErrorKind::Char(c) => Diagnostic::error().with_message(format!("expected {c}")),
+            nom::error::VerboseErrorKind::Nom(e) => Diagnostic::error().with_message(format!("in {e:?}")),
+        }.with_labels(labels));
+    }
+    diags
+}
+
 impl str::FromStr for Modusfile {
-    type Err = String;
+    type Err = Vec<Diagnostic<()>>;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let span = Span::new(s);
         match parser::modusfile(span) {
             Result::Ok((_, o)) => Ok(o),
             Result::Err(nom::Err::Error(e) | nom::Err::Failure(e)) => {
-                // HACK: converts our span based errors to the standard &str based errors.
-                // This drops information that would likely be recomputed in `convert_error`.
-                let errors = e
-                    .errors
-                    .into_iter()
-                    .map(|(span, err)| (span.fragment().to_owned(), err))
-                    .collect();
-                let str_verbose_error = VerboseError { errors };
-                Result::Err(convert_error(s, str_verbose_error))
+                Err(better_convert_error(e))
             }
             _ => unimplemented!(),
         }
@@ -1275,7 +1286,7 @@ mod tests {
             fn should_parse(s: &str) {
                 if let Err(e) = s.parse::<Modusfile>() {
                     panic!(
-                        "Failed to parse: Error:\n{e}\nModusfile:\n{s}",
+                        "Failed to parse: Error:\n{e:?}\nModusfile:\n{s}",
                         e = e,
                         s = s
                     );
