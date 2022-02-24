@@ -302,54 +302,52 @@ pub struct Version {
 /// Combines nom_supreme's error tree type, codespan's reporting and some custom logic
 /// that selects only a subset of a span to produce better error messages.
 fn better_convert_error(e: ErrorTree<Span>) -> Vec<Diagnostic<()>> {
-    fn generate_base_diag(span: &Span, kind: &BaseErrorKind) -> Diagnostic<()> {
-        let diag = Diagnostic::error().with_message(kind.to_string());
-        let labels = match kind {
-            BaseErrorKind::Expected(expectation) => {
-                let expectation_length = match expectation {
-                    nom_supreme::error::Expectation::Tag(t) => t.len(),
-                    _ => 1,
-                };
-                vec![Label::primary(
-                    (),
-                    span.location_offset()..span.location_offset() + expectation_length,
-                )]
-            }
-            _ => vec![], // the source probably won't help with other error types
+    fn generate_base_label(span: &Span, kind: &BaseErrorKind) -> Label<()> {
+        let length = if let BaseErrorKind::Expected(nom_supreme::error::Expectation::Tag(t)) = kind
+        {
+            t.len()
+        } else {
+            // Default to displaying a single character if we do not know what's expected.
+            // (Displaying the full span could be the entire rest of the source file.)
+            1
         };
-        diag.with_labels(labels)
+        Label::primary((), span.location_offset()..span.location_offset() + length)
     }
 
     let mut diags = Vec::new();
     match e {
         ErrorTree::Base { location, kind } => {
-            diags.push(generate_base_diag(&location, &kind));
+            let diag = Diagnostic::error()
+                .with_message(kind.to_string())
+                .with_labels(vec![generate_base_label(&location, &kind)]);
+            diags.push(diag);
         }
         ErrorTree::Stack { base, contexts } => {
+            let mut labels = Vec::new();
+            let diag;
+
             let base_range;
             if let ErrorTree::Base { location, kind } = *base {
-                let diag = generate_base_diag(&location, &kind);
-                base_range = diag.labels[0].range.clone();
-                diags.push(diag);
+                labels.push(generate_base_label(&location, &kind));
+                base_range = labels[0].range.clone();
+                diag = Diagnostic::error().with_message(kind.to_string());
             } else {
                 panic!("base of the error stack was not ErrorTree::Base")
             }
 
             for (span, stack_context) in contexts.iter() {
-                let diag = Diagnostic::note()
-                    .with_message(stack_context.to_string())
-                    .with_labels(vec![Label::primary(
-                        (),
-                        span.location_offset()..base_range.end,
-                    )]);
-                diags.push(diag);
+                labels.push(
+                    Label::secondary((), span.location_offset()..base_range.end)
+                        .with_message(stack_context.to_string()),
+                );
             }
+            diags.push(diag.with_labels(labels))
         }
-        ErrorTree::Alt(mut alts) => {
-            // TODO: could use the full tree.
-            // One way to do this would be to have non-base errors in a stack to
-            // be part of the same diagnostic - just add to the labels.
-            return better_convert_error(alts.remove(alts.len() - 1));
+        ErrorTree::Alt(alts) => {
+            diags.extend(
+                alts.into_iter()
+                    .flat_map(|alt_tree| better_convert_error(alt_tree)),
+            );
         }
     }
     diags
@@ -1402,5 +1400,21 @@ mod tests {
             .
         "#,
         )
+    }
+
+    #[test]
+    fn reports_error_in_rule() {
+        let modus_file: Result<Modusfile, Vec<Diagnostic<()>>> =
+            "foo(X) :- bar(X), baz(X), .".parse();
+        assert!(modus_file.is_err());
+
+        let diags = modus_file.err().unwrap();
+        assert_eq!(1, diags.len());
+        assert_eq!(
+            diags[0].severity,
+            codespan_reporting::diagnostic::Severity::Error
+        );
+        assert!(diags[0].labels[1].message.contains("body"));
+        assert!(diags[0].labels[2].message.contains("rule"));
     }
 }
