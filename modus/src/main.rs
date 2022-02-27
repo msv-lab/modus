@@ -58,6 +58,8 @@ fn main() {
     let matches = Command::new("modus")
         .version(crate_version!())
         .about("A language for building container images")
+        .subcommand_required(true)
+        .arg_required_else_help(true)
         .subcommand(
             Command::new("transpile")
                 .hide(true)
