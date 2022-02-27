@@ -33,8 +33,8 @@ use petgraph::algo::find_negative_cycle;
 
 use crate::builtin::select_builtin;
 use crate::logic::{self, Literal, Predicate, SpannedPosition};
-use crate::modusfile::Modusfile;
 use crate::modusfile::{Expression, ModusClause};
+use crate::modusfile::{ModusTerm, Modusfile};
 use crate::translate::translate_modusfile;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -482,6 +482,33 @@ fn check_negated_logic_kind(
     }
 }
 
+fn f_strings_present_in_head(mf: &Modusfile) -> Result<(), Vec<Diagnostic<()>>> {
+    fn generate_diag(pos: &SpannedPosition) -> Diagnostic<()> {
+        Diagnostic::error()
+            .with_message("A format string was found in a head literal.")
+            .with_labels(vec![Label::primary(
+                (),
+                pos.offset..pos.offset + pos.length,
+            )])
+    }
+
+    let mut diags = Vec::new();
+
+    for modus_clause in &mf.0 {
+        for arg in &modus_clause.head.args {
+            if let ModusTerm::FormatString { position, .. } = arg {
+                diags.push(generate_diag(position));
+            }
+        }
+    }
+
+    if diags.is_empty() {
+        Ok(())
+    } else {
+        Err(diags)
+    }
+}
+
 /// Returns true if the results of the check were satisfactory; we don't need to terminate.
 pub fn check_and_output_analysis<
     'files,
@@ -501,15 +528,25 @@ pub fn check_and_output_analysis<
         }
     }
 
-    let ir_clauses = translate_modusfile(mf);
-    let negation_errors = check_negated_logic_kind(&ir_clauses, &kind_res.pred_kind)
-        .err()
-        .unwrap_or(Vec::new());
+    let f_string_head_res = f_strings_present_in_head(mf);
+    let f_string_head_errors = f_string_head_res.err().unwrap_or_default();
+
+    let can_translate = f_string_head_errors.len() == 0;
+
+    let negation_errors = if can_translate {
+        let ir_clauses = translate_modusfile(mf);
+        check_negated_logic_kind(&ir_clauses, &kind_res.pred_kind)
+            .err()
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
 
     let errs = kind_res
         .errs
         .iter()
         .chain(&negation_errors)
+        .chain(&f_string_head_errors)
         .collect::<Vec<_>>();
     for err in &errs {
         term::emit(out, config, file, err).expect("Error when writing to stderr.");
@@ -720,5 +757,19 @@ mod tests {
         let kind_res = mf.kinds();
         assert_eq!(kind_res.errs.len(), 1);
         assert_eq!(kind_res.errs[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn errors_f_string_present_in_head() {
+        let clauses = vec![
+            "fact_f(f\"foo ${X}\", f\"${Y}\").",
+            "fact_f(f\"foo\").",
+            "fact_f(f\"foo ${X}\") :- bar, lar.",
+        ];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+
+        let res = f_strings_present_in_head(&mf);
+        assert!(res.is_err());
+        assert_eq!(4, res.err().unwrap().len()); // one for each arg
     }
 }

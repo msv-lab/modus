@@ -202,12 +202,10 @@ impl From<ModusTerm> for logic::IRTerm {
     fn from(modus_term: ModusTerm) -> Self {
         match modus_term {
             ModusTerm::Constant(c) => logic::IRTerm::Constant(c),
-            // TODO: return a Result type and propogate the error up properly if we want to warn about
-            // this. Example: the user might try to use a format string in a head literal.
             ModusTerm::FormatString {
                 position: _,
                 format_string_literal: _,
-            } => panic!("Cannot convert a format string to an IRTerm."),
+            } => unreachable!("BUG: analysis should've handled this case."),
             ModusTerm::UserVariable(v) => logic::IRTerm::UserVariable(v),
             ModusTerm::AnonymousVariable => sld::Auxiliary::aux(true),
         }
