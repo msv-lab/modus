@@ -1,6 +1,6 @@
 [package]
 name = "modus-lib"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["University College London"]
 edition = "2018"
 license = "AGPL-3.0"
