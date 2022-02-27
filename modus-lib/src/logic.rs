@@ -413,19 +413,19 @@ pub mod parser {
 
     use nom::{
         branch::alt,
-        bytes::complete::{is_a, tag, take_until},
+        bytes::complete::{is_a, take_until},
         character::complete::{alpha1, alphanumeric1, multispace0},
         combinator::{cut, map, opt, recognize},
-        error::VerboseError,
         multi::{many0, many0_count, separated_list0, separated_list1},
         sequence::{delimited, pair, preceded, terminated, tuple},
         Offset, Slice,
     };
+    use nom_supreme::{error::ErrorTree, tag::complete::tag};
 
     pub type Span<'a> = LocatedSpan<&'a str>;
 
-    /// Redeclaration that uses VerboseError instead of the default nom::Error.
-    pub type IResult<T, O> = nom::IResult<T, O, VerboseError<T>>;
+    /// Redeclaration that uses ErrorTree instead of the default nom::Error.
+    pub type IResult<T, O> = nom::IResult<T, O, ErrorTree<T>>;
 
     /// Creates a parser that returns a `SpannedPosition` that spans the consumed input
     /// of a given parser. Also returns the actual output of the parser.

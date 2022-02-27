@@ -14,10 +14,12 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use codespan_reporting::diagnostic::Diagnostic;
+use codespan_reporting::diagnostic::Label;
 use nom::character::complete::line_ending;
 use nom::character::complete::not_line_ending;
-use nom::error::convert_error;
-use nom::error::VerboseError;
+use nom_supreme::error::BaseErrorKind;
+use nom_supreme::error::ErrorTree;
 
 use std::collections::HashSet;
 use std::fmt;
@@ -295,45 +297,81 @@ pub struct Version {
     build: String,
 }
 
+/// Combines nom_supreme's error tree type, codespan's reporting and some custom logic
+/// that selects only a subset of a span to produce better error messages.
+fn better_convert_error(e: ErrorTree<Span>) -> Vec<Diagnostic<()>> {
+    fn generate_base_label(span: &Span, kind: &BaseErrorKind) -> Label<()> {
+        let length = if let BaseErrorKind::Expected(nom_supreme::error::Expectation::Tag(t)) = kind
+        {
+            t.len()
+        } else {
+            // Default to displaying a single character if we do not know what's expected.
+            // (Displaying the full span could be the entire rest of the source file.)
+            1
+        };
+        Label::primary((), span.location_offset()..span.location_offset() + length)
+    }
+
+    let mut diags = Vec::new();
+    match e {
+        ErrorTree::Base { location, kind } => {
+            let diag = Diagnostic::error()
+                .with_message(kind.to_string())
+                .with_labels(vec![generate_base_label(&location, &kind)]);
+            diags.push(diag);
+        }
+        ErrorTree::Stack { base, contexts } => {
+            let mut labels = Vec::new();
+            let diag;
+
+            let base_range;
+            if let ErrorTree::Base { location, kind } = *base {
+                labels.push(generate_base_label(&location, &kind));
+                base_range = labels[0].range.clone();
+                diag = Diagnostic::error().with_message(kind.to_string());
+            } else {
+                panic!("base of the error stack was not ErrorTree::Base")
+            }
+
+            for (span, stack_context) in contexts.iter() {
+                labels.push(
+                    Label::secondary((), span.location_offset()..base_range.end)
+                        .with_message(stack_context.to_string()),
+                );
+            }
+            diags.push(diag.with_labels(labels))
+        }
+        ErrorTree::Alt(alts) => {
+            diags.extend(
+                alts.into_iter()
+                    .flat_map(|alt_tree| better_convert_error(alt_tree)),
+            );
+        }
+    }
+    diags
+}
+
 impl str::FromStr for Modusfile {
-    type Err = String;
+    type Err = Vec<Diagnostic<()>>;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let span = Span::new(s);
         match parser::modusfile(span) {
             Result::Ok((_, o)) => Ok(o),
-            Result::Err(nom::Err::Error(e) | nom::Err::Failure(e)) => {
-                // HACK: converts our span based errors to the standard &str based errors.
-                // This drops information that would likely be recomputed in `convert_error`.
-                let errors = e
-                    .errors
-                    .into_iter()
-                    .map(|(span, err)| (span.fragment().to_owned(), err))
-                    .collect();
-                let str_verbose_error = VerboseError { errors };
-                Result::Err(convert_error(s, str_verbose_error))
-            }
+            Result::Err(nom::Err::Error(e) | nom::Err::Failure(e)) => Err(better_convert_error(e)),
             _ => unimplemented!(),
         }
     }
 }
 
 impl str::FromStr for Expression {
-    type Err = String;
+    type Err = Vec<Diagnostic<()>>;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let span = Span::new(s);
         match parser::body(span) {
             Ok((_, o)) => Ok(o),
-            Err(nom::Err::Error(e) | nom::Err::Failure(e)) => {
-                let errors = e
-                    .errors
-                    .into_iter()
-                    .map(|(span, err)| (span.fragment().to_owned(), err))
-                    .collect();
-                let str_verbose_error = VerboseError { errors };
-                Result::Err(convert_error(s, str_verbose_error))
-            }
+            Err(nom::Err::Error(e) | nom::Err::Failure(e)) => Err(better_convert_error(e)),
             _ => unimplemented!(),
         }
     }
@@ -425,11 +463,11 @@ pub mod parser {
     use nom::sequence::{pair, tuple};
     use nom::{
         branch::alt,
-        bytes::complete::tag,
         combinator::{eof, map},
         multi::many0,
         sequence::{delimited, preceded, separated_pair, terminated},
     };
+    use nom_supreme::tag::complete::tag;
 
     fn comment(s: Span) -> IResult<Span, Span> {
         recognize(delimited(
@@ -650,7 +688,10 @@ pub mod parser {
             map(
                 terminated(
                     head,
-                    terminated(nom::character::complete::char('.'), token_sep0),
+                    // NOTE: this is a failure ('cut') assuming the rule parser failed,
+                    // however if this is tried *before* the rule parser, this shouldn't be a
+                    // failure. This is just one of the subtleties of a parser combinator.
+                    cut(terminated(nom::character::complete::char('.'), token_sep0)),
                 ),
                 |h| ModusClause {
                     head: h,
@@ -769,8 +810,16 @@ pub mod parser {
         literal_identifier(i)
     }
 
-    pub fn modus_var(i: Span) -> IResult<Span, Span> {
+    fn modus_var(i: Span) -> IResult<Span, Span> {
         context(stringify!(modus_var), variable_identifier)(i)
+    }
+
+    pub fn string_interpolation(i: Span) -> IResult<Span, Span> {
+        delimited(
+            terminated(tag("${"), token_sep0),
+            modus_var,
+            cut(preceded(token_sep0, tag("}"))),
+        )(i)
     }
 
     pub fn modus_term(i: Span) -> IResult<Span, ModusTerm> {
@@ -790,7 +839,7 @@ pub mod parser {
     }
 
     pub fn modus_clause(i: Span) -> IResult<Span, ModusClause> {
-        alt((fact, rule))(i)
+        alt((rule, fact))(i)
     }
 
     pub fn modusfile(i: Span) -> IResult<Span, Modusfile> {
@@ -1265,7 +1314,7 @@ mod tests {
             fn should_parse(s: &str) {
                 if let Err(e) = s.parse::<Modusfile>() {
                     panic!(
-                        "Failed to parse: Error:\n{e}\nModusfile:\n{s}",
+                        "Failed to parse: Error:\n{e:?}\nModusfile:\n{s}",
                         e = e,
                         s = s
                     );
@@ -1349,5 +1398,21 @@ mod tests {
             .
         "#,
         )
+    }
+
+    #[test]
+    fn reports_error_in_rule() {
+        let modus_file: Result<Modusfile, Vec<Diagnostic<()>>> =
+            "foo(X) :- bar(X), baz(X), .".parse();
+        assert!(modus_file.is_err());
+
+        let diags = modus_file.err().unwrap();
+        assert_eq!(1, diags.len());
+        assert_eq!(
+            diags[0].severity,
+            codespan_reporting::diagnostic::Severity::Error
+        );
+        assert!(diags[0].labels[1].message.contains("body"));
+        assert!(diags[0].labels[2].message.contains("rule"));
     }
 }

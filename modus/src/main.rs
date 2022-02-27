@@ -22,8 +22,8 @@ use codespan_reporting::{
     files::SimpleFile,
     term::{
         self,
-        termcolor::{Color, ColorSpec, StandardStream, WriteColor},
-    },
+        termcolor::{Color, ColorSpec, StandardStream, WriteColor}, Config,
+    }, diagnostic::Diagnostic,
 };
 use colored::Colorize;
 use modus_lib::{analysis::ModusSemantics, sld::tree_from_modusfile};
@@ -227,6 +227,12 @@ fn main() {
     let err_writer = StandardStream::stderr(codespan_reporting::term::termcolor::ColorChoice::Auto);
     let config = codespan_reporting::term::Config::default();
 
+    fn print_diagnostics<'files, F: codespan_reporting::files::Files<'files, FileId = ()>>(diags: &Vec<Diagnostic<()>>, writer: &mut dyn WriteColor, config: &Config, files: &'files F) {
+        for diagnostic in diags {
+            term::emit(writer, config, files, diagnostic).expect("Error when printing to term.")
+        }
+    }
+
     match matches.subcommand().unwrap() {
         ("transpile", sub) => {
             let input_file = sub.value_of("FILE").unwrap();
@@ -239,9 +245,9 @@ fn main() {
                 Ok(mf) => mf,
                 Err(e) => {
                     eprintln!(
-                        "❌ Did not parse Modusfile successfully. Error trace:\n{}",
-                        e
+                        "❌ Did not parse Modusfile successfully",
                     );
+                    print_diagnostics(&e, &mut err_writer.lock(), &config, &file);
                     std::process::exit(1);
                 }
             };
@@ -285,9 +291,9 @@ fn main() {
                 Ok(mf) => mf,
                 Err(e) => {
                     eprintln!(
-                        "❌ Did not parse Modusfile successfully. Error trace:\n{}",
-                        e
+                        "❌ Did not parse Modusfile successfully.",
                     );
+                    print_diagnostics(&e, &mut err_writer.lock(), &config, &file);
                     std::process::exit(1);
                 }
             };
@@ -473,11 +479,11 @@ fn main() {
                         }
                     }
                 }
-                (Err(error), _) => {
+                (Err(e), _) => {
                     eprintln!(
-                        "❌ Did not parse Modusfile successfully. Error trace:\n{}",
-                        error
+                        "❌ Did not parse Modusfile successfully.",
                     );
+                    print_diagnostics(&e, &mut err_writer.lock(), &config, &file);
                     std::process::exit(1);
                 }
             }
@@ -508,9 +514,9 @@ fn main() {
                 }
                 Err(e) => {
                     eprintln!(
-                        "❌ Did not parse Modusfile successfully. Error trace:\n{}",
-                        e
+                        "❌ Did not parse Modusfile successfully.",
                     );
+                    print_diagnostics(&e, &mut err_writer.lock(), &config, &file);
                     std::process::exit(1);
                 }
             }

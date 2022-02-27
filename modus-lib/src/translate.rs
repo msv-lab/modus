@@ -19,13 +19,15 @@ use std::{
     sync::atomic::AtomicUsize,
 };
 
-use nom::{bytes::streaming::tag, sequence::delimited};
-
 use crate::{
-    logic::{self, parser::Span, IRTerm, Predicate, SpannedPosition},
+    logic::{
+        self,
+        parser::{recognized_span, Span},
+        IRTerm, Predicate, SpannedPosition,
+    },
     modusfile::{
         self,
-        parser::{modus_var, outside_format_expansion, process_raw_string},
+        parser::{outside_format_expansion, process_raw_string, string_interpolation},
         Expression, ModusClause, ModusTerm,
     },
     sld::{self, Auxiliary},
@@ -89,15 +91,14 @@ fn convert_format_string(
         }
 
         // this might fail, e.g. if we are at the end of the string
-        let variable_res = delimited(tag("${"), modus_var, tag("}"))(i);
-        if let Ok((rest, variable)) = variable_res {
+        let interpolation_res = recognized_span(string_interpolation)(i);
+        if let Ok((rest, (span, variable))) = interpolation_res {
             let new_var: IRTerm = Auxiliary::aux(false);
-            let span_length = 2 + variable.fragment().len() + 1; // the variable string surrounded by ${...}
             let new_literal = logic::Literal {
                 positive: true,
                 position: Some(SpannedPosition {
                     offset: spanned_position.offset + curr_string_offset,
-                    length: span_length,
+                    length: span.length,
                 }),
                 predicate: logic::Predicate(concat_predicate.to_string()),
                 args: vec![
@@ -106,7 +107,7 @@ fn convert_format_string(
                     new_var.clone(),
                 ],
             };
-            curr_string_offset += span_length;
+            curr_string_offset += span.length;
             new_literals.push(new_literal);
             prev_variable = new_var;
             curr_string = rest.fragment();
@@ -469,7 +470,7 @@ mod tests {
     fn format_string_translation() {
         setup();
 
-        let case = "${target_folder}/buildkit-frontend";
+        let case = "${ target_folder }/buildkit-frontend";
 
         let lits = vec![
             logic::Literal {
@@ -489,7 +490,7 @@ mod tests {
                 positive: true,
                 position: Some(SpannedPosition {
                     offset: 2,
-                    length: 16,
+                    length: 18,
                 }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
@@ -501,7 +502,7 @@ mod tests {
             logic::Literal {
                 positive: true,
                 position: Some(SpannedPosition {
-                    offset: 18,
+                    offset: 20,
                     length: 18,
                 }),
                 predicate: logic::Predicate("string_concat".to_owned()),
