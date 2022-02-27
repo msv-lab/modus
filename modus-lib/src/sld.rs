@@ -575,6 +575,8 @@ pub fn sld(
         grounded: &HashMap<Signature, Vec<bool>>,
     ) -> Result<(LiteralGoalId, LiteralWithHistory), ResolutionError> {
         for (id, lit) in goal.iter().enumerate() {
+            // TODO: could rewrite this to enumerate the different cases more explicitly.
+
             let literal = &lit.literal;
 
             // A negated literal must have only constants or anonymous variables (which represent
@@ -611,7 +613,10 @@ pub fn sld(
                 } else {
                     continue;
                 }
-            } else if select_builtin_res.0 == SelectBuiltinResult::GroundnessMismatch {
+            } else if select_builtin_res.0 == SelectBuiltinResult::GroundnessMismatch
+                || (select_builtin_res.0 == SelectBuiltinResult::Match
+                    && !positive_or_grounded_negation)
+            {
                 continue;
             }
 
