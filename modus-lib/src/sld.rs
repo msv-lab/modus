@@ -312,29 +312,35 @@ impl Proof {
         &self,
         clauses: &Vec<Clause>,
         pred_kind: &HashMap<Predicate, analysis::Kind>,
+        compact: bool,
     ) -> impl TreeItem {
         fn dfs(
             p: &Proof,
             clauses: &Vec<Clause>,
             builder: &mut TreeBuilder,
             pred_kind: &HashMap<Predicate, analysis::Kind>,
+            compact: bool,
         ) {
             for child in &p.children {
                 match &child.clause {
                     ClauseId::Rule(rid) => {
-                        let s = clauses[*rid].head.substitute(&child.valuation).to_string();
-                        builder.begin_child(format!(
-                            "{}",
-                            if pred_kind.get(&clauses[*rid].head.predicate)
-                                == Some(&analysis::Kind::Image)
-                            {
-                                s.cyan()
-                            } else {
-                                s.normal()
-                            },
-                        ));
-                        dfs(&child, clauses, builder, pred_kind);
-                        builder.end_child();
+                        if !compact {
+                            let s = clauses[*rid].head.substitute(&child.valuation).to_string();
+                            builder.begin_child(format!(
+                                "{}",
+                                if pred_kind.get(&clauses[*rid].head.predicate)
+                                    == Some(&analysis::Kind::Image)
+                                {
+                                    s.cyan()
+                                } else {
+                                    s.normal()
+                                },
+                            ));
+                        }
+                        dfs(&child, clauses, builder, pred_kind, compact);
+                        if !compact {
+                            builder.end_child();
+                        }
                     }
                     ClauseId::Query => {
                         builder.add_empty_child("query".to_string());
@@ -375,7 +381,7 @@ impl Proof {
         }
 
         let mut builder = TreeBuilder::new("".to_string());
-        dfs(self, clauses, &mut builder, pred_kind);
+        dfs(self, clauses, &mut builder, pred_kind, compact);
 
         builder.build()
     }
@@ -384,8 +390,9 @@ impl Proof {
         &self,
         clauses: &Vec<Clause>,
         pred_kind: &HashMap<Predicate, analysis::Kind>,
+        compact: bool,
     ) -> io::Result<()> {
-        print_tree(&self.get_tree(clauses, pred_kind))
+        print_tree(&self.get_tree(clauses, pred_kind, compact))
     }
 }
 

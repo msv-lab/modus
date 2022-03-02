@@ -194,7 +194,8 @@ fn main() {
                         .index(2),
                 )
                 .arg(arg!(-e --explain "Prints out an explanation of the steps taken in resolution."))
-                .arg(arg!(-g --graph "Outputs a (DOT) graph that of the SLD tree traversed in resolution.")),
+                .arg(arg!(-g --graph "Outputs a (DOT) graph that of the SLD tree traversed in resolution."))
+                .arg(arg!(--compact "Omits logical rule resolution.")),
         )
         .subcommand(
             Command::new("check")
@@ -416,6 +417,7 @@ fn main() {
         ("proof", sub) => {
             let should_output_graph = sub.is_present("graph");
             let should_explain = sub.is_present("explain");
+            let compact = sub.is_present("compact");
 
             let context_dir = sub.value_of_os("CONTEXT").unwrap();
             let input_file = sub
@@ -467,7 +469,9 @@ fn main() {
                                 );
 
                                 for (_, proof) in proofs {
-                                    proof.pretty_print(&clauses, &kind_res.pred_kind).expect("error when printing");
+                                    proof
+                                        .pretty_print(&clauses, &kind_res.pred_kind, compact)
+                                        .expect("error when printing");
                                 }
                             }
                             Err(e) => {
