@@ -322,7 +322,7 @@ impl Proof {
             for child in &p.children {
                 match &child.clause {
                     ClauseId::Rule(rid) => {
-                        let s = clauses[*rid].head.substitute(&p.valuation).to_string();
+                        let s = clauses[*rid].head.substitute(&child.valuation).to_string();
                         builder.begin_child(format!(
                             "{}",
                             if pred_kind.get(&clauses[*rid].head.predicate)
@@ -343,13 +343,13 @@ impl Proof {
                         crate::analysis::Kind::Image => {
                             builder.add_empty_child(format!(
                                 "{}",
-                                b.substitute(&p.valuation).to_string().cyan()
+                                b.substitute(&child.valuation).to_string().cyan()
                             ));
                         }
                         crate::analysis::Kind::Layer => {
                             builder.add_empty_child(format!(
                                 "{}",
-                                b.substitute(&p.valuation).to_string()
+                                b.substitute(&child.valuation).to_string()
                             ));
                         }
                         crate::analysis::Kind::Logic => {
@@ -363,7 +363,7 @@ impl Proof {
                                     //       but may not make sense as a DAG.
                                     builder.add_empty_child(format!(
                                         ")::{}",
-                                        b.substitute(&p.valuation).unmangle().to_string()
+                                        b.substitute(&child.valuation).unmangle().to_string()
                                     ));
                                 }
                             }
