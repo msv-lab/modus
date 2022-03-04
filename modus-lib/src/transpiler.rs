@@ -53,6 +53,12 @@ fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
             let node = &plan.nodes[node_id];
             let str_id = format!("n_{}", node_id);
             match node {
+                BuildNode::FromScratch { .. } => {
+                    vec![Instruction::From(From {
+                        parent: ResolvedParent::Image(Image::from_str("scratch").unwrap()),
+                        alias: Some(str_id),
+                    })]
+                }
                 BuildNode::From {
                     image_ref,
                     display_name: _,

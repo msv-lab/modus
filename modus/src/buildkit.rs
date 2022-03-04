@@ -355,11 +355,23 @@ fn resolve_froms(
     sh: &mut SignalHandler,
     image_cleanup: &mut DockerImageRmOnDrop,
 ) -> Result<(), BuildError> {
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    enum ImageToResolve {
+        Ref(String),
+        Scratch,
+    }
+
     let queue = build_plan
         .nodes
         .iter()
         .filter_map(|x| match x {
-            BuildNode::From { image_ref, .. } if !image_ref_is_hash(image_ref) => Some(image_ref),
+            BuildNode::From { image_ref, .. } if !image_ref_is_hash(image_ref) => {
+                Some(ImageToResolve::Ref(image_ref.to_owned()))
+            }
+            BuildNode::FromScratch { scratch_ref } => {
+                debug_assert!(scratch_ref.is_none());
+                Some(ImageToResolve::Scratch)
+            }
             _ => None,
         })
         .collect::<HashSet<_>>()
@@ -378,10 +390,10 @@ fn resolve_froms(
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     struct Task {
-        original_image_ref: String,
+        to_resolve: ImageToResolve,
         iidfile: PathBuf,
     }
-    for (i, &image_ref) in queue.iter().enumerate() {
+    for (i, to_resolve) in queue.iter().enumerate() {
         let ctx = ctx.join(i.to_string());
         if sh.termination_pending() {
             return Err(Interrupted);
@@ -400,26 +412,33 @@ fn resolve_froms(
            wrong image (a duplicate of the other).
         */
 
-        let mut tmp_plan = BuildPlan::new();
-        let out = tmp_plan.new_node(
-            BuildNode::From {
-                image_ref: image_ref.clone(),
-                display_name: image_ref.clone(),
-            },
-            Vec::new(),
-        );
-        tmp_plan.outputs.push(Output {
-            node: out,
-            source_literal: None,
-        });
+        let content = match to_resolve {
+            ImageToResolve::Ref(image_ref) => {
+                let mut tmp_plan = BuildPlan::new();
+                let out = tmp_plan.new_node(
+                    BuildNode::From {
+                        image_ref: image_ref.clone(),
+                        display_name: image_ref.clone(),
+                    },
+                    Vec::new(),
+                );
+                tmp_plan.outputs.push(Output {
+                    node: out,
+                    source_literal: None,
+                });
 
-        let mut content = String::new();
-        content.push_str("#syntax=");
-        content.push_str(&build_options.frontend_image);
-        content.push('\n');
-        content.push_str(
-            &serde_json::to_string(&tmp_plan).expect("Unable to serialize temporary build plan"),
-        );
+                let mut content = String::new();
+                content.push_str("#syntax=");
+                content.push_str(&build_options.frontend_image);
+                content.push('\n');
+                content.push_str(
+                    &serde_json::to_string(&tmp_plan)
+                        .expect("Unable to serialize temporary build plan"),
+                );
+                content
+            }
+            ImageToResolve::Scratch => "FROM scratch".to_owned(),
+        };
         if sh.termination_pending() {
             return Err(Interrupted);
         }
@@ -439,8 +458,8 @@ fn resolve_froms(
             Some(&ctx),
         );
         let t = Task {
-            original_image_ref: image_ref.clone(),
-            iidfile: iidfile,
+            to_resolve: to_resolve.clone(),
+            iidfile,
         };
         procs.add_command(t, cmd);
     }
@@ -460,14 +479,17 @@ fn resolve_froms(
                     return Err(UnableToRunDockerBuild(err));
                 }
                 let (_, exit_status) = child.unwrap();
+                let orig_str_repr = match &t.to_resolve {
+                    ImageToResolve::Ref(s) => s,
+                    ImageToResolve::Scratch => "scratch",
+                };
                 if !exit_status.success() {
                     let _ = procs.sigint_all_and_wait(sh);
-                    return Err(CouldNotResolveImage(t.original_image_ref.clone(), exit_status));
+                    return Err(CouldNotResolveImage(orig_str_repr.to_owned(), exit_status));
                 }
                 nb_done += 1;
                 let resolved = std::fs::read_to_string(&t.iidfile)
                     .map_err(|e| UnableToReadTmpFile(t.iidfile.display().to_string(), e))?;
-                let original = &t.original_image_ref;
                 let tmp_tag = format!("modus_tmp_tag_{}", &resolved);
                 // tmp_tag is going to be something like modus_tmp_tag_sha256:1234....
                 // This is very much intentional.
@@ -479,15 +501,15 @@ fn resolve_froms(
                 }
                 image_cleanup.add(tmp_tag.clone());
 
-                debug_assert!(!orig_to_resolved_tag.contains_key(original));
-                orig_to_resolved_tag.insert(original.clone(), tmp_tag);
+                debug_assert!(!orig_to_resolved_tag.contains_key(&t.to_resolve));
+                orig_to_resolved_tag.insert(t.to_resolve.clone(), tmp_tag);
                 eprintln!(
                     "\x1b[2K\r{}\x1b[0m",
                     format!(
                         "[{}/{}] Resolved from({:?})...",
                         nb_done,
                         queue.len(),
-                        original
+                        orig_str_repr
                     )
                     .blue()
                 );
@@ -504,10 +526,27 @@ fn resolve_froms(
     debug_assert_eq!(nb_done, queue.len());
 
     for node in build_plan.nodes.iter_mut() {
-        if let BuildNode::From { image_ref, .. } = node {
-            if let Some(resolved) = orig_to_resolved_tag.get(image_ref) {
-                *image_ref = resolved.clone();
+        match node {
+            BuildNode::From { image_ref, .. } => {
+                if let Some(resolved) =
+                    orig_to_resolved_tag.get(&ImageToResolve::Ref(image_ref.to_owned()))
+                {
+                    *image_ref = resolved.clone();
+                }
             }
+            // See buildkit_frontend.rs for why we have to treat scratch image separately.
+            BuildNode::FromScratch { scratch_ref } => {
+                debug_assert!(scratch_ref.is_none());
+                *node = BuildNode::FromScratch {
+                    scratch_ref: Some(
+                        orig_to_resolved_tag
+                            .get(&ImageToResolve::Scratch)
+                            .unwrap()
+                            .to_owned(),
+                    ),
+                }
+            }
+            _ => {}
         }
     }
 
