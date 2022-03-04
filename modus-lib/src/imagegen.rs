@@ -155,6 +155,10 @@ pub enum BuildNode {
         /// What user specified initially, such as "alpine".
         display_name: String,
     },
+    FromScratch {
+        /// A hack, inserted by buildkit.rs See buildkit_frontend.rs for documentation
+        scratch_ref: Option<String>,
+    },
     Run {
         parent: NodeId,
         command: String,
@@ -359,13 +363,19 @@ pub fn build_dag_from_proofs(
                         curr_state.set_node(existing_node);
                     } else {
                         let image_ref = intrinsic.args[0].as_constant().unwrap().to_owned();
-                        let new_node = res.new_node(
-                            BuildNode::From {
-                                display_name: image_ref.clone(),
-                                image_ref,
-                            },
-                            vec![],
-                        );
+                        let new_node;
+                        if &image_ref == "scratch" {
+                            new_node =
+                                res.new_node(BuildNode::FromScratch { scratch_ref: None }, vec![]);
+                        } else {
+                            new_node = res.new_node(
+                                BuildNode::From {
+                                    display_name: image_ref.clone(),
+                                    image_ref,
+                                },
+                                vec![],
+                            );
+                        }
                         curr_state.set_node(new_node);
                         image_literals.insert(intrinsic.clone(), new_node);
                     }

@@ -187,6 +187,17 @@ async fn handle_build_plan(
             stop_signal: None,
         }
     }
+    fn scratch_spec() -> ImageSpecification {
+        ImageSpecification {
+            architecture: buildkit_frontend::oci::Architecture::Amd64, // TODO
+            author: None,
+            config: Some(empty_image_config()),
+            created: None,
+            history: None,
+            os: buildkit_frontend::oci::OperatingSystem::Linux,
+            rootfs: None,
+        }
+    }
 
     async fn get_local_source_for_copy(
         bridge: &Bridge,
@@ -240,6 +251,17 @@ async fn handle_build_plan(
         }
 
         let new_node: (OwnedOutput, Arc<ImageSpecification>) = match node {
+            /*
+                resolve_image_config will fail if we try to resolve an empty
+                image (like that produced by FROM scratch). Therefore, we have a
+                special case here for scratch images that don't try to resolve
+                its spec.
+            */
+            FromScratch { scratch_ref } => {
+                let img_s =
+                    Source::image(scratch_ref.as_ref().unwrap()).custom_name("from(\"scratch\")");
+                (img_s.ref_counted().into(), Arc::new(scratch_spec()))
+            }
             From {
                 image_ref,
                 display_name,
@@ -247,10 +269,13 @@ async fn handle_build_plan(
                 let img_s =
                     Source::image(image_ref).custom_name(format!("from({:?})", display_name));
                 let log_name = format!("from({:?}) :: resolve image config", display_name);
-                let (_, resolved_config) = bridge
-                    .resolve_image_config(&img_s, Some(&log_name))
-                    .await
-                    .expect("Resolution failed.");
+                let resolved_config =
+                    match bridge.resolve_image_config(&img_s, Some(&log_name)).await {
+                        Ok((_, x)) => x,
+                        Err(e) => {
+                            panic!("Failed to resolve image config: {:?}", e); // unreachable
+                        }
+                    };
                 (img_s.ref_counted().into(), Arc::new(resolved_config))
             }
             Run {
