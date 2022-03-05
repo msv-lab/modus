@@ -162,6 +162,18 @@ impl ModusClause {
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
+enum FormatStringFragment {
+    StringContent(String),
+    InterpolatedVariable(String),
+}
+
+impl fmt::Display for FormatStringFragment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        todo!()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum ModusTerm {
     Constant(String),
     /// A format string with '\$' left unhandled. This should be dealt with when
@@ -169,9 +181,7 @@ pub enum ModusTerm {
     FormatString {
         /// The position of this term, beginning from the 'f' in the source
         position: SpannedPosition,
-        /// The input string literal, as in the source code, i.e. the escape characters
-        /// have not been converted.
-        format_string_literal: String,
+        fragments: Vec<FormatStringFragment>,
     },
     UserVariable(String),
     AnonymousVariable,
@@ -193,8 +203,8 @@ impl fmt::Display for ModusTerm {
             ModusTerm::UserVariable(s) => write!(f, "{}", s),
             ModusTerm::FormatString {
                 position: _,
-                format_string_literal,
-            } => write!(f, "\"{}\"", format_string_literal),
+                fragments,
+            } => write!(f, "\"{}\"", fragments.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("")),
             ModusTerm::AnonymousVariable => write!(f, "_"),
         }
     }
@@ -205,8 +215,7 @@ impl From<ModusTerm> for logic::IRTerm {
         match modus_term {
             ModusTerm::Constant(c) => logic::IRTerm::Constant(c),
             ModusTerm::FormatString {
-                position: _,
-                format_string_literal: _,
+                ..
             } => unreachable!("BUG: analysis should've handled this case."),
             ModusTerm::UserVariable(v) => logic::IRTerm::UserVariable(v),
             ModusTerm::AnonymousVariable => sld::Auxiliary::aux(true),
@@ -797,12 +806,14 @@ pub mod parser {
         recognize(opt(escaped(none_of("\\$"), '\\', one_of("$\"\\nrt0\n"))))(i)
     }
 
-    fn modus_format_string(i: Span) -> IResult<Span, (SpannedPosition, String)> {
+    fn format_string_fragment(i: Span) -> IResult<Span, FormatStringFragment> {
+        todo!()
+    }
+
+    fn modus_format_string(i: Span) -> IResult<Span, (SpannedPosition, Vec<FormatStringFragment>)> {
         context(
             stringify!(modus_format_string),
-            // TODO: check that the token(s) inside "${...}" conform to the variable syntax.
-            // Note that if it's escaped, "\${...}", it does not need to conform to the variable syntax.
-            recognized_span(delimited(tag("f\""), format_string_content, cut(tag("\"")))),
+            recognized_span(delimited(tag("f\""), many0(format_string_fragment), cut(tag("\"")))),
         )(i)
     }
 
@@ -825,10 +836,10 @@ pub mod parser {
     pub fn modus_term(i: Span) -> IResult<Span, ModusTerm> {
         alt((
             map(modus_const, ModusTerm::Constant),
-            map(modus_format_string, |(position, format_string_literal)| {
+            map(modus_format_string, |(position, fragments)| {
                 ModusTerm::FormatString {
                     position,
-                    format_string_literal,
+                    fragments,
                 }
             }),
             map(is_a("_"), |_| ModusTerm::AnonymousVariable),
