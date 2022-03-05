@@ -184,7 +184,7 @@ pub enum ModusTerm {
     /// A format string with '\$' left unhandled. This should be dealt with when
     /// converting to the IR.
     FormatString {
-        /// The position of this term, beginning from the 'f' in the source
+        /// The position of this entire term, beginning from the 'f' in the source
         position: SpannedPosition,
         fragments: Vec<FormatStringFragment>,
     },
@@ -219,6 +219,19 @@ impl fmt::Display for ModusTerm {
                     .join("")
             ),
             ModusTerm::AnonymousVariable => write!(f, "_"),
+        }
+    }
+}
+
+impl str::FromStr for ModusTerm {
+    type Err = Vec<Diagnostic<()>>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let span = Span::new(s);
+        match parser::modus_term(span) {
+            Result::Ok((_, o)) => Ok(o),
+            Result::Err(nom::Err::Error(e) | nom::Err::Failure(e)) => Err(better_convert_error(e)),
+            _ => unimplemented!(),
         }
     }
 }

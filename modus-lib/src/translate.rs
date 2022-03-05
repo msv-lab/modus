@@ -451,23 +451,12 @@ mod tests {
     fn format_string_translation() {
         setup();
 
-        // "${ target_folder }/buildkit-frontend"
-        let case = vec![
-            FormatStringFragment::InterpolatedVariable(
-                SpannedPosition {
-                    offset: 3 + 2,
-                    length: 13,
-                },
-                "target_folder".to_string(),
-            ),
-            FormatStringFragment::StringContent(
-                SpannedPosition {
-                    offset: 18 + 2,
-                    length: 18,
-                },
-                "/buildkit-frontend".to_string(),
-            ),
-        ];
+        let term: ModusTerm = "f\"${ target_folder }/buildkit-frontend\"".parse().unwrap();
+        let (span, fragments) = if let ModusTerm::FormatString { position, fragments } = term {
+            (position, fragments)
+        } else {
+            panic!("term should be f-string")
+        };
 
         let lits = vec![
             logic::Literal {
@@ -501,11 +490,8 @@ mod tests {
         assert_eq!(
             (lits, IRTerm::AuxiliaryVariable(1)),
             convert_format_string(
-                &SpannedPosition {
-                    length: 2 + 13 + 18 + 3,
-                    offset: 0
-                },
-                &case
+                &span,
+                &fragments
             )
         );
     }
@@ -515,33 +501,13 @@ mod tests {
     fn format_string_translation_with_escape() {
         setup();
 
-        // let case = r#"use \"${feature}\" like this \${...} \
-        //               foobar"#;
-        let case = vec![
-            FormatStringFragment::StringContent(
-                SpannedPosition {
-                    offset: 2,
-                    length: 6,
-                },
-                r#"use \""#.to_string(),
-            ),
-            FormatStringFragment::InterpolatedVariable(
-                SpannedPosition {
-                    offset: 10,
-                    length: 7,
-                },
-                "feature".to_string(),
-            ),
-            FormatStringFragment::StringContent(
-                SpannedPosition {
-                    offset: 18,
-                    length: 54,
-                },
-                r#"\" like this \${...} \
-                         foobar"#
-                    .to_string(),
-            ),
-        ];
+        let term: ModusTerm = r#"f"use \"${feature}\" like this \${...} \
+                                   foobar""#.parse().unwrap();
+        let (span, fragments) = if let ModusTerm::FormatString { position, fragments } = term {
+            (position, fragments)
+        } else {
+            panic!("term should be f-string")
+        };
 
         let lits = vec![
             logic::Literal {
@@ -574,7 +540,7 @@ mod tests {
                 positive: true,
                 position: Some(SpannedPosition {
                     offset: 2,
-                    length: 70,
+                    length: 80,
                 }),
                 predicate: logic::Predicate("string_concat".to_owned()),
                 args: vec![
@@ -588,11 +554,8 @@ mod tests {
         assert_eq!(
             (lits, IRTerm::AuxiliaryVariable(2)),
             convert_format_string(
-                &SpannedPosition {
-                    length: case.len() + 3,
-                    offset: 0
-                },
-                &case
+                &span,
+                &fragments
             )
         );
     }

@@ -1491,28 +1491,9 @@ mod tests {
             positive: true,
             position: None,
             predicate: Predicate("base_image".into()),
-            args: vec![ModusTerm::FormatString {
-                position: logic::SpannedPosition {
-                    offset: 0,
-                    length: 13,
-                },
-                fragments: vec![
-                    FormatStringFragment::StringContent(
-                        SpannedPosition {
-                            offset: 2,
-                            length: 6,
-                        },
-                        "alpine".into(),
-                    ),
-                    FormatStringFragment::InterpolatedVariable(
-                        SpannedPosition {
-                            offset: 9,
-                            length: 1,
-                        },
-                        "X".into(),
-                    ),
-                ],
-            }],
+            args: vec![
+                "f\"alpine${X}\"".parse().unwrap()
+            ],
         });
 
         let (_, _, sld_res) = tree_from_modusfile(mf, query, 20, true);
