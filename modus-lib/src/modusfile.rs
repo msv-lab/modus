@@ -162,16 +162,31 @@ impl ModusClause {
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum FormatStringFragment {
+    /// A raw section of a f-string - escape characters unprocessed - and its span.
+    StringContent(SpannedPosition, String),
+    /// A variable as a string, and its span.
+    InterpolatedVariable(SpannedPosition, String),
+}
+
+impl fmt::Display for FormatStringFragment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FormatStringFragment::StringContent(_, s) => write!(f, "{s}"),
+            FormatStringFragment::InterpolatedVariable(_, v) => write!(f, "${{{v}}}"),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum ModusTerm {
     Constant(String),
     /// A format string with '\$' left unhandled. This should be dealt with when
     /// converting to the IR.
     FormatString {
-        /// The position of this term, beginning from the 'f' in the source
+        /// The position of this entire term, beginning from the 'f' in the source
         position: SpannedPosition,
-        /// The input string literal, as in the source code, i.e. the escape characters
-        /// have not been converted.
-        format_string_literal: String,
+        fragments: Vec<FormatStringFragment>,
     },
     UserVariable(String),
     AnonymousVariable,
@@ -193,9 +208,30 @@ impl fmt::Display for ModusTerm {
             ModusTerm::UserVariable(s) => write!(f, "{}", s),
             ModusTerm::FormatString {
                 position: _,
-                format_string_literal,
-            } => write!(f, "\"{}\"", format_string_literal),
+                fragments,
+            } => write!(
+                f,
+                "\"{}\"",
+                fragments
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>()
+                    .join("")
+            ),
             ModusTerm::AnonymousVariable => write!(f, "_"),
+        }
+    }
+}
+
+impl str::FromStr for ModusTerm {
+    type Err = Vec<Diagnostic<()>>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let span = Span::new(s);
+        match parser::modus_term(span) {
+            Result::Ok((_, o)) => Ok(o),
+            Result::Err(nom::Err::Error(e) | nom::Err::Failure(e)) => Err(better_convert_error(e)),
+            _ => unimplemented!(),
         }
     }
 }
@@ -204,10 +240,9 @@ impl From<ModusTerm> for logic::IRTerm {
     fn from(modus_term: ModusTerm) -> Self {
         match modus_term {
             ModusTerm::Constant(c) => logic::IRTerm::Constant(c),
-            ModusTerm::FormatString {
-                position: _,
-                format_string_literal: _,
-            } => unreachable!("BUG: analysis should've handled this case."),
+            ModusTerm::FormatString { .. } => {
+                unreachable!("BUG: analysis should've handled this case.")
+            }
             ModusTerm::UserVariable(v) => logic::IRTerm::UserVariable(v),
             ModusTerm::AnonymousVariable => sld::Auxiliary::aux(true),
         }
@@ -325,12 +360,19 @@ fn better_convert_error(e: ErrorTree<Span>) -> Vec<Diagnostic<()>> {
             let diag;
 
             let base_range;
-            if let ErrorTree::Base { location, kind } = *base {
-                labels.push(generate_base_label(&location, &kind));
-                base_range = labels[0].range.clone();
-                diag = Diagnostic::error().with_message(kind.to_string());
-            } else {
-                panic!("base of the error stack was not ErrorTree::Base")
+            match *base {
+                ErrorTree::Base { location, kind } => {
+                    labels.push(generate_base_label(&location, &kind));
+                    base_range = labels[0].range.clone();
+                    diag = Diagnostic::error().with_message(kind.to_string());
+                }
+                ErrorTree::Stack { .. } => panic!("base of an error stack was a stack"),
+                ErrorTree::Alt(alts) => {
+                    return alts
+                        .into_iter()
+                        .flat_map(|a| better_convert_error(a))
+                        .collect()
+                }
             }
 
             for (span, stack_context) in contexts.iter() {
@@ -777,10 +819,18 @@ pub mod parser {
         Ok((i, parsed_str.to_owned()))
     }
 
+    /// Parses a non-empty substring outside of the interpolation part of a format string.
     fn format_string_content(i: Span) -> IResult<Span, String> {
-        let escape_parser = escaped(none_of("\\\""), '\\', one_of(FORMAT_STRING_ESCAPE_CHARS));
-        let (i, o) = opt(escape_parser)(i)?;
-        let parsed_str: &str = o.map(|span| *span.fragment()).unwrap_or("");
+        // This assumes that the escape char parser is only called after a control character, otherwise
+        // the 'cut' may not be valid.
+        // Could replace `one_of` with a bunch of alts if it's important to print the expected chars,
+        // ideally `one_of` would just have a better error type.
+        let (i, o) = escaped(
+            none_of("\\\"$"),
+            '\\',
+            cut(one_of(FORMAT_STRING_ESCAPE_CHARS)),
+        )(i)?;
+        let parsed_str: &str = o.fragment();
         Ok((i, parsed_str.to_owned()))
     }
 
@@ -791,18 +841,44 @@ pub mod parser {
         )(i)
     }
 
-    /// Parses a substring outside of the expansion part of a format string's content.
-    pub fn outside_format_expansion(i: Span) -> IResult<Span, Span> {
-        // We want to parse until we see '$', except if it was preceded with escape char.
-        recognize(opt(escaped(none_of("\\$"), '\\', one_of("$\"\\nrt0\n"))))(i)
+    fn format_string_fragment(i: Span) -> IResult<Span, FormatStringFragment> {
+        let interpolation = delimited(
+            terminated(tag("${"), token_sep0),
+            cut(modus_var),
+            cut(preceded(token_sep0, tag("}"))),
+        );
+
+        alt((
+            map(interpolation, |v_span| {
+                FormatStringFragment::InterpolatedVariable(
+                    v_span.into(),
+                    v_span.fragment().to_string(),
+                )
+            }),
+            // this may bloat the fragment list but likely worth the convenience of
+            // using '$' without escaping it
+            map(tag("$"), |span: Span| {
+                FormatStringFragment::StringContent(
+                    span.into(),
+                    span.fragment().to_string(),
+                )
+            }),
+            map(recognized_span(format_string_content), |(span, content)| {
+                FormatStringFragment::StringContent(span, content)
+            }),
+        ))(i)
     }
 
-    fn modus_format_string(i: Span) -> IResult<Span, (SpannedPosition, String)> {
+    pub fn modus_format_string(
+        i: Span,
+    ) -> IResult<Span, (SpannedPosition, Vec<FormatStringFragment>)> {
         context(
             stringify!(modus_format_string),
-            // TODO: check that the token(s) inside "${...}" conform to the variable syntax.
-            // Note that if it's escaped, "\${...}", it does not need to conform to the variable syntax.
-            recognized_span(delimited(tag("f\""), format_string_content, cut(tag("\"")))),
+            recognized_span(delimited(
+                tag("f\""),
+                cut(many0(format_string_fragment)),
+                cut(tag("\"")),
+            )),
         )(i)
     }
 
@@ -825,10 +901,10 @@ pub mod parser {
     pub fn modus_term(i: Span) -> IResult<Span, ModusTerm> {
         alt((
             map(modus_const, ModusTerm::Constant),
-            map(modus_format_string, |(position, format_string_literal)| {
+            map(modus_format_string, |(position, fragments)| {
                 ModusTerm::FormatString {
                     position,
-                    format_string_literal,
+                    fragments,
                 }
             }),
             map(is_a("_"), |_| ModusTerm::AnonymousVariable),
@@ -857,6 +933,8 @@ pub mod parser {
 mod tests {
     use rand::Rng;
     use serial_test::serial;
+
+    use crate::modusfile::parser::modus_term;
 
     use super::*;
 
@@ -1414,5 +1492,146 @@ mod tests {
         );
         assert!(diags[0].labels[1].message.contains("body"));
         assert!(diags[0].labels[2].message.contains("rule"));
+    }
+
+    #[test]
+    fn format_string() {
+        let case = "f\"foo ${ X }\"";
+
+        let expected: ModusTerm = ModusTerm::FormatString {
+            position: SpannedPosition {
+                offset: 0,
+                length: 10 + 3,
+            },
+            fragments: vec![
+                FormatStringFragment::StringContent(
+                    SpannedPosition {
+                        offset: 2,
+                        length: 4,
+                    },
+                    "foo ".to_string(),
+                ),
+                FormatStringFragment::InterpolatedVariable(
+                    SpannedPosition {
+                        offset: 9,
+                        length: 1,
+                    },
+                    "X".to_string(),
+                ),
+            ],
+        };
+
+        assert_eq!(expected, modus_term(Span::new(case)).unwrap().1);
+    }
+
+    #[test]
+    fn format_string_starts_with_variable() {
+        let case = r#"f"${var1} foo bar\tbaz""#;
+
+        let expected = ModusTerm::FormatString {
+            position: SpannedPosition {
+                offset: 0,
+                length: 20 + 3,
+            },
+            fragments: vec![
+                FormatStringFragment::InterpolatedVariable(
+                    SpannedPosition {
+                        offset: 4,
+                        length: 4,
+                    },
+                    "var1".to_string(),
+                ),
+                FormatStringFragment::StringContent(
+                    SpannedPosition {
+                        offset: 9,
+                        length: 13,
+                    },
+                    r#" foo bar\tbaz"#.to_string(),
+                ),
+            ]
+        };
+
+        assert_eq!(expected, modus_term(Span::new(case)).unwrap().1);
+    }
+
+    #[test]
+    fn empty_format_string() {
+        let case = "f\"\"";
+
+        let expected: ModusTerm = ModusTerm::FormatString {
+            position: SpannedPosition {
+                offset: 0,
+                length: 0 + 3,
+            },
+            fragments: vec![],
+        };
+
+        assert_eq!(expected, modus_term(Span::new(case)).unwrap().1);
+    }
+
+    #[test]
+    fn format_string_errors_with_multiple_vars() {
+        let case = "f\"bar ${X X2}\"";
+
+        let actual = modus_term(Span::new(case));
+        assert!(actual.is_err());
+    }
+
+    #[test]
+    fn format_string_dollar_without_interpolation() {
+        let case = "f\"bar $ baz\"";
+
+        let expected = ModusTerm::FormatString {
+            position: SpannedPosition {
+                offset: 0,
+                length: 9 + 3,
+            },
+            fragments: vec![
+                FormatStringFragment::StringContent(
+                    SpannedPosition {
+                        offset: 2,
+                        length: 4,
+                    },
+                    r#"bar "#.to_string(),
+                ),
+                FormatStringFragment::StringContent(
+                    SpannedPosition {
+                        offset: 6,
+                        length: 1,
+                    },
+                    "$".to_string(),
+                ),
+                FormatStringFragment::StringContent(
+                    SpannedPosition {
+                        offset: 7,
+                        length: 4,
+                    },
+                    " baz".to_string(),
+                ),
+            ],
+        };
+
+        assert_eq!(expected, modus_term(Span::new(case)).unwrap().1);
+    }
+
+    #[test]
+    fn f_string_escaped_interpolation() {
+        let case = r#"f"\${var} foo""#;
+
+        let expected = ModusTerm::FormatString {
+            position: SpannedPosition {
+                offset: 0,
+                length: 11 + 3,
+            },
+            fragments: vec![FormatStringFragment::StringContent(
+                SpannedPosition {
+                    offset: 2,
+                    length: 11,
+                },
+                r#"\${var} foo"#.to_string(),
+            )],
+        };
+
+        assert_eq!(expected, modus_term(Span::new(case)).unwrap().1);
     }
 }
