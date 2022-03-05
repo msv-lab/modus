@@ -314,6 +314,27 @@ impl Proof {
         pred_kind: &HashMap<Predicate, analysis::Kind>,
         compact: bool,
     ) -> impl TreeItem {
+        fn find_matching_end(
+            operator_start: &Literal,
+            start_index: usize,
+            children: &[Proof],
+        ) -> Option<usize> {
+            for i in start_index + 1..children.len() {
+                let child = &children[i];
+                if let ClauseId::Builtin(b) = &child.clause {
+                    if b.predicate.naive_predicate_kind().is_logic()
+                        && b.predicate.is_operator()
+                        && b.predicate.0.ends_with("_end")
+                        && b.predicate.0.replace("_end", "_begin") == operator_start.predicate.0
+                        && b.args.last() == operator_start.args.last()
+                    {
+                        return Some(i);
+                    }
+                }
+            }
+            None
+        }
+
         fn dfs(
             p: &Proof,
             clauses: &Vec<Clause>,
@@ -321,7 +342,11 @@ impl Proof {
             pred_kind: &HashMap<Predicate, analysis::Kind>,
             compact: bool,
         ) {
-            for child in &p.children {
+            let mut prev_scope_start_index = 0;
+            let mut prev_scope_end_index = 0;
+            let mut dont_close: HashSet<usize> = HashSet::new();
+
+            for (i, child) in p.children.iter().enumerate() {
                 match &child.clause {
                     ClauseId::Rule(rid) => {
                         if !compact {
@@ -361,14 +386,29 @@ impl Proof {
                         crate::analysis::Kind::Logic => {
                             if b.predicate.is_operator() {
                                 if b.predicate.0.ends_with("_begin") {
-                                    builder.begin_child("(".to_string());
+                                    let curr_scope_end_index = find_matching_end(b, i, &p.children).expect("begin operator has an end");
+
+                                    let curr_scope_start_index = i;
+                                    if prev_scope_start_index + 1 == curr_scope_start_index
+                                        && curr_scope_end_index + 1 == prev_scope_end_index {
+                                        // if we are directly inside the previous scope, we won't need to start a new scope
+                                        dont_close.insert(prev_scope_end_index);
+                                    } else {
+                                        builder.begin_child("(".to_string());
+                                    }
+                                    prev_scope_start_index = i;
+                                    prev_scope_end_index = curr_scope_end_index;
                                 } else {
-                                    builder.end_child();
+                                    if !dont_close.contains(&i) {
+                                        builder.end_child();
+                                    }
+
                                     // HACK: Because we want to print the operators *after* their scope,
                                     //       we add a leaf node here. It will look as expected in the term
                                     //       but may not make sense as a DAG.
                                     builder.add_empty_child(format!(
-                                        ")::{}",
+                                        "{}::{}",
+                                        if dont_close.contains(&i) { " " } else { ")" },
                                         b.substitute(&child.valuation).unmangle().to_string()
                                     ));
                                 }
