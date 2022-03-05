@@ -1171,7 +1171,10 @@ pub fn tree_from_modusfile(
 
 #[cfg(test)]
 mod tests {
-    use crate::modusfile::{Expression, ModusTerm};
+    use crate::{
+        logic::SpannedPosition,
+        modusfile::{Expression, FormatStringFragment, ModusTerm},
+    };
 
     use super::*;
     use serial_test::serial;
@@ -1490,10 +1493,25 @@ mod tests {
             predicate: Predicate("base_image".into()),
             args: vec![ModusTerm::FormatString {
                 position: logic::SpannedPosition {
-                    offset: 11,
+                    offset: 0,
                     length: 13,
                 },
-                format_string_literal: "alpine${X}".to_owned(),
+                fragments: vec![
+                    FormatStringFragment::StringContent(
+                        SpannedPosition {
+                            offset: 2,
+                            length: 6,
+                        },
+                        "alpine".into(),
+                    ),
+                    FormatStringFragment::InterpolatedVariable(
+                        SpannedPosition {
+                            offset: 9,
+                            length: 1,
+                        },
+                        "X".into(),
+                    ),
+                ],
             }],
         });
 

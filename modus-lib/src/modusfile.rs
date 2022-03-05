@@ -162,14 +162,19 @@ impl ModusClause {
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-enum FormatStringFragment {
-    StringContent(String),
-    InterpolatedVariable(String),
+pub enum FormatStringFragment {
+    /// A raw section of a f-string - escape characters unprocessed - and its span.
+    StringContent(SpannedPosition, String),
+    /// A variable as a string, and its span.
+    InterpolatedVariable(SpannedPosition, String),
 }
 
 impl fmt::Display for FormatStringFragment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        match self {
+            FormatStringFragment::StringContent(_, s) => write!(f, "{s}"),
+            FormatStringFragment::InterpolatedVariable(_, v) => write!(f, "${{{v}}}"),
+        }
     }
 }
 
@@ -204,7 +209,15 @@ impl fmt::Display for ModusTerm {
             ModusTerm::FormatString {
                 position: _,
                 fragments,
-            } => write!(f, "\"{}\"", fragments.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("")),
+            } => write!(
+                f,
+                "\"{}\"",
+                fragments
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>()
+                    .join("")
+            ),
             ModusTerm::AnonymousVariable => write!(f, "_"),
         }
     }
@@ -214,9 +227,9 @@ impl From<ModusTerm> for logic::IRTerm {
     fn from(modus_term: ModusTerm) -> Self {
         match modus_term {
             ModusTerm::Constant(c) => logic::IRTerm::Constant(c),
-            ModusTerm::FormatString {
-                ..
-            } => unreachable!("BUG: analysis should've handled this case."),
+            ModusTerm::FormatString { .. } => {
+                unreachable!("BUG: analysis should've handled this case.")
+            }
             ModusTerm::UserVariable(v) => logic::IRTerm::UserVariable(v),
             ModusTerm::AnonymousVariable => sld::Auxiliary::aux(true),
         }
@@ -786,10 +799,10 @@ pub mod parser {
         Ok((i, parsed_str.to_owned()))
     }
 
+    /// Parses a non-empty substring outside of the interpolation part of a format string.
     fn format_string_content(i: Span) -> IResult<Span, String> {
-        let escape_parser = escaped(none_of("\\\""), '\\', one_of(FORMAT_STRING_ESCAPE_CHARS));
-        let (i, o) = opt(escape_parser)(i)?;
-        let parsed_str: &str = o.map(|span| *span.fragment()).unwrap_or("");
+        let (i, o) = escaped(none_of("\\\"$"), '\\', one_of(FORMAT_STRING_ESCAPE_CHARS))(i)?;
+        let parsed_str: &str = o.fragment();
         Ok((i, parsed_str.to_owned()))
     }
 
@@ -800,20 +813,36 @@ pub mod parser {
         )(i)
     }
 
-    /// Parses a substring outside of the expansion part of a format string's content.
-    pub fn outside_format_expansion(i: Span) -> IResult<Span, Span> {
-        // We want to parse until we see '$', except if it was preceded with escape char.
-        recognize(opt(escaped(none_of("\\$"), '\\', one_of("$\"\\nrt0\n"))))(i)
-    }
-
     fn format_string_fragment(i: Span) -> IResult<Span, FormatStringFragment> {
-        todo!()
+        let interpolation = delimited(
+            terminated(tag("${"), token_sep0),
+            modus_var,
+            cut(preceded(token_sep0, tag("}"))),
+        );
+
+        alt((
+            map(interpolation, |v_span| {
+                FormatStringFragment::InterpolatedVariable(
+                    v_span.into(),
+                    v_span.fragment().to_string(),
+                )
+            }),
+            map(recognized_span(format_string_content), |(span, content)| {
+                FormatStringFragment::StringContent(span, content)
+            }),
+        ))(i)
     }
 
-    fn modus_format_string(i: Span) -> IResult<Span, (SpannedPosition, Vec<FormatStringFragment>)> {
+    pub fn modus_format_string(
+        i: Span,
+    ) -> IResult<Span, (SpannedPosition, Vec<FormatStringFragment>)> {
         context(
             stringify!(modus_format_string),
-            recognized_span(delimited(tag("f\""), many0(format_string_fragment), cut(tag("\"")))),
+            recognized_span(delimited(
+                tag("f\""),
+                cut(many0(format_string_fragment)),
+                cut(tag("\"")),
+            )),
         )(i)
     }
 
@@ -868,6 +897,8 @@ pub mod parser {
 mod tests {
     use rand::Rng;
     use serial_test::serial;
+
+    use crate::modusfile::parser::modus_term;
 
     use super::*;
 
@@ -1425,5 +1456,35 @@ mod tests {
         );
         assert!(diags[0].labels[1].message.contains("body"));
         assert!(diags[0].labels[2].message.contains("rule"));
+    }
+
+    #[test]
+    fn format_string() {
+        let case = "f\"foo ${ X }\"";
+
+        let expected: ModusTerm = ModusTerm::FormatString {
+            position: SpannedPosition {
+                offset: 0,
+                length: 10 + 3,
+            },
+            fragments: vec![
+                FormatStringFragment::StringContent(
+                    SpannedPosition {
+                        offset: 2,
+                        length: 4,
+                    },
+                    "foo ".to_string(),
+                ),
+                FormatStringFragment::InterpolatedVariable(
+                    SpannedPosition {
+                        offset: 9,
+                        length: 1,
+                    },
+                    "X".to_string(),
+                ),
+            ],
+        };
+
+        assert_eq!(expected, modus_term(Span::new(case)).unwrap().1);
     }
 }
