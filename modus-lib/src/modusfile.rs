@@ -365,9 +365,14 @@ fn better_convert_error(e: ErrorTree<Span>) -> Vec<Diagnostic<()>> {
                     labels.push(generate_base_label(&location, &kind));
                     base_range = labels[0].range.clone();
                     diag = Diagnostic::error().with_message(kind.to_string());
-                },
+                }
                 ErrorTree::Stack { .. } => panic!("base of an error stack was a stack"),
-                ErrorTree::Alt(alts) => return alts.into_iter().flat_map(|a| better_convert_error(a)).collect(),
+                ErrorTree::Alt(alts) => {
+                    return alts
+                        .into_iter()
+                        .flat_map(|a| better_convert_error(a))
+                        .collect()
+                }
             }
 
             for (span, stack_context) in contexts.iter() {
@@ -820,7 +825,11 @@ pub mod parser {
         // the 'cut' may not be valid.
         // Could replace `one_of` with a bunch of alts if it's important to print the expected chars,
         // ideally `one_of` would just have a better error type.
-        let (i, o) = escaped(none_of("\\\"$"), '\\', cut(one_of(FORMAT_STRING_ESCAPE_CHARS)))(i)?;
+        let (i, o) = escaped(
+            none_of("\\\"$"),
+            '\\',
+            cut(one_of(FORMAT_STRING_ESCAPE_CHARS)),
+        )(i)?;
         let parsed_str: &str = o.fragment();
         Ok((i, parsed_str.to_owned()))
     }
@@ -1547,15 +1556,13 @@ mod tests {
                 offset: 0,
                 length: 11 + 3,
             },
-            fragments: vec![
-                FormatStringFragment::StringContent(
-                    SpannedPosition {
-                        offset: 2,
-                        length: 11,
-                    },
-                    r#"\${var} foo"#.to_string()
-                ),
-            ],
+            fragments: vec![FormatStringFragment::StringContent(
+                SpannedPosition {
+                    offset: 2,
+                    length: 11,
+                },
+                r#"\${var} foo"#.to_string(),
+            )],
         };
 
         assert_eq!(expected, modus_term(Span::new(case)).unwrap().1);

@@ -1491,9 +1491,7 @@ mod tests {
             positive: true,
             position: None,
             predicate: Predicate("base_image".into()),
-            args: vec![
-                "f\"alpine${X}\"".parse().unwrap()
-            ],
+            args: vec!["f\"alpine${X}\"".parse().unwrap()],
         });
 
         let (_, _, sld_res) = tree_from_modusfile(mf, query, 20, true);

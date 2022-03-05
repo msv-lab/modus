@@ -452,7 +452,11 @@ mod tests {
         setup();
 
         let term: ModusTerm = "f\"${ target_folder }/buildkit-frontend\"".parse().unwrap();
-        let (span, fragments) = if let ModusTerm::FormatString { position, fragments } = term {
+        let (span, fragments) = if let ModusTerm::FormatString {
+            position,
+            fragments,
+        } = term
+        {
             (position, fragments)
         } else {
             panic!("term should be f-string")
@@ -489,10 +493,7 @@ mod tests {
 
         assert_eq!(
             (lits, IRTerm::AuxiliaryVariable(1)),
-            convert_format_string(
-                &span,
-                &fragments
-            )
+            convert_format_string(&span, &fragments)
         );
     }
 
@@ -502,8 +503,14 @@ mod tests {
         setup();
 
         let term: ModusTerm = r#"f"use \"${feature}\" like this \${...} \
-                                   foobar""#.parse().unwrap();
-        let (span, fragments) = if let ModusTerm::FormatString { position, fragments } = term {
+                                   foobar""#
+            .parse()
+            .unwrap();
+        let (span, fragments) = if let ModusTerm::FormatString {
+            position,
+            fragments,
+        } = term
+        {
             (position, fragments)
         } else {
             panic!("term should be f-string")
@@ -553,10 +560,7 @@ mod tests {
 
         assert_eq!(
             (lits, IRTerm::AuxiliaryVariable(2)),
-            convert_format_string(
-                &span,
-                &fragments
-            )
+            convert_format_string(&span, &fragments)
         );
     }
 
