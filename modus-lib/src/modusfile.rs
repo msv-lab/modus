@@ -1517,6 +1517,36 @@ mod tests {
     }
 
     #[test]
+    fn format_string_starts_with_variable() {
+        let case = r#"f"${var1} foo bar\tbaz""#;
+
+        let expected = ModusTerm::FormatString {
+            position: SpannedPosition {
+                offset: 0,
+                length: 20 + 3,
+            },
+            fragments: vec![
+                FormatStringFragment::InterpolatedVariable(
+                    SpannedPosition {
+                        offset: 4,
+                        length: 4,
+                    },
+                    "var1".to_string(),
+                ),
+                FormatStringFragment::StringContent(
+                    SpannedPosition {
+                        offset: 9,
+                        length: 13,
+                    },
+                    r#" foo bar\tbaz"#.to_string(),
+                ),
+            ]
+        };
+
+        assert_eq!(expected, modus_term(Span::new(case)).unwrap().1);
+    }
+
+    #[test]
     fn empty_format_string() {
         let case = "f\"\"";
 
