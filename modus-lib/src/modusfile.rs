@@ -31,6 +31,8 @@ use crate::logic::Predicate;
 use crate::logic::SpannedPosition;
 use crate::sld;
 
+use self::parser::process_raw_string;
+
 /// Represents expressions that could be found in the body of a ModusClause.
 /// Each enum variant will have some notion of span and whether it's negated.
 /// False would mean it is negated.
@@ -239,7 +241,7 @@ impl str::FromStr for ModusTerm {
 impl From<ModusTerm> for logic::IRTerm {
     fn from(modus_term: ModusTerm) -> Self {
         match modus_term {
-            ModusTerm::Constant(c) => logic::IRTerm::Constant(c),
+            ModusTerm::Constant(c) => logic::IRTerm::Constant(process_raw_string(&c)),
             ModusTerm::FormatString { .. } => {
                 unreachable!("BUG: analysis should've handled this case.")
             }

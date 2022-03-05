@@ -1272,6 +1272,27 @@ mod tests {
 
     #[test]
     #[serial]
+    fn simple_solving_with_escape_chars() {
+        let goal: Goal<logic::IRTerm> = vec!["a".parse().unwrap()];
+        let clauses: Vec<logic::Clause> = vec![
+            r#"a :- b("\n")."#.parse().unwrap(),
+            logic::Clause {
+                head: r#"b("\n")"#.parse().unwrap(),
+                body: vec![],
+            },
+        ];
+        let tree = sld(&clauses, &goal, 10, true).tree;
+        let solutions = solutions(&tree);
+        assert_eq!(solutions.len(), 1);
+
+        assert!(contains_ignoring_position(
+            &solutions,
+            &vec![r#"a"#.parse::<logic::Literal>().unwrap()]
+        ));
+    }
+
+    #[test]
+    #[serial]
     fn simple_negation_solving() {
         let goal: Goal<logic::IRTerm> = vec!["a(\"c\")".parse().unwrap()];
         let clauses: Vec<logic::Clause> = vec![
