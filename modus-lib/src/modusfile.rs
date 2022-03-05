@@ -360,12 +360,14 @@ fn better_convert_error(e: ErrorTree<Span>) -> Vec<Diagnostic<()>> {
             let diag;
 
             let base_range;
-            if let ErrorTree::Base { location, kind } = *base {
-                labels.push(generate_base_label(&location, &kind));
-                base_range = labels[0].range.clone();
-                diag = Diagnostic::error().with_message(kind.to_string());
-            } else {
-                panic!("base of the error stack was not ErrorTree::Base")
+            match *base {
+                ErrorTree::Base { location, kind } => {
+                    labels.push(generate_base_label(&location, &kind));
+                    base_range = labels[0].range.clone();
+                    diag = Diagnostic::error().with_message(kind.to_string());
+                },
+                ErrorTree::Stack { .. } => panic!("base of an error stack was a stack"),
+                ErrorTree::Alt(alts) => return alts.into_iter().flat_map(|a| better_convert_error(a)).collect(),
             }
 
             for (span, stack_context) in contexts.iter() {
@@ -814,7 +816,11 @@ pub mod parser {
 
     /// Parses a non-empty substring outside of the interpolation part of a format string.
     fn format_string_content(i: Span) -> IResult<Span, String> {
-        let (i, o) = escaped(none_of("\\\"$"), '\\', one_of(FORMAT_STRING_ESCAPE_CHARS))(i)?;
+        // This assumes that the escape char parser is only called after a control character, otherwise
+        // the 'cut' may not be valid.
+        // Could replace `one_of` with a bunch of alts if it's important to print the expected chars,
+        // ideally `one_of` would just have a better error type.
+        let (i, o) = escaped(none_of("\\\"$"), '\\', cut(one_of(FORMAT_STRING_ESCAPE_CHARS)))(i)?;
         let parsed_str: &str = o.fragment();
         Ok((i, parsed_str.to_owned()))
     }
@@ -1494,6 +1500,60 @@ mod tests {
                         length: 1,
                     },
                     "X".to_string(),
+                ),
+            ],
+        };
+
+        assert_eq!(expected, modus_term(Span::new(case)).unwrap().1);
+    }
+
+    #[test]
+    fn empty_format_string() {
+        let case = "f\"\"";
+
+        let expected: ModusTerm = ModusTerm::FormatString {
+            position: SpannedPosition {
+                offset: 0,
+                length: 0 + 3,
+            },
+            fragments: vec![],
+        };
+
+        assert_eq!(expected, modus_term(Span::new(case)).unwrap().1);
+    }
+
+    #[test]
+    fn format_string_errors_with_multiple_vars() {
+        let case = "f\"bar ${X X2}\"";
+
+        let actual = modus_term(Span::new(case));
+        assert!(actual.is_err());
+    }
+
+    #[test]
+    fn format_string_errors_with_unescaped_dollar() {
+        let case = "f\"bar $ baz\"";
+
+        let actual = modus_term(Span::new(case));
+        assert!(actual.is_err());
+    }
+
+    #[test]
+    fn f_string_escaped_interpolation() {
+        let case = r#"f"\${var} foo""#;
+
+        let expected = ModusTerm::FormatString {
+            position: SpannedPosition {
+                offset: 0,
+                length: 11 + 3,
+            },
+            fragments: vec![
+                FormatStringFragment::StringContent(
+                    SpannedPosition {
+                        offset: 2,
+                        length: 11,
+                    },
+                    r#"\${var} foo"#.to_string()
                 ),
             ],
         };
