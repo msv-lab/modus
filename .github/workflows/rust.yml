@@ -49,8 +49,7 @@ jobs:
       run: >
         docker push $IMAGE_REF &&
         docker push $IMAGE_BASE:latest
-    - name: Publish release binary
-      if: github.event_name != 'pull_request' && github.branch == 'main'
+    - name: Upload binary
       uses: actions/upload-artifact@v3
       with:
         name: modus
