@@ -844,7 +844,7 @@ pub mod parser {
     fn format_string_fragment(i: Span) -> IResult<Span, FormatStringFragment> {
         let interpolation = delimited(
             terminated(tag("${"), token_sep0),
-            modus_var,
+            cut(modus_var),
             cut(preceded(token_sep0, tag("}"))),
         );
 
@@ -853,6 +853,14 @@ pub mod parser {
                 FormatStringFragment::InterpolatedVariable(
                     v_span.into(),
                     v_span.fragment().to_string(),
+                )
+            }),
+            // this may bloat the fragment list but likely worth the convenience of
+            // using '$' without escaping it
+            map(tag("$"), |span: Span| {
+                FormatStringFragment::StringContent(
+                    span.into(),
+                    span.fragment().to_string(),
                 )
             }),
             map(recognized_span(format_string_content), |(span, content)| {
@@ -1570,11 +1578,40 @@ mod tests {
     }
 
     #[test]
-    fn format_string_errors_with_unescaped_dollar() {
+    fn format_string_dollar_without_interpolation() {
         let case = "f\"bar $ baz\"";
 
-        let actual = modus_term(Span::new(case));
-        assert!(actual.is_err());
+        let expected = ModusTerm::FormatString {
+            position: SpannedPosition {
+                offset: 0,
+                length: 9 + 3,
+            },
+            fragments: vec![
+                FormatStringFragment::StringContent(
+                    SpannedPosition {
+                        offset: 2,
+                        length: 4,
+                    },
+                    r#"bar "#.to_string(),
+                ),
+                FormatStringFragment::StringContent(
+                    SpannedPosition {
+                        offset: 6,
+                        length: 1,
+                    },
+                    "$".to_string(),
+                ),
+                FormatStringFragment::StringContent(
+                    SpannedPosition {
+                        offset: 7,
+                        length: 4,
+                    },
+                    " baz".to_string(),
+                ),
+            ],
+        };
+
+        assert_eq!(expected, modus_term(Span::new(case)).unwrap().1);
     }
 
     #[test]
