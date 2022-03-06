@@ -52,7 +52,7 @@ jobs:
         docker run --rm -v $(pwd):/mnt --entrypoint sh modus -c "cp ./modus /mnt/$ARTIFACT_NAME" &&
         ./$ARTIFACT_NAME --version
     - name: Publish image
-      if: github.event_name != 'pull_request' && github.branch == 'main'
+      if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
       run: >
         docker push $IMAGE_REF &&
         docker push $IMAGE_BASE:latest
