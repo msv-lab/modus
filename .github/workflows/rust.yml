@@ -47,8 +47,8 @@ jobs:
     - name: Extract binary release from docker image
       run: >
         docker build -t modus -f /tmp/modus.Dockerfile . &&
-        docker run --rm -v $(pwd):/mnt --entrypoint sh modus -c 'cp ./modus /mnt/modus' &&
-        ./modus --version
+        docker run --rm -v $(pwd):/mnt --entrypoint sh modus -c 'cp ./modus /mnt/modus.bin' &&
+        ./modus.bin --version
     - name: Publish image
       if: github.event_name != 'pull_request' && github.branch == 'main'
       run: >
@@ -57,5 +57,5 @@ jobs:
     - name: Upload binary
       uses: actions/upload-artifact@v3
       with:
-        name: modus-x86_64-linux-musl
-        path: modus
+        name: modus.x86_64-linux-musl
+        path: modus.bin
