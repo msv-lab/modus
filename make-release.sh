@@ -14,5 +14,5 @@ if [ "$MODUS_LIB_VERSION" != "$MODUS_VERSION" ]; then
 fi
 
 cargo publish -p modus-lib
-cargo update --dry-run # to refresh registry cache, so that the following cargo command is aware of the new version in crates.io
+sleep 5 # otherwise cargo will not be aware of the newly published modus-lib on crates.io
 cargo publish -p modus
