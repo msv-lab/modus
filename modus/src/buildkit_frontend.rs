@@ -250,6 +250,19 @@ async fn handle_build_plan(
             cmd
         }
 
+        fn iter_hm_sorted<K: Ord, V>(hm: &HashMap<K, V>) -> Vec<(&K, &V)> {
+            let mut v = hm.iter().collect::<Vec<_>>();
+            v.sort_unstable_by_key(|(k, _)| *k);
+            v
+        }
+
+        fn add_envs<'a>(mut cmd: Command<'a>, envs: &HashMap<String, String>) -> Command<'a> {
+            for (k, v) in iter_hm_sorted(envs) {
+                cmd = cmd.env(k, v);
+            }
+            cmd
+        }
+
         let new_node: (OwnedOutput, Arc<ImageSpecification>) = match node {
             /*
                 resolve_image_config will fail if we try to resolve an empty
@@ -291,9 +304,7 @@ async fn handle_build_plan(
                 let mut cmd = new_cmd(&*parent_config, &cwd[..], &parent.0, &options)
                     .args(&["-c", &command[..]])
                     .custom_name(format!("run({:?})", command));
-                for (k, v) in additional_envs.iter() {
-                    cmd = cmd.env(k, v);
-                }
+                cmd = add_envs(cmd, additional_envs);
                 let o = OwnedOutput::from_command(cmd.ref_counted(), 0);
                 (o, parent_config)
             }
@@ -419,7 +430,7 @@ async fn handle_build_plan(
                             let resolved_cwd = image_cwd.join(cwd);
                             let resolved_cwd = resolved_cwd.to_str().unwrap(); // TODO: report error if image cwd is not valid utf8.
                             cd(resolved_cwd, &mut script);
-                            for (k, v) in additional_envs.iter() {
+                            for (k, v) in iter_hm_sorted(additional_envs) {
                                 script.push(format!(
                                     "export {}={}",
                                     escape(k.into()),
