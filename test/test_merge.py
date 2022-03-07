@@ -170,7 +170,8 @@ class TestMerge(ModusTestCase):
             a :-
                 from("alpine"),
                 (
-                    "1" = "1"
+                    "1" = "1",
+                    run("")
                 )::merge.""")
         self.build(mf, "a")
 
