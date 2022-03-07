@@ -165,16 +165,6 @@ class TestMerge(ModusTestCase):
         self.assertEqual(img.read_file("/tmp/file"), "ddd\n")
         self.assertEqual(img.read_file("/tmp/file2"), "ccc\n")
 
-    def test_nop_merge(self):
-        mf = dedent("""\
-            a :-
-                from("alpine"),
-                (
-                    "1" = "1",
-                    run("")
-                )::merge.""")
-        self.build(mf, "a")
-
     def test_copy_should_mkdir(self):
         self.init_files()
         mf = dedent("""\
