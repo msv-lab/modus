@@ -29,11 +29,12 @@ use std::ops::Range;
 use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
 use codespan_reporting::files::Files;
 use codespan_reporting::term::{self, Config};
+use colored::Colorize;
 use petgraph::algo::find_negative_cycle;
 
-use crate::builtin::select_builtin;
+use crate::builtin::{select_builtin, OPERATOR_KIND_MAP};
 use crate::logic::{self, Literal, Predicate, SpannedPosition};
-use crate::modusfile::{Expression, ModusClause};
+use crate::modusfile::{Expression, ModusClause, Operator};
 use crate::modusfile::{ModusTerm, Modusfile};
 use crate::translate::translate_modusfile;
 
@@ -120,6 +121,49 @@ impl ModusSemantics for Modusfile {
             Diagnostic::note().with_message(message).with_labels(labels)
         }
 
+        fn generate_unknown_operator_diag(op: &Operator) -> Diagnostic<()> {
+            let diag = Diagnostic::error().with_message(format!(
+                "Unknown operator: {}",
+                op.predicate.to_string().bold()
+            ));
+            if let Some(pos) = &op.position {
+                diag.with_labels(vec![Label::primary(
+                    (),
+                    pos.offset..pos.offset + pos.length,
+                )])
+            } else {
+                diag
+            }
+        }
+
+        fn generate_invalid_operator_inp(
+            op: &Operator,
+            expected: Kind,
+            actual: Kind,
+            expr: &Expression,
+        ) -> Diagnostic<()> {
+            let diag = Diagnostic::error().with_message(format!(
+                "Operator {} applied to invalid kind.",
+                op.predicate.to_string().bold()
+            ));
+            let mut labels = Vec::new();
+
+            if let Some(pos) = &op.position {
+                labels.push(
+                    Label::secondary((), pos.offset..pos.offset + pos.length)
+                        .with_message(format!("operator expects kind {expected:?}")),
+                );
+            }
+            if let Some(pos) = expr.get_spanned_position() {
+                labels.push(
+                    Label::primary((), pos.offset..pos.offset + pos.length)
+                        .with_message(format!("expression found to be {actual:?}")),
+                )
+            }
+
+            diag.with_labels(labels)
+        }
+
         /// Attempts to get the predicate kind of the head, based on the current findings
         /// of the predicate kind map.
         fn evaluate_expression(
@@ -152,10 +196,19 @@ impl ModusSemantics for Modusfile {
                 }
                 Expression::OperatorApplication(_, expr, op) => {
                     let expr_kind = evaluate_expression(expr, pred_kind, clauses)?;
-                    if expr_kind.is_image() && op.predicate.0 == "copy" {
-                        Ok(Kind::Layer)
+                    let op_kind_map = OPERATOR_KIND_MAP.get(op.predicate.0.as_str());
+
+                    if let Some((inp_kind, out_kind)) = op_kind_map {
+                        if &expr_kind == inp_kind {
+                            Ok(*out_kind)
+                        } else {
+                            Err(generate_invalid_operator_inp(
+                                op, *inp_kind, expr_kind, expr,
+                            ))
+                        }
                     } else {
-                        Ok(expr_kind)
+                        // unknown operator
+                        Err(generate_unknown_operator_diag(op))
                     }
                 }
                 Expression::And(span, true, e1, e2) => {
@@ -771,5 +824,25 @@ mod tests {
         let res = f_strings_present_in_head(&mf);
         assert!(res.is_err());
         assert_eq!(4, res.err().unwrap().len()); // one for each arg
+    }
+
+    #[test]
+    fn kind_errors_with_unknown_operator() {
+        let clauses = vec!["head :- bar::foobar(X, Y), lar.", "lar."];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+
+        let kind_res = mf.kinds();
+        assert_eq!(kind_res.errs[0].severity, Severity::Error);
+        assert!(kind_res.errs[0].message.contains("Unknown operator"));
+    }
+
+    #[test]
+    fn kind_errors_with_incorrect_operator_inp() {
+        let clauses = vec!["head :- run(\"echo foobar\")::set_entrypoint(\"bash\")."];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+
+        let kind_res = mf.kinds();
+        assert_eq!(kind_res.errs[0].severity, Severity::Error);
+        assert!(kind_res.errs[0].message.contains("applied to invalid kind"));
     }
 }

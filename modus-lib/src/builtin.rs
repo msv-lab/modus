@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::collections::HashMap;
+
 use crate::{
     analysis::Kind,
     logic::{Clause, IRTerm, Literal, Predicate},
@@ -523,6 +525,22 @@ pub fn select_builtin<'a>(
         semver::semver_geq,
         semver::semver_leq,
     )
+}
+
+lazy_static! {
+    // An operator can take an expression of one kind and produce another kind.
+    pub static ref OPERATOR_KIND_MAP: HashMap<&'static str, (Kind, Kind)> = {
+        let mut m = HashMap::new();
+        m.insert("copy", (Kind::Image, Kind::Layer));
+        m.insert("set_env", (Kind::Image, Kind::Image));
+        m.insert("set_entrypoint", (Kind::Image, Kind::Image));
+        m.insert("set_workdir", (Kind::Image, Kind::Image));
+        m.insert("append_path", (Kind::Image, Kind::Image));
+        m.insert("in_workdir", (Kind::Layer, Kind::Layer));
+        m.insert("in_env", (Kind::Layer, Kind::Layer));
+        m.insert("merge", (Kind::Layer, Kind::Layer));
+        m
+    };
 }
 
 #[cfg(test)]
