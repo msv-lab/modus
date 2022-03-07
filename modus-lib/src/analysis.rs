@@ -124,7 +124,7 @@ impl ModusSemantics for Modusfile {
         fn generate_unknown_operator_diag(op: &Operator) -> Diagnostic<()> {
             let diag = Diagnostic::error().with_message(format!(
                 "Unknown operator: {}",
-                op.predicate.to_string().bold()
+                op.predicate
             ));
             if let Some(pos) = &op.position {
                 diag.with_labels(vec![Label::primary(
@@ -144,7 +144,7 @@ impl ModusSemantics for Modusfile {
         ) -> Diagnostic<()> {
             let diag = Diagnostic::error().with_message(format!(
                 "Operator {} applied to invalid kind.",
-                op.predicate.to_string().bold()
+                op.predicate
             ));
             let mut labels = Vec::new();
 
