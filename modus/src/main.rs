@@ -377,7 +377,6 @@ fn main() {
                         .unwrap_or_default(),
                 },
             };
-            dbg!(&options);
             match buildkit::build(build_plan.clone(), context_dir, &options) {
                 Err(e) => {
                     print_build_error_and_exit(&e.to_string(), &err_writer);
