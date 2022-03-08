@@ -27,3 +27,6 @@ pub mod translate;
 pub mod transpiler;
 pub mod unification;
 pub mod wellformed;
+
+#[macro_use]
+extern crate lazy_static;
