@@ -148,3 +148,13 @@ class TestSimple(ModusTestCase):
 
         # just make sure we can actually output a if we wanted to.
         self.build(mf, "a")
+
+    def test_many_outputs(self):
+        mf = dedent("""\
+            a(X) :-
+            aa(X),
+            from("alpine"),
+            run("sleep 1"),
+            run(f"echo ${X}").""") + "\n".join(f"aa(\"{i}\")" for i in range(1, 21))
+        imgs = self.build(mf, "a(X)")
+        self.assertEqual(len(imgs), 20)
