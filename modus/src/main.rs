@@ -17,18 +17,20 @@
 mod buildkit;
 mod reporting;
 
-use clap::{crate_version, Command, Arg, arg};
+use clap::{arg, crate_version, Arg, Command};
 use codespan_reporting::{
+    diagnostic::Diagnostic,
     files::SimpleFile,
     term::{
         self,
-        termcolor::{Color, ColorSpec, StandardStream, WriteColor}, Config,
-    }, diagnostic::Diagnostic,
+        termcolor::{Color, ColorSpec, StandardStream, WriteColor},
+        Config,
+    },
 };
 use colored::Colorize;
-use modus_lib::{analysis::ModusSemantics, sld::tree_from_modusfile};
 use modus_lib::transpiler::render_tree;
 use modus_lib::*;
+use modus_lib::{analysis::ModusSemantics, sld::tree_from_modusfile};
 use ptree::write_tree;
 use std::{ffi::OsStr, fs, path::Path};
 use std::{io::Write, path::PathBuf};
@@ -148,8 +150,12 @@ fn main() {
                         .long("image-export-concurrency")
                         .takes_value(true)
                         .required(false)
-                        .default_value("8")
                         .value_name("NUM")
+                        .help("The number of concurrent docker instances to run in the final exporting stage.")
+                        .long_help("The number of concurrent docker instances to run in the final exporting stage.\n\
+                                    This is only relevant for builds with multiple output images. Most of the work done \
+                                    here is computing checksums for each final image.\n\
+                                    Default is the number of CPUs available.")
                 )
                 .arg(
                     Arg::new("CUSTOM_FRONTEND")
@@ -228,7 +234,12 @@ fn main() {
     let err_writer = StandardStream::stderr(codespan_reporting::term::termcolor::ColorChoice::Auto);
     let config = codespan_reporting::term::Config::default();
 
-    fn print_diagnostics<'files, F: codespan_reporting::files::Files<'files, FileId = ()>>(diags: &Vec<Diagnostic<()>>, writer: &mut dyn WriteColor, config: &Config, files: &'files F) {
+    fn print_diagnostics<'files, F: codespan_reporting::files::Files<'files, FileId = ()>>(
+        diags: &Vec<Diagnostic<()>>,
+        writer: &mut dyn WriteColor,
+        config: &Config,
+        files: &'files F,
+    ) {
         for diagnostic in diags {
             term::emit(writer, config, files, diagnostic).expect("Error when printing to term.")
         }
@@ -245,9 +256,7 @@ fn main() {
             let mf: Modusfile = match file.source().parse() {
                 Ok(mf) => mf,
                 Err(e) => {
-                    eprintln!(
-                        "❌ Did not parse Modusfile successfully",
-                    );
+                    eprintln!("❌ Did not parse Modusfile successfully",);
                     print_diagnostics(&e, &mut err_writer.lock(), &config, &file);
                     std::process::exit(1);
                 }
@@ -291,9 +300,7 @@ fn main() {
             let mf: Modusfile = match file.source().parse() {
                 Ok(mf) => mf,
                 Err(e) => {
-                    eprintln!(
-                        "❌ Did not parse Modusfile successfully.",
-                    );
+                    eprintln!("❌ Did not parse Modusfile successfully.",);
                     print_diagnostics(&e, &mut err_writer.lock(), &config, &file);
                     std::process::exit(1);
                 }
@@ -351,14 +358,15 @@ fn main() {
                     }),
                 export_concurrency: sub
                     .value_of("EXPORT_CONCURRENCY")
-                    .unwrap()
-                    .parse()
-                    .unwrap_or_else(|_| {
-                        print_build_error_and_exit(
-                            "invalid export concurrency - expected number",
-                            &err_writer,
-                        )
-                    }),
+                    .map(|s| {
+                        s.parse().unwrap_or_else(|_| {
+                            print_build_error_and_exit(
+                                "invalid export concurrency - expected number",
+                                &err_writer,
+                            )
+                        })
+                    })
+                    .unwrap_or_else(|| num_cpus::get() as u32), // Cast: we're not getting 2^32 CPU computers anytime soon
                 docker_build_options: DockerBuildOptions {
                     verbose: sub.is_present("VERBOSE"),
                     no_cache: sub.is_present("NO_CACHE"),
@@ -369,6 +377,7 @@ fn main() {
                         .unwrap_or_default(),
                 },
             };
+            dbg!(&options);
             match buildkit::build(build_plan.clone(), context_dir, &options) {
                 Err(e) => {
                     print_build_error_and_exit(&e.to_string(), &err_writer);
@@ -430,10 +439,9 @@ fn main() {
             let query = query.map(|q| q.without_position());
 
             match (file.source().parse::<Modusfile>(), query) {
-                (Ok(modus_f), None) => println!(
-                    "Parsed successfully. Found {} clauses.",
-                    modus_f.0.len()
-                ),
+                (Ok(modus_f), None) => {
+                    println!("Parsed successfully. Found {} clauses.", modus_f.0.len())
+                }
                 (Ok(modus_f), Some(e)) => {
                     let kind_res = modus_f.kinds();
                     if !analysis::check_and_output_analysis(
@@ -484,9 +492,7 @@ fn main() {
                     }
                 }
                 (Err(e), _) => {
-                    eprintln!(
-                        "❌ Did not parse Modusfile successfully.",
-                    );
+                    eprintln!("❌ Did not parse Modusfile successfully.",);
                     print_diagnostics(&e, &mut err_writer.lock(), &config, &file);
                     std::process::exit(1);
                 }
@@ -517,9 +523,7 @@ fn main() {
                     }
                 }
                 Err(e) => {
-                    eprintln!(
-                        "❌ Did not parse Modusfile successfully.",
-                    );
+                    eprintln!("❌ Did not parse Modusfile successfully.",);
                     print_diagnostics(&e, &mut err_writer.lock(), &config, &file);
                     std::process::exit(1);
                 }

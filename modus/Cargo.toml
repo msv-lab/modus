@@ -30,6 +30,7 @@ thiserror = "1.0"
 ptree = { version = "0.4", default-features = false, features = ["petgraph", "ansi", "value"] } # pretty-print trees
 petgraph = "0.6.0"
 codespan-reporting = "0.11.1"
+num_cpus = "1.13.1"
 
 # For buildkit
 buildkit-frontend = "0.3.0"
