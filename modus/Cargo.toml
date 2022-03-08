@@ -1,6 +1,6 @@
 [package]
 name = "modus"
-version = "0.1.8"
+version = "0.1.9"
 authors = ["University College London"]
 edition = "2018"
 default-run = "modus"
@@ -21,7 +21,7 @@ name = "buildkit-frontend"
 path = "src/buildkit_frontend.rs"
 
 [dependencies]
-modus-lib = { version = "=0.1.8", path = "../modus-lib" }
+modus-lib = { version = "=0.1.9", path = "../modus-lib" }
 
 clap = { version = "3", features = ["cargo"] }
 colored = "2"
