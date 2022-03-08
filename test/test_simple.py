@@ -155,6 +155,6 @@ class TestSimple(ModusTestCase):
             aa(X),
             from("alpine"),
             run("sleep 1"),
-            run(f"echo ${X}").""") + "\n".join(f"aa(\"{i}\")" for i in range(1, 21))
+            run(f"echo ${X}").""") + "\n".join(f"aa(\"{i}\")." for i in range(1, 21))
         imgs = self.build(mf, "a(X)")
         self.assertEqual(len(imgs), 20)
