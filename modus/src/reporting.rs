@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{fmt::Display, io::Write};
+use std::{fmt::Display, io::{Write, self}, path::Path};
 
 use serde::Serialize;
 
@@ -84,5 +84,20 @@ pub fn write_build_result<F: Write, P: Display>(
         )
         .map_err(|e| format!("Error writing to {}: {}", json_out_name, e))?;
 
+    Ok(())
+}
+
+#[derive(Serialize, Debug, Clone, Default)]
+pub struct Profiling {
+    pub planning: f32,
+    pub resolving_total: f32,
+    pub building: f32,
+    pub exporting_total: f32,
+    pub total: f32,
+}
+
+pub fn write_profiling_result(p: &Profiling, f: impl AsRef<Path>) -> io::Result<()> {
+    let mut f = std::fs::File::create(f)?;
+    serde_json::to_writer(&mut f, p)?;
     Ok(())
 }

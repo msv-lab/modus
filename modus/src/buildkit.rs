@@ -59,7 +59,7 @@ use std::{
     convert::TryInto,
     fs::OpenOptions,
     path::{Path, PathBuf},
-    process::{Command, ExitStatus, Stdio},
+    process::{Command, ExitStatus, Stdio}, time::Instant,
 };
 
 use spawn_wait::{ProcessSet, SignalHandler};
@@ -115,6 +115,8 @@ pub enum BuildError {
 }
 
 use BuildError::*;
+
+use crate::reporting::Profiling;
 
 #[derive(Debug, Clone, Default)]
 pub struct DockerBuildOptions {
@@ -579,13 +581,16 @@ pub fn build<P: AsRef<Path>>(
     mut build_plan: BuildPlan,
     context: P,
     build_options: &BuildOptions,
+    profiling: &mut Profiling,
 ) -> Result<Vec<String>, BuildError> {
     let mut sh = SignalHandler::default();
     let context = context.as_ref().canonicalize().map_err(CwdError)?;
     let previous_cwd = PathBuf::from(".").canonicalize().map_err(CwdError)?;
     let _restore_cwd = RestoreCwd(previous_cwd);
     let mut image_cleanup = DockerImageRmOnDrop::default();
+    let resolving_start = Instant::now();
     resolve_froms(&mut build_plan, build_options, &mut sh, &mut image_cleanup)?;
+    profiling.resolving_total = resolving_start.elapsed().as_secs_f32();
     std::env::set_current_dir(&context).map_err(EnterContextDir)?;
     let has_dockerignore = check_dockerignore()?;
     let mut content = String::new();
@@ -601,6 +606,7 @@ pub fn build<P: AsRef<Path>>(
     eprintln!("{}", "Running docker build...".blue());
     let main_img_iidfile = AutoDeleteTmpFilename::gen(".iid");
     let mut procs = ProcessSet::new();
+    let build_start = Instant::now();
     procs.add_command(
         (),
         make_buildkit_command(
@@ -616,6 +622,7 @@ pub fn build<P: AsRef<Path>>(
     match procs.wait_any(&mut sh) {
         Subprocess(_, res) => {
             let (_, exit_status) = res.map_err(|e| UnableToRunDockerBuild(e))?;
+            profiling.building = build_start.elapsed().as_secs_f32();
             if !exit_status.success() {
                 return Err(DockerBuildFailed(exit_status));
             }
@@ -640,6 +647,7 @@ pub fn build<P: AsRef<Path>>(
             // Overwrite the last line printed by buildkit.
             eprintln!("\x1b[1A\x1b[2K\r=== Build success, exporting individual images ===");
             let mut iidfiles = Vec::with_capacity(nb_outputs);
+            let exporting_start = Instant::now();
             for i in 0..nb_outputs {
                 let target_str = format!("{}", i);
                 let iidfile = AutoDeleteTmpFilename::gen(".iid");
@@ -712,6 +720,7 @@ pub fn build<P: AsRef<Path>>(
                     }
                 }
             }
+            profiling.exporting_total = exporting_start.elapsed().as_secs_f32();
             debug_assert_eq!(nb_done, nb_outputs);
             Ok(res.into_iter().map(|x| x.unwrap()).collect())
         }
