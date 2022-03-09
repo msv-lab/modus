@@ -32,12 +32,13 @@ use modus_lib::transpiler::render_tree;
 use modus_lib::*;
 use modus_lib::{analysis::ModusSemantics, sld::tree_from_modusfile};
 use ptree::write_tree;
-use std::{ffi::OsStr, fs, path::Path};
+use std::{ffi::OsStr, fs, path::Path, time::Instant};
 use std::{io::Write, path::PathBuf};
 
 use modus_lib::modusfile::Modusfile;
 
 use crate::buildkit::{BuildOptions, DockerBuildOptions};
+use crate::reporting::Profiling;
 
 fn get_file_or_exit(path: &Path) -> SimpleFile<&str, String> {
     let file_name: &str = path
@@ -169,6 +170,17 @@ fn main() {
                                     This flag allows you to use something other than the default, for example for development on Modus itself."))
                         .default_value(buildkit::FRONTEND_IMAGE),
                 )
+                .arg(
+                    Arg::new("PROFILING")
+                        .long("output-profiling")
+                        .allow_invalid_utf8(true)
+                        .takes_value(true)
+                        .value_name("FILE")
+                        .required(false)
+                        .help("Output profiling information to a JSON file.")
+                        .long_help("Output profiling information to a JSON file.\n\
+                                    The format of the output is not specified.")
+                )
         )
         .subcommand(
             Command::new("proof")
@@ -297,6 +309,8 @@ fn main() {
                 sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
             let query = query.without_position();
 
+            let parse_start = Instant::now();
+
             let mf: Modusfile = match file.source().parse() {
                 Ok(mf) => mf,
                 Err(e) => {
@@ -327,6 +341,7 @@ fn main() {
                     std::process::exit(1)
                 }
             };
+
             fn print_build_error_and_exit(e_str: &str, w: &StandardStream) -> ! {
                 let mut w = w.lock();
                 (move || -> std::io::Result<()> {
@@ -344,6 +359,7 @@ fn main() {
                 .expect("Unable to write to stderr.");
                 std::process::exit(1)
             }
+
             let options = BuildOptions {
                 frontend_image: sub.value_of("CUSTOM_FRONTEND").unwrap().to_owned(),
                 resolve_concurrency: sub
@@ -377,11 +393,17 @@ fn main() {
                         .unwrap_or_default(),
                 },
             };
-            match buildkit::build(build_plan.clone(), context_dir, &options) {
+
+            let mut profiling = Profiling::default();
+            profiling.planning = parse_start.elapsed().as_secs_f32();
+
+            match buildkit::build(build_plan.clone(), context_dir, &options, &mut profiling) {
                 Err(e) => {
                     print_build_error_and_exit(&e.to_string(), &err_writer);
                 }
                 Ok(image_ids) => {
+                    let total_dur = parse_start.elapsed();
+                    profiling.total = total_dur.as_secs_f32();
                     if sub.is_present("JSON_OUTPUT") {
                         let json_out_name;
                         let mut json_out_f;
@@ -417,6 +439,14 @@ fn main() {
                             &image_ids[..],
                         ) {
                             print_build_error_and_exit(&e, &err_writer);
+                        }
+                    }
+                    if let Some(out) = sub.value_of_os("PROFILING") {
+                        if let Err(e) = reporting::write_profiling_result(&profiling, out) {
+                            print_build_error_and_exit(
+                                &format!("Unable to write profiling JSON: {}", e),
+                                &err_writer,
+                            );
                         }
                     }
                 }
