@@ -158,3 +158,11 @@ class TestSimple(ModusTestCase):
             run(f"echo ${X}").""") + "\n".join(f"aa(\"{i}\")." for i in range(1, 21))
         imgs = self.build(mf, "a(X)")
         self.assertEqual(len(imgs), 20)
+
+    def test_label(self):
+        mf = dedent("""\
+            a :-
+                from("alpine")
+                    ::set_label("com.modus-continens.label-test", "hello").
+            """)
+        self.build(mf, "a")

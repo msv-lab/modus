@@ -421,6 +421,20 @@ intrinsic_predicate!(
     false
 );
 intrinsic_predicate!(
+    _operator_set_label_begin,
+    crate::analysis::Kind::Image,
+    false,
+    false,
+    false
+);
+intrinsic_predicate!(
+    _operator_set_label_end,
+    crate::analysis::Kind::Image,
+    false,
+    false,
+    false
+);
+intrinsic_predicate!(
     _operator_set_env_begin,
     crate::analysis::Kind::Image,
     false,
@@ -503,6 +517,8 @@ pub fn select_builtin<'a>(
         _operator_set_workdir_end,
         _operator_set_entrypoint_begin,
         _operator_set_entrypoint_end,
+        _operator_set_label_begin,
+        _operator_set_label_end,
         _operator_set_env_begin,
         _operator_set_env_end,
         _operator_in_env_begin,
