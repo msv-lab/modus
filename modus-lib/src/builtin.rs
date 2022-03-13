@@ -421,6 +421,20 @@ intrinsic_predicate!(
     false
 );
 intrinsic_predicate!(
+    _operator_set_label_begin,
+    crate::analysis::Kind::Image,
+    false,
+    false,
+    false
+);
+intrinsic_predicate!(
+    _operator_set_label_end,
+    crate::analysis::Kind::Image,
+    false,
+    false,
+    false
+);
+intrinsic_predicate!(
     _operator_set_env_begin,
     crate::analysis::Kind::Image,
     false,
@@ -503,6 +517,8 @@ pub fn select_builtin<'a>(
         _operator_set_workdir_end,
         _operator_set_entrypoint_begin,
         _operator_set_entrypoint_end,
+        _operator_set_label_begin,
+        _operator_set_label_end,
         _operator_set_env_begin,
         _operator_set_env_end,
         _operator_in_env_begin,
@@ -535,6 +551,7 @@ lazy_static! {
         m.insert("set_env", (Kind::Image, Kind::Image));
         m.insert("set_entrypoint", (Kind::Image, Kind::Image));
         m.insert("set_workdir", (Kind::Image, Kind::Image));
+        m.insert("set_label", (Kind::Image, Kind::Image));
         m.insert("append_path", (Kind::Image, Kind::Image));
         m.insert("in_workdir", (Kind::Layer, Kind::Layer));
         m.insert("in_env", (Kind::Layer, Kind::Layer));

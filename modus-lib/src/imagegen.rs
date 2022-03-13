@@ -481,46 +481,82 @@ pub fn build_dag_from_proofs(
                     // TODO: emit a warning if the tree inside attempts
                     // to build a fresh image - this is probably an incorrect usage.
                 }
-                "set_workdir" => {
+                "set_workdir" | "set_entrypoint" | "set_env" | "append_path" | "set_label" => {
                     if curr_state.current_merge.is_some() {
                         panic!("You can not generate a new image inside a merge.");
                     }
                     let img = process_image(subtree_in_op, rules, res, image_literals, None)
-                        .expect("set_workdir should be applied to an image.");
+                        .expect(&format!("{} should be applied to an image.", op_name));
                     if curr_state.has_base() {
-                        panic!("set_workdir generates a new image, so it should be the first instruction.");
+                        panic!(
+                            "{} generates a new image, so it should be the first instruction.",
+                            op_name
+                        );
                     }
-                    let new_p = lit.args[1].as_constant().unwrap();
-                    curr_state.set_node(res.new_node(
-                        BuildNode::SetWorkdir {
-                            parent: img,
-                            new_workdir: join_path(&curr_state.cwd, new_p),
-                        },
-                        vec![img],
-                    ));
-                }
-                "set_entrypoint" => {
-                    if curr_state.current_merge.is_some() {
-                        panic!("You can not generate a new image inside a merge.");
+
+                    match op_name {
+                        "set_workdir" => {
+                            let new_p = lit.args[1].as_constant().unwrap();
+                            curr_state.set_node(res.new_node(
+                                BuildNode::SetWorkdir {
+                                    parent: img,
+                                    new_workdir: join_path(&curr_state.cwd, new_p),
+                                },
+                                vec![img],
+                            ));
+                        }
+                        "set_entrypoint" => {
+                            let entrypoint = lit
+                                .args
+                                .iter()
+                                .skip(1)
+                                .map(|x| x.as_constant().unwrap().to_owned())
+                                .collect::<Vec<_>>();
+                            curr_state.set_node(res.new_node(
+                                BuildNode::SetEntrypoint {
+                                    parent: img,
+                                    new_entrypoint: entrypoint,
+                                },
+                                vec![img],
+                            ));
+                        }
+                        "set_env" => {
+                            let env_k = lit.args[1].as_constant().unwrap().to_owned();
+                            let env_v = lit.args[2].as_constant().unwrap().to_owned();
+                            curr_state.set_node(res.new_node(
+                                BuildNode::SetEnv {
+                                    parent: img,
+                                    key: env_k,
+                                    value: env_v,
+                                },
+                                vec![img],
+                            ));
+                        }
+                        "append_path" => {
+                            let append = format!(":{}", lit.args[1].as_constant().unwrap());
+                            curr_state.set_node(res.new_node(
+                                BuildNode::AppendEnvValue {
+                                    parent: img,
+                                    key: "PATH".to_owned(),
+                                    value: append,
+                                },
+                                vec![img],
+                            ));
+                        }
+                        "set_label" => {
+                            let label_k = lit.args[1].as_constant().unwrap().to_owned();
+                            let label_v = lit.args[2].as_constant().unwrap().to_owned();
+                            curr_state.set_node(res.new_node(
+                                BuildNode::SetLabel {
+                                    parent: img,
+                                    label: label_k,
+                                    value: label_v,
+                                },
+                                vec![img],
+                            ));
+                        }
+                        _ => unreachable!(),
                     }
-                    let img = process_image(subtree_in_op, rules, res, image_literals, None)
-                        .expect("set_entrypoint should be applied to an image.");
-                    if curr_state.has_base() {
-                        panic!("set_entrypoint generates a new image, so it should be the first instruction.");
-                    }
-                    let entrypoint = lit
-                        .args
-                        .iter()
-                        .skip(1)
-                        .map(|x| x.as_constant().unwrap().to_owned())
-                        .collect::<Vec<_>>();
-                    curr_state.set_node(res.new_node(
-                        BuildNode::SetEntrypoint {
-                            parent: img,
-                            new_entrypoint: entrypoint,
-                        },
-                        vec![img],
-                    ));
                 }
                 "merge" => {
                     if curr_state.current_merge.is_some() {
@@ -551,49 +587,6 @@ pub fn build_dag_from_proofs(
                         .collect();
                     deps.push(parent);
                     curr_state.set_node(res.new_node(BuildNode::Merge(merge_node), deps));
-                }
-                "set_env" => {
-                    if curr_state.current_merge.is_some() {
-                        panic!("You can not generate a new image inside a merge.");
-                    }
-                    let img = process_image(subtree_in_op, rules, res, image_literals, None)
-                        .expect("set_env should be applied to an image.");
-                    if curr_state.has_base() {
-                        panic!(
-                            "set_env generates a new image, so it should be the first instruction."
-                        );
-                    }
-                    let env_k = lit.args[1].as_constant().unwrap().to_owned();
-                    let env_v = lit.args[2].as_constant().unwrap().to_owned();
-                    curr_state.set_node(res.new_node(
-                        BuildNode::SetEnv {
-                            parent: img,
-                            key: env_k,
-                            value: env_v,
-                        },
-                        vec![img],
-                    ));
-                }
-                "append_path" => {
-                    if curr_state.current_merge.is_some() {
-                        panic!("You can not generate a new image inside a merge.");
-                    }
-                    let img = process_image(subtree_in_op, rules, res, image_literals, None)
-                        .expect("append_path should be applied to an image.");
-                    if curr_state.has_base() {
-                        panic!(
-                            "append_path generates a new image, so it should be the first instruction."
-                        );
-                    }
-                    let append = format!(":{}", lit.args[1].as_constant().unwrap());
-                    curr_state.set_node(res.new_node(
-                        BuildNode::AppendEnvValue {
-                            parent: img,
-                            key: "PATH".to_owned(),
-                            value: append,
-                        },
-                        vec![img],
-                    ));
                 }
                 "in_env" => {
                     let env_k = lit.args[1].as_constant().unwrap().to_owned();
