@@ -551,6 +551,7 @@ lazy_static! {
         m.insert("set_env", (Kind::Image, Kind::Image));
         m.insert("set_entrypoint", (Kind::Image, Kind::Image));
         m.insert("set_workdir", (Kind::Image, Kind::Image));
+        m.insert("set_label", (Kind::Image, Kind::Image));
         m.insert("append_path", (Kind::Image, Kind::Image));
         m.insert("in_workdir", (Kind::Layer, Kind::Layer));
         m.insert("in_env", (Kind::Layer, Kind::Layer));
