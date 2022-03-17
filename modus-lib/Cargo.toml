@@ -1,7 +1,7 @@
 [package]
 name = "modus-lib"
 version = "0.1.11"
-authors = ["University College London"]
+authors = ["ANONYMISED"]
 edition = "2018"
 license = "AGPL-3.0"
 description = "A language for building container images"

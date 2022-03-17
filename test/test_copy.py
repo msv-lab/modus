@@ -1,5 +1,5 @@
 # Modus, a language for building container images
-# Copyright (C) 2022 University College London
+# Copyright (C) 2022 ANONYMISED
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
