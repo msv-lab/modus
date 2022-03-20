@@ -99,6 +99,12 @@ lazy_static! {
 
         (Kind::Logic, Kind::Logic, Kind::Logic),
     ];
+
+    static ref OR_KIND_TABLE: Vec<(Kind, Kind, Kind)> = vec![
+        (Kind::Image, Kind::Image, Kind::Image),
+        (Kind::Layer, Kind::Layer, Kind::Layer),
+        (Kind::Logic, Kind::Logic, Kind::Logic),
+    ];
 }
 
 impl ModusSemantics for Modusfile {
@@ -180,13 +186,14 @@ impl ModusSemantics for Modusfile {
             clauses: &[ModusClause],
             assertion: Option<Kind>,
         ) -> Result<Kind, Diagnostic<()>> {
-            fn get_and_expression_possibilities(
+            fn get_expression_possibilities(
+                table: &[(Kind, Kind, Kind)],
                 e1: Option<Kind>,
                 e2: Option<Kind>,
                 e3: Option<Kind>,
             ) -> Vec<(Kind, Kind, Kind)> {
                 let num_some = e1.is_some() as i32 + e2.is_some() as i32 + e3.is_some() as i32;
-                AND_KIND_TABLE
+                table
                     .iter()
                     .cloned()
                     .filter(|(t1, t2, t3)| {
@@ -269,8 +276,12 @@ impl ModusSemantics for Modusfile {
                     let sem1_res = evaluate_or_assert_expression(e1, pred_kind, clauses, None);
                     let sem2_res = evaluate_or_assert_expression(e2, pred_kind, clauses, None);
 
-                    let possibilities =
-                        get_and_expression_possibilities(sem1_res.ok(), sem2_res.ok(), assertion);
+                    let possibilities = get_expression_possibilities(
+                        &AND_KIND_TABLE,
+                        sem1_res.ok(),
+                        sem2_res.ok(),
+                        assertion,
+                    );
                     if possibilities.len() == 1 {
                         let possibility = possibilities[0];
                         let _ = evaluate_or_assert_expression(
@@ -293,30 +304,45 @@ impl ModusSemantics for Modusfile {
                     }
                 }
                 Expression::Or(span, true, e1, e2) => {
-                    let sem1 = evaluate_or_assert_expression(e1, pred_kind, clauses, assertion)?;
-                    let sem2 = evaluate_or_assert_expression(e2, pred_kind, clauses, assertion)?;
+                    let sem1_res = evaluate_or_assert_expression(e1, pred_kind, clauses, assertion);
+                    let sem2_res = evaluate_or_assert_expression(e2, pred_kind, clauses, assertion);
 
-                    let matching_expr = sem1 == sem2;
-                    if matching_expr {
-                        Ok(sem1)
+                    let possibilities = get_expression_possibilities(
+                        &OR_KIND_TABLE,
+                        sem1_res.clone().ok(),
+                        sem2_res.clone().ok(),
+                        assertion,
+                    );
+                    if possibilities.len() == 1 {
+                        let possibility = possibilities[0];
+                        let _ = evaluate_or_assert_expression(
+                            e1,
+                            pred_kind,
+                            clauses,
+                            Some(possibility.0),
+                        )?;
+                        let _ = evaluate_or_assert_expression(
+                            e2,
+                            pred_kind,
+                            clauses,
+                            Some(possibility.1),
+                        )?;
+                        Ok(possibility.2)
                     } else {
-                        Err(generate_err_diagnostic(span, e1, e2, &sem1, &sem2))
+                        match (sem1_res, sem2_res) {
+                            (Ok(sem1), Ok(sem2)) => {
+                                Err(generate_err_diagnostic(span, e1, e2, &sem1, &sem2))
+                            }
+                            (Err(e), _) | (_, Err(e)) => Err(e),
+                        }
                     }
                 }
                 // A negated expression is a check for whether we can prove the expression,
                 // so `!foo` is always a logical kind, regardless of foo.
-                &Expression::And(_, false, ..) | Expression::Or(_, false, ..) => {
-                    match assertion {
-                        None | Some(Kind::Logic) => Ok(Kind::Logic),
-                        Some(k) => {
-                            Err(generate_failed_assumption(
-                                expression,
-                                &k,
-                                &Kind::Logic,
-                            ))
-                        },
-                    }
-                }
+                &Expression::And(_, false, ..) | Expression::Or(_, false, ..) => match assertion {
+                    None | Some(Kind::Logic) => Ok(Kind::Logic),
+                    Some(k) => Err(generate_failed_assumption(expression, &k, &Kind::Logic)),
+                },
             }
         }
 
@@ -857,7 +883,7 @@ mod tests {
     fn handles_recursion_through_presumptions() {
         let clauses = vec![
             "foo(mode) :- ( \
-               mode=\"prod\",from(\"alpine\"),a(\"dev\")::copy(\".\", \".\") \
+               mode=\"prod\",from(\"alpine\"),foo(\"dev\")::copy(\".\", \".\") \
              ; \
                mode=\"dev\",from(\"gcc\"),run(\"echo hello\") \
              ).",
@@ -871,6 +897,27 @@ mod tests {
             kind_res.pred_kind.get(&Predicate("foo".into()))
         );
     }
+
+    // Example of test case that doesn't work atm.
+    // TODO: implement this
+    // #[test]
+    // fn handles_disjunct_recursion_through_presumptions() {
+    //     let clauses = vec![
+    //         "foo(mode) :- ( \
+    //            mode=\"prod\",foo(\"dev\"),run(\"make prod\") \
+    //          ; \
+    //            mode=\"dev\",copy(\".\", \"/app\"),run(\"echo hello\") \
+    //          ).",
+    //     ];
+    //     let mf: Modusfile = clauses.join("\n").parse().unwrap();
+
+    //     let kind_res = mf.kinds();
+    //     assert_eq!(kind_res.errs.len(), 0);
+    //     assert_eq!(
+    //         Some(&Kind::Layer),
+    //         kind_res.pred_kind.get(&Predicate("foo".into()))
+    //     );
+    // }
 
     #[test]
     fn warns_recursion() {
