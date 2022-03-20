@@ -88,6 +88,7 @@ pub trait ModusSemantics {
 
 lazy_static! {
     /// Enumerates the possible `e1 , e2 = e3` kinds. One entry represents (e1_kind, e2_kind, resulting_kind).
+    /// e.g. if two of the kinds are known, then the third kind is a valid possibility.
     static ref AND_KIND_TABLE: Vec<(Kind, Kind, Kind)> = vec![
         (Kind::Image, Kind::Logic, Kind::Image),
         (Kind::Image, Kind::Layer, Kind::Image),
@@ -152,36 +153,18 @@ impl ModusSemantics for Modusfile {
             }
         }
 
-        fn generate_invalid_operator_inp(
-            op: &Operator,
-            expected: Kind,
-            actual: Kind,
-            expr: &Expression,
-        ) -> Diagnostic<()> {
-            let diag = Diagnostic::error().with_message(format!(
-                "Operator {} applied to invalid kind.",
-                op.predicate
-            ));
+        fn generate_failed_assumption(expr: &Expression, expected: &Kind, actual: &Kind) -> Diagnostic<()> {
+            let diag = Diagnostic::error().with_message(format!("Expected kind: {expected:?}"));
             let mut labels = Vec::new();
 
-            if let Some(pos) = &op.position {
-                labels.push(
-                    Label::secondary((), pos.offset..pos.offset + pos.length)
-                        .with_message(format!("operator expects kind {expected:?}")),
-                );
-            }
             if let Some(pos) = expr.get_spanned_position() {
                 labels.push(
                     Label::primary((), pos.offset..pos.offset + pos.length)
                         .with_message(format!("expression found to be {actual:?}")),
-                )
+                );
             }
 
             diag.with_labels(labels)
-        }
-
-        fn generate_failed_assumption(expr: &Expression, expected: &Kind, actual: &Kind) -> Diagnostic<()> {
-            todo!()
         }
 
         /// Attempts to get the predicate kind of this expression, based on the current findings
@@ -194,6 +177,14 @@ impl ModusSemantics for Modusfile {
             clauses: &[ModusClause],
             assertion: Option<Kind>,
         ) -> Result<Kind, Diagnostic<()>> {
+            fn get_and_expression_possibilities(e1: Option<Kind>, e2: Option<Kind>, e3: Option<Kind>) -> Vec<(Kind, Kind, Kind)> {
+                let num_some = e1.is_some() as i32 + e2.is_some() as i32 + e3.is_some() as i32;
+                AND_KIND_TABLE.iter().cloned().filter(|(t1, t2, t3)| {
+                    let match_count = (Some(t1) == e1.as_ref()) as i32 + (Some(t2) == e2.as_ref()) as i32 + (Some(t3) == e3.as_ref()) as i32;
+                    match_count >= num_some
+                }).collect()
+            }
+
             match expression {
                 Expression::Literal(lit) => {
                     match (pred_kind.get(&lit.predicate).map(|x| *x), assertion) {
@@ -237,22 +228,29 @@ impl ModusSemantics for Modusfile {
                                 return Err(generate_failed_assumption(expression, &kind_assumption, &out_kind));
                             }
                         }
-                        evaluate_or_assert_expression(expr, pred_kind, clauses, Some(inp_kind))
+                        // assert that the input expression is as expected and return out_kind if no errors
+                        let _ = evaluate_or_assert_expression(expr, pred_kind, clauses, Some(inp_kind))?;
+                        Ok(out_kind)
                     } else {
                         // unknown operator
                         Err(generate_unknown_operator_diag(op))
                     }
                 }
                 Expression::And(span, true, e1, e2) => {
-                    todo!()
-                    // let sem1_res = evaluate_or_assert_expression(e1, pred_kind, clauses, None);
-                    // let sem2_res = evaluate_or_assert_expression(e2, pred_kind, clauses, None);
+                    let sem1_res = evaluate_or_assert_expression(e1, pred_kind, clauses, None);
+                    let sem2_res = evaluate_or_assert_expression(e2, pred_kind, clauses, None);
 
-                    // for (e_left, e_right, e_all) in AND_KIND_TABLE.iter() {
-                    //     if matches!((sem1_res, sem2_res, assertion), (Ok(e_left), Ok(e_right), Some(e_all))) {
-                    //         // TODO
-                    //     }
-                    // }
+                    let possibilities = get_and_expression_possibilities(sem1_res.ok(), sem2_res.ok(), assertion);
+                    if possibilities.len() == 1 {
+                        let possibility = possibilities[0];
+                        let _ = evaluate_or_assert_expression(e1, pred_kind, clauses, Some(possibility.0))?;
+                        let _ = evaluate_or_assert_expression(e2, pred_kind, clauses, Some(possibility.1))?;
+                        Ok(possibility.2)
+                    } else {
+                        let sem1 = evaluate_or_assert_expression(e1, pred_kind, clauses, None)?;
+                        let sem2 = evaluate_or_assert_expression(e2, pred_kind, clauses, None)?;
+                        Err(generate_err_diagnostic(span, e1, e2, &sem1, &sem2))
+                    }
                 }
                 Expression::Or(span, true, e1, e2) => {
                     let sem1 = evaluate_or_assert_expression(e1, pred_kind, clauses, assertion)?;
@@ -707,7 +705,7 @@ mod tests {
 
     #[test]
     fn simple_image_predicate_kind() {
-        let clauses = vec!["a :- from(\"ubuntu\"), run(\"apt-get update\")."];
+        let clauses = vec!["a :- from(\"ubuntu\"), run(\"apt-get update\"), run(\"echo hello\")."];
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
         let kind_res = mf.kinds();
@@ -877,11 +875,14 @@ mod tests {
 
     #[test]
     fn kind_errors_with_incorrect_operator_inp() {
-        let clauses = vec!["head :- run(\"echo foobar\")::set_entrypoint(\"bash\")."];
+        let clauses = vec![
+            "run_alias :- run(\"echo foobar\").",
+            "head :- run_alias::set_entrypoint(\"bash\")."
+        ];
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
         let kind_res = mf.kinds();
         assert_eq!(kind_res.errs[0].severity, Severity::Error);
-        assert!(kind_res.errs[0].message.contains("applied to invalid kind"));
+        assert!(kind_res.errs[0].message.contains("Expected kind: Image"));
     }
 }
