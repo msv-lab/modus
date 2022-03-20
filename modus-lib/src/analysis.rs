@@ -83,7 +83,6 @@ pub struct KindResult {
 /// A trait for objects that have some interpretation w.r.t. the build graph.
 pub trait ModusSemantics {
     fn kinds(&self) -> KindResult;
-
 }
 
 lazy_static! {
@@ -153,7 +152,11 @@ impl ModusSemantics for Modusfile {
             }
         }
 
-        fn generate_failed_assumption(expr: &Expression, expected: &Kind, actual: &Kind) -> Diagnostic<()> {
+        fn generate_failed_assumption(
+            expr: &Expression,
+            expected: &Kind,
+            actual: &Kind,
+        ) -> Diagnostic<()> {
             let diag = Diagnostic::error().with_message(format!("Expected kind: {expected:?}"));
             let mut labels = Vec::new();
 
@@ -177,19 +180,32 @@ impl ModusSemantics for Modusfile {
             clauses: &[ModusClause],
             assertion: Option<Kind>,
         ) -> Result<Kind, Diagnostic<()>> {
-            fn get_and_expression_possibilities(e1: Option<Kind>, e2: Option<Kind>, e3: Option<Kind>) -> Vec<(Kind, Kind, Kind)> {
+            fn get_and_expression_possibilities(
+                e1: Option<Kind>,
+                e2: Option<Kind>,
+                e3: Option<Kind>,
+            ) -> Vec<(Kind, Kind, Kind)> {
                 let num_some = e1.is_some() as i32 + e2.is_some() as i32 + e3.is_some() as i32;
-                AND_KIND_TABLE.iter().cloned().filter(|(t1, t2, t3)| {
-                    let match_count = (Some(t1) == e1.as_ref()) as i32 + (Some(t2) == e2.as_ref()) as i32 + (Some(t3) == e3.as_ref()) as i32;
-                    match_count >= num_some
-                }).collect()
+                AND_KIND_TABLE
+                    .iter()
+                    .cloned()
+                    .filter(|(t1, t2, t3)| {
+                        let match_count = (Some(t1) == e1.as_ref()) as i32
+                            + (Some(t2) == e2.as_ref()) as i32
+                            + (Some(t3) == e3.as_ref()) as i32;
+                        match_count >= num_some
+                    })
+                    .collect()
             }
 
             match expression {
                 Expression::Literal(lit) => {
                     match (pred_kind.get(&lit.predicate).map(|x| *x), assertion) {
                         (None, None) => {
-                            if clauses.iter().any(|c| c.body.is_some() && c.head.predicate == lit.predicate) {
+                            if clauses
+                                .iter()
+                                .any(|c| c.body.is_some() && c.head.predicate == lit.predicate)
+                            {
                                 // If there is some rule with the desired predicate, we'll defer to evaluating it, instead of
                                 // assuming that it is a logical kind.
                                 //
@@ -204,19 +220,23 @@ impl ModusSemantics for Modusfile {
                             } else {
                                 Ok(Kind::Logic)
                             }
-                        },
+                        }
                         (None, Some(kind_assumption)) => {
                             pred_kind.insert(lit.predicate.clone(), kind_assumption);
                             Ok(kind_assumption)
-                        },
+                        }
                         (Some(existing_k), None) => Ok(existing_k),
                         (Some(existing_k), Some(kind_assumption)) => {
                             if existing_k != kind_assumption {
-                                Err(generate_failed_assumption(expression, &kind_assumption, &existing_k))
+                                Err(generate_failed_assumption(
+                                    expression,
+                                    &kind_assumption,
+                                    &existing_k,
+                                ))
                             } else {
                                 Ok(kind_assumption)
                             }
-                        },
+                        }
                     }
                 }
                 Expression::OperatorApplication(_, expr, op) => {
@@ -225,11 +245,20 @@ impl ModusSemantics for Modusfile {
                     if let Some((inp_kind, out_kind)) = op_kind_map {
                         if let Some(kind_assumption) = assertion {
                             if out_kind != kind_assumption {
-                                return Err(generate_failed_assumption(expression, &kind_assumption, &out_kind));
+                                return Err(generate_failed_assumption(
+                                    expression,
+                                    &kind_assumption,
+                                    &out_kind,
+                                ));
                             }
                         }
                         // assert that the input expression is as expected and return out_kind if no errors
-                        let _ = evaluate_or_assert_expression(expr, pred_kind, clauses, Some(inp_kind))?;
+                        let _ = evaluate_or_assert_expression(
+                            expr,
+                            pred_kind,
+                            clauses,
+                            Some(inp_kind),
+                        )?;
                         Ok(out_kind)
                     } else {
                         // unknown operator
@@ -240,11 +269,22 @@ impl ModusSemantics for Modusfile {
                     let sem1_res = evaluate_or_assert_expression(e1, pred_kind, clauses, None);
                     let sem2_res = evaluate_or_assert_expression(e2, pred_kind, clauses, None);
 
-                    let possibilities = get_and_expression_possibilities(sem1_res.ok(), sem2_res.ok(), assertion);
+                    let possibilities =
+                        get_and_expression_possibilities(sem1_res.ok(), sem2_res.ok(), assertion);
                     if possibilities.len() == 1 {
                         let possibility = possibilities[0];
-                        let _ = evaluate_or_assert_expression(e1, pred_kind, clauses, Some(possibility.0))?;
-                        let _ = evaluate_or_assert_expression(e2, pred_kind, clauses, Some(possibility.1))?;
+                        let _ = evaluate_or_assert_expression(
+                            e1,
+                            pred_kind,
+                            clauses,
+                            Some(possibility.0),
+                        )?;
+                        let _ = evaluate_or_assert_expression(
+                            e2,
+                            pred_kind,
+                            clauses,
+                            Some(possibility.1),
+                        )?;
                         Ok(possibility.2)
                     } else {
                         let sem1 = evaluate_or_assert_expression(e1, pred_kind, clauses, None)?;
@@ -265,7 +305,17 @@ impl ModusSemantics for Modusfile {
                 }
                 // A negated expression is a check for whether we can prove the expression,
                 // so `!foo` is always a logical kind, regardless of foo.
-                &Expression::And(_, false, ..) | Expression::Or(_, false, ..) => if assertion.is_none() || assertion == Some(Kind::Logic) { Ok(Kind::Logic) } else { Err(generate_failed_assumption(expression, &assertion.unwrap(), &Kind::Logic)) },
+                &Expression::And(_, false, ..) | Expression::Or(_, false, ..) => {
+                    if assertion.is_none() || assertion == Some(Kind::Logic) {
+                        Ok(Kind::Logic)
+                    } else {
+                        Err(generate_failed_assumption(
+                            expression,
+                            &assertion.unwrap(),
+                            &Kind::Logic,
+                        ))
+                    }
+                }
             }
         }
 
@@ -334,7 +384,12 @@ impl ModusSemantics for Modusfile {
             let mut new_pred = false;
             for c in self.0.iter().filter(|c| c.body.is_some()) {
                 let maybe_existing_kind = pred_kind.get(&c.head.predicate).map(|x| *x);
-                let k_res = evaluate_or_assert_expression(c.body.as_ref().unwrap(), &mut pred_kind, &self.0, maybe_existing_kind);
+                let k_res = evaluate_or_assert_expression(
+                    c.body.as_ref().unwrap(),
+                    &mut pred_kind,
+                    &self.0,
+                    maybe_existing_kind,
+                );
                 if let Ok(k) = k_res {
                     if maybe_existing_kind == None {
                         new_pred = true;
@@ -353,7 +408,12 @@ impl ModusSemantics for Modusfile {
         // evaluate all the expression bodies a final time to pick up any conflicting definitions
         for c in self.0.iter().filter(|c| c.body.is_some()) {
             let assertion = pred_kind.get(&c.head.predicate).map(|x| *x);
-            match evaluate_or_assert_expression(c.body.as_ref().unwrap(), &mut pred_kind, &self.0, assertion) {
+            match evaluate_or_assert_expression(
+                c.body.as_ref().unwrap(),
+                &mut pred_kind,
+                &self.0,
+                assertion,
+            ) {
                 Ok(kind) => {
                     let pred = &c.head.predicate;
                     if let Some(k) = pred_kind.get(pred) {
@@ -877,7 +937,7 @@ mod tests {
     fn kind_errors_with_incorrect_operator_inp() {
         let clauses = vec![
             "run_alias :- run(\"echo foobar\").",
-            "head :- run_alias::set_entrypoint(\"bash\")."
+            "head :- run_alias::set_entrypoint(\"bash\").",
         ];
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
