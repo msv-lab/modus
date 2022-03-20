@@ -200,7 +200,7 @@ impl ModusSemantics for Modusfile {
 
             match expression {
                 Expression::Literal(lit) => {
-                    match (pred_kind.get(&lit.predicate).map(|x| *x), assertion) {
+                    match (pred_kind.get(&lit.predicate).copied(), assertion) {
                         (None, None) => {
                             if clauses
                                 .iter()
@@ -240,7 +240,7 @@ impl ModusSemantics for Modusfile {
                     }
                 }
                 Expression::OperatorApplication(_, expr, op) => {
-                    let op_kind_map = OPERATOR_KIND_MAP.get(op.predicate.0.as_str()).map(|x| *x);
+                    let op_kind_map = OPERATOR_KIND_MAP.get(op.predicate.0.as_str()).copied();
 
                     if let Some((inp_kind, out_kind)) = op_kind_map {
                         if let Some(kind_assumption) = assertion {
@@ -306,14 +306,15 @@ impl ModusSemantics for Modusfile {
                 // A negated expression is a check for whether we can prove the expression,
                 // so `!foo` is always a logical kind, regardless of foo.
                 &Expression::And(_, false, ..) | Expression::Or(_, false, ..) => {
-                    if assertion.is_none() || assertion == Some(Kind::Logic) {
-                        Ok(Kind::Logic)
-                    } else {
-                        Err(generate_failed_assumption(
-                            expression,
-                            &assertion.unwrap(),
-                            &Kind::Logic,
-                        ))
+                    match assertion {
+                        None | Some(Kind::Logic) => Ok(Kind::Logic),
+                        Some(k) => {
+                            Err(generate_failed_assumption(
+                                expression,
+                                &k,
+                                &Kind::Logic,
+                            ))
+                        },
                     }
                 }
             }
@@ -383,7 +384,7 @@ impl ModusSemantics for Modusfile {
         loop {
             let mut new_pred = false;
             for c in self.0.iter().filter(|c| c.body.is_some()) {
-                let maybe_existing_kind = pred_kind.get(&c.head.predicate).map(|x| *x);
+                let maybe_existing_kind = pred_kind.get(&c.head.predicate).copied();
                 let k_res = evaluate_or_assert_expression(
                     c.body.as_ref().unwrap(),
                     &mut pred_kind,
@@ -407,7 +408,7 @@ impl ModusSemantics for Modusfile {
         let mut errs = Vec::new();
         // evaluate all the expression bodies a final time to pick up any conflicting definitions
         for c in self.0.iter().filter(|c| c.body.is_some()) {
-            let assertion = pred_kind.get(&c.head.predicate).map(|x| *x);
+            let assertion = pred_kind.get(&c.head.predicate).copied();
             match evaluate_or_assert_expression(
                 c.body.as_ref().unwrap(),
                 &mut pred_kind,
@@ -662,7 +663,7 @@ pub fn check_and_output_analysis<
     let f_string_head_res = f_strings_present_in_head(mf);
     let f_string_head_errors = f_string_head_res.err().unwrap_or_default();
 
-    let can_translate = f_string_head_errors.len() == 0;
+    let can_translate = f_string_head_errors.is_empty();
 
     let negation_errors = if can_translate {
         let ir_clauses = translate_modusfile(mf);
