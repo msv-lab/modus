@@ -21,6 +21,9 @@
 //! Instead of trying to work out the proper order we should 'apply' clauses, we apply all of them,
 //! and if we cannot evaluate some expression body because we haven't evaluated a future predicate kind
 //! yet, we move on - eventually it will be handled.
+//! However, we make an assumption on what an expression body's kind is whenever an incorrect assumption
+//! must lead to an error. For example, in `e1 ; e2`, if e1 is an image kind then we'll error if e2
+//! is not an image kind, so we may as well assume it is and error later if needed.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -29,7 +32,6 @@ use std::ops::Range;
 use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
 use codespan_reporting::files::Files;
 use codespan_reporting::term::{self, Config};
-use colored::Colorize;
 use petgraph::algo::find_negative_cycle;
 
 use crate::builtin::{select_builtin, OPERATOR_KIND_MAP};
@@ -83,6 +85,28 @@ pub trait ModusSemantics {
     fn kinds(&self) -> KindResult;
 }
 
+lazy_static! {
+    /// Enumerates the possible `e1 , e2 = e3` kinds. One entry represents (e1_kind, e2_kind, resulting_kind).
+    /// e.g. if two of the kinds are known, then the third kind is a valid possibility.
+    static ref AND_KIND_TABLE: Vec<(Kind, Kind, Kind)> = vec![
+        (Kind::Image, Kind::Logic, Kind::Image),
+        (Kind::Image, Kind::Layer, Kind::Image),
+        (Kind::Logic, Kind::Image, Kind::Image),
+
+        (Kind::Layer, Kind::Layer, Kind::Layer),
+        (Kind::Logic, Kind::Layer, Kind::Layer),
+        (Kind::Layer, Kind::Logic, Kind::Layer),
+
+        (Kind::Logic, Kind::Logic, Kind::Logic),
+    ];
+
+    static ref OR_KIND_TABLE: Vec<(Kind, Kind, Kind)> = vec![
+        (Kind::Image, Kind::Image, Kind::Image),
+        (Kind::Layer, Kind::Layer, Kind::Layer),
+        (Kind::Logic, Kind::Logic, Kind::Logic),
+    ];
+}
+
 impl ModusSemantics for Modusfile {
     fn kinds(&self) -> KindResult {
         fn generate_err_diagnostic(
@@ -122,10 +146,8 @@ impl ModusSemantics for Modusfile {
         }
 
         fn generate_unknown_operator_diag(op: &Operator) -> Diagnostic<()> {
-            let diag = Diagnostic::error().with_message(format!(
-                "Unknown operator: {}",
-                op.predicate
-            ));
+            let diag =
+                Diagnostic::error().with_message(format!("Unknown operator: {}", op.predicate));
             if let Some(pos) = &op.position {
                 diag.with_labels(vec![Label::primary(
                     (),
@@ -136,117 +158,234 @@ impl ModusSemantics for Modusfile {
             }
         }
 
-        fn generate_invalid_operator_inp(
-            op: &Operator,
-            expected: Kind,
-            actual: Kind,
+        fn generate_failed_assumption(
             expr: &Expression,
+            expected: &Kind,
+            actual: &Kind,
         ) -> Diagnostic<()> {
-            let diag = Diagnostic::error().with_message(format!(
-                "Operator {} applied to invalid kind.",
-                op.predicate
-            ));
+            let diag = Diagnostic::error().with_message(format!("Expected kind: {expected:?}"));
             let mut labels = Vec::new();
 
-            if let Some(pos) = &op.position {
-                labels.push(
-                    Label::secondary((), pos.offset..pos.offset + pos.length)
-                        .with_message(format!("operator expects kind {expected:?}")),
-                );
-            }
             if let Some(pos) = expr.get_spanned_position() {
                 labels.push(
                     Label::primary((), pos.offset..pos.offset + pos.length)
                         .with_message(format!("expression found to be {actual:?}")),
-                )
+                );
             }
 
             diag.with_labels(labels)
         }
 
-        /// Attempts to get the predicate kind of the head, based on the current findings
+        /// Attempts to get the predicate kind of this expression, based on the current findings
         /// of the predicate kind map.
-        fn evaluate_expression(
+        ///
+        /// If assertion is Some(k), then we will either assume that it is of kind k if we don't know,
+        /// or we will assert it.
+        ///
+        /// If head_pred is Some(p), we assume that this expression is the body of a corresponding
+        /// rule and modify pred_kind accordingly. This is used to assist in some recursive cases,
+        /// i.e. where we know that the top level expression outcome must be some kind k.
+        fn evaluate_or_assert_expression(
             expression: &Expression,
-            pred_kind: &HashMap<Predicate, Kind>,
+            pred_kind: &mut HashMap<Predicate, Kind>,
             clauses: &[ModusClause],
+            assertion: Option<Kind>,
+            head_pred: Option<&Predicate>,
         ) -> Result<Kind, Diagnostic<()>> {
+            fn get_expression_possibilities(
+                table: &[(Kind, Kind, Kind)],
+                e1: Option<Kind>,
+                e2: Option<Kind>,
+                e3: Option<Kind>,
+            ) -> Vec<(Kind, Kind, Kind)> {
+                let num_some = e1.is_some() as i32 + e2.is_some() as i32 + e3.is_some() as i32;
+                table
+                    .iter()
+                    .cloned()
+                    .filter(|(t1, t2, t3)| {
+                        let match_count = (Some(t1) == e1.as_ref()) as i32
+                            + (Some(t2) == e2.as_ref()) as i32
+                            + (Some(t3) == e3.as_ref()) as i32;
+                        match_count >= num_some
+                    })
+                    .collect()
+            }
+
             match expression {
                 Expression::Literal(lit) => {
-                    if let Some(kind) = pred_kind.get(&lit.predicate) {
-                        Ok(*kind)
-                    } else if clauses
-                        .iter()
-                        .any(|c| c.body.is_some() && c.head.predicate == lit.predicate)
-                    {
-                        // If there is some rule with the desired predicate, we'll defer to evaluating it, instead of
-                        // assuming that it is a logical kind.
-                        //
-                        // This may lead to issues with cases like:
-                        // ````
-                        // foo(X) :- bar(X).
-                        // bar(X) :- foo(X).
-                        // ````
-                        // Since both will 'defer' to each other. However, this isn't a sensible program on it's own anyway.
-                        Err(Diagnostic::warning()
-                            .with_message(format!("{} not determined yet.", lit.predicate)))
-                    } else {
-                        Ok(Kind::Logic)
+                    match (pred_kind.get(&lit.predicate).copied(), assertion) {
+                        (None, None) => {
+                            if clauses
+                                .iter()
+                                .any(|c| c.body.is_some() && c.head.predicate == lit.predicate)
+                            {
+                                // If there is some rule with the desired predicate, we'll defer to evaluating it, instead of
+                                // assuming that it is a logical kind.
+                                //
+                                // This may lead to issues with cases like:
+                                // ````
+                                // foo(X) :- bar(X).
+                                // bar(X) :- foo(X).
+                                // ````
+                                // Since both will 'defer' to each other. However, this isn't a sensible program on it's own anyway.
+                                Err(Diagnostic::warning()
+                                    .with_message(format!("{} not determined yet.", lit.predicate)))
+                            } else {
+                                Ok(Kind::Logic)
+                            }
+                        }
+                        (None, Some(kind_assumption)) => {
+                            pred_kind.insert(lit.predicate.clone(), kind_assumption);
+                            Ok(kind_assumption)
+                        }
+                        (Some(existing_k), None) => Ok(existing_k),
+                        (Some(existing_k), Some(kind_assumption)) => {
+                            if existing_k != kind_assumption {
+                                Err(generate_failed_assumption(
+                                    expression,
+                                    &kind_assumption,
+                                    &existing_k,
+                                ))
+                            } else {
+                                Ok(kind_assumption)
+                            }
+                        }
                     }
                 }
                 Expression::OperatorApplication(_, expr, op) => {
-                    let expr_kind = evaluate_expression(expr, pred_kind, clauses)?;
-                    let op_kind_map = OPERATOR_KIND_MAP.get(op.predicate.0.as_str());
+                    let op_kind_map = OPERATOR_KIND_MAP.get(op.predicate.0.as_str()).copied();
 
                     if let Some((inp_kind, out_kind)) = op_kind_map {
-                        if &expr_kind == inp_kind {
-                            Ok(*out_kind)
-                        } else {
-                            Err(generate_invalid_operator_inp(
-                                op, *inp_kind, expr_kind, expr,
-                            ))
+                        if let Some(kind_assumption) = assertion {
+                            if out_kind != kind_assumption {
+                                return Err(generate_failed_assumption(
+                                    expression,
+                                    &kind_assumption,
+                                    &out_kind,
+                                ));
+                            }
                         }
+                        if let Some(p) = head_pred {
+                            if !pred_kind.contains_key(&p) {
+                                pred_kind.insert(p.clone(), out_kind);
+                            } else {
+                                // could enforce existing is equal to assumption here
+                            }
+                        }
+                        // assert that the input expression is as expected and return out_kind if no errors
+                        let _ = evaluate_or_assert_expression(
+                            expr,
+                            pred_kind,
+                            clauses,
+                            Some(inp_kind),
+                            None,
+                        )?;
+                        Ok(out_kind)
                     } else {
                         // unknown operator
                         Err(generate_unknown_operator_diag(op))
                     }
                 }
                 Expression::And(span, true, e1, e2) => {
-                    // Could propogate multiple errors up instead of terminating early with '?'
-                    let sem1 = evaluate_expression(e1, pred_kind, clauses)?;
-                    let sem2 = evaluate_expression(e2, pred_kind, clauses)?;
+                    let sem1_res =
+                        evaluate_or_assert_expression(e1, pred_kind, clauses, None, None);
+                    let sem2_res =
+                        evaluate_or_assert_expression(e2, pred_kind, clauses, None, None);
 
-                    let is_image_expr = (sem1.is_image() && !sem2.is_image())
-                        || (sem1.is_logic() && sem2.is_image());
-                    let is_layer_expr = (sem1.is_layer() && sem2.is_layer())
-                        || (sem1.is_logic() && sem2.is_layer())
-                        || (sem1.is_layer() && sem2.is_logic());
-                    let is_logic_expr = sem1.is_logic() && sem2.is_logic();
+                    let possibilities = get_expression_possibilities(
+                        &AND_KIND_TABLE,
+                        sem1_res.clone().ok(),
+                        sem2_res.clone().ok(),
+                        assertion,
+                    );
+                    if possibilities.len() == 1 {
+                        let possibility = possibilities[0];
 
-                    if is_image_expr {
-                        Ok(Kind::Image)
-                    } else if is_layer_expr {
-                        Ok(Kind::Layer)
-                    } else if is_logic_expr {
-                        Ok(Kind::Logic)
+                        if let Some(p) = head_pred {
+                            if !pred_kind.contains_key(&p) {
+                                pred_kind.insert(p.clone(), possibility.2);
+                            } else {
+                                // could enforce existing is equal to assumption here
+                            }
+                        }
+
+                        let _ = evaluate_or_assert_expression(
+                            e1,
+                            pred_kind,
+                            clauses,
+                            Some(possibility.0),
+                            None,
+                        )?;
+                        let _ = evaluate_or_assert_expression(
+                            e2,
+                            pred_kind,
+                            clauses,
+                            Some(possibility.1),
+                            None,
+                        )?;
+                        Ok(possibility.2)
                     } else {
-                        Err(generate_err_diagnostic(span, e1, e2, &sem1, &sem2))
+                        match (sem1_res, sem2_res) {
+                            (Ok(sem1), Ok(sem2)) => {
+                                Err(generate_err_diagnostic(span, e1, e2, &sem1, &sem2))
+                            }
+                            (Err(e), _) | (_, Err(e)) => Err(e),
+                        }
                     }
                 }
                 Expression::Or(span, true, e1, e2) => {
-                    let sem1 = evaluate_expression(e1, pred_kind, clauses)?;
-                    let sem2 = evaluate_expression(e2, pred_kind, clauses)?;
+                    let sem1_res =
+                        evaluate_or_assert_expression(e1, pred_kind, clauses, assertion, None);
+                    let sem2_res =
+                        evaluate_or_assert_expression(e2, pred_kind, clauses, assertion, None);
 
-                    let matching_expr = sem1 == sem2;
-                    if matching_expr {
-                        Ok(sem1)
+                    let possibilities = get_expression_possibilities(
+                        &OR_KIND_TABLE,
+                        sem1_res.clone().ok(),
+                        sem2_res.clone().ok(),
+                        assertion,
+                    );
+                    if possibilities.len() == 1 {
+                        let possibility = possibilities[0];
+
+                        if let Some(p) = head_pred {
+                            if !pred_kind.contains_key(&p) {
+                                pred_kind.insert(p.clone(), possibility.2);
+                            } else {
+                                // could enforce existing is equal to assumption here
+                            }
+                        }
+
+                        let _ = evaluate_or_assert_expression(
+                            e1,
+                            pred_kind,
+                            clauses,
+                            Some(possibility.0),
+                            None,
+                        )?;
+                        let _ = evaluate_or_assert_expression(
+                            e2,
+                            pred_kind,
+                            clauses,
+                            Some(possibility.1),
+                            None,
+                        )?;
+                        Ok(possibility.2)
                     } else {
-                        Err(generate_err_diagnostic(span, e1, e2, &sem1, &sem2))
+                        match (sem1_res, sem2_res) {
+                            (Ok(sem1), Ok(sem2)) => {
+                                Err(generate_err_diagnostic(span, e1, e2, &sem1, &sem2))
+                            }
+                            (Err(e), _) | (_, Err(e)) => Err(e),
+                        }
                     }
                 }
                 // A negated expression is a check for whether we can prove the expression,
                 // so `!foo` is always a logical kind, regardless of foo.
-                &Expression::And(_, false, ..) | Expression::Or(_, false, ..) => Ok(Kind::Logic),
+                &Expression::And(_, false, ..) | Expression::Or(_, false, ..) => match assertion {
+                    None | Some(Kind::Logic) => Ok(Kind::Logic),
+                    Some(k) => Err(generate_failed_assumption(expression, &k, &Kind::Logic)),
+                },
             }
         }
 
@@ -314,12 +453,16 @@ impl ModusSemantics for Modusfile {
         loop {
             let mut new_pred = false;
             for c in self.0.iter().filter(|c| c.body.is_some()) {
-                let k_res = evaluate_expression(c.body.as_ref().unwrap(), &pred_kind, &self.0);
+                let maybe_existing_kind = pred_kind.get(&c.head.predicate).copied();
+                let k_res = evaluate_or_assert_expression(
+                    c.body.as_ref().unwrap(),
+                    &mut pred_kind,
+                    &self.0,
+                    maybe_existing_kind,
+                    Some(&c.head.predicate),
+                );
                 if let Ok(k) = k_res {
-                    // This assumes that we correctly determine the kind the first time
-                    // we can evaluate it. An alternative approach may overwrite previously
-                    // found kinds, but that would risk not reaching a fixpoint.
-                    if !pred_kind.contains_key(&c.head.predicate) {
+                    if maybe_existing_kind == None {
                         new_pred = true;
                         pred_kind.insert(c.head.predicate.clone(), k);
                     }
@@ -335,7 +478,14 @@ impl ModusSemantics for Modusfile {
         let mut errs = Vec::new();
         // evaluate all the expression bodies a final time to pick up any conflicting definitions
         for c in self.0.iter().filter(|c| c.body.is_some()) {
-            match evaluate_expression(c.body.as_ref().unwrap(), &pred_kind, &self.0) {
+            let assertion = pred_kind.get(&c.head.predicate).copied();
+            match evaluate_or_assert_expression(
+                c.body.as_ref().unwrap(),
+                &mut pred_kind,
+                &self.0,
+                assertion,
+                Some(&c.head.predicate),
+            ) {
                 Ok(kind) => {
                     let pred = &c.head.predicate;
                     if let Some(k) = pred_kind.get(pred) {
@@ -584,7 +734,7 @@ pub fn check_and_output_analysis<
     let f_string_head_res = f_strings_present_in_head(mf);
     let f_string_head_errors = f_string_head_res.err().unwrap_or_default();
 
-    let can_translate = f_string_head_errors.len() == 0;
+    let can_translate = f_string_head_errors.is_empty();
 
     let negation_errors = if can_translate {
         let ir_clauses = translate_modusfile(mf);
@@ -687,7 +837,7 @@ mod tests {
 
     #[test]
     fn simple_image_predicate_kind() {
-        let clauses = vec!["a :- from(\"ubuntu\"), run(\"apt-get update\")."];
+        let clauses = vec!["a :- from(\"ubuntu\"), run(\"apt-get update\"), run(\"echo hello\")."];
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
         let kind_res = mf.kinds();
@@ -775,6 +925,44 @@ mod tests {
     }
 
     #[test]
+    fn handles_recursion_through_presumptions() {
+        let clauses = vec![
+            "foo(mode) :- ( \
+               mode=\"prod\",from(\"alpine\"),foo(\"dev\")::copy(\".\", \".\") \
+             ; \
+               mode=\"dev\",from(\"gcc\"),run(\"echo hello\") \
+             ).",
+        ];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+
+        let kind_res = mf.kinds();
+        assert_eq!(kind_res.errs.len(), 0);
+        assert_eq!(
+            Some(&Kind::Image),
+            kind_res.pred_kind.get(&Predicate("foo".into()))
+        );
+    }
+
+    #[test]
+    fn handles_disjunct_recursion_through_presumptions() {
+        let clauses = vec![
+            "foo(mode) :- ( \
+               mode=\"prod\",foo(\"dev\"),run(\"make prod\") \
+             ; \
+               mode=\"dev\",copy(\".\", \"/app\"),run(\"echo hello\") \
+             ).",
+        ];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+
+        let kind_res = mf.kinds();
+        assert_eq!(kind_res.errs.len(), 0);
+        assert_eq!(
+            Some(&Kind::Layer),
+            kind_res.pred_kind.get(&Predicate("foo".into()))
+        );
+    }
+
+    #[test]
     fn warns_recursion() {
         let clauses = vec![
             "recurse :- recurse.",
@@ -838,11 +1026,14 @@ mod tests {
 
     #[test]
     fn kind_errors_with_incorrect_operator_inp() {
-        let clauses = vec!["head :- run(\"echo foobar\")::set_entrypoint(\"bash\")."];
+        let clauses = vec![
+            "run_alias :- run(\"echo foobar\").",
+            "head :- run_alias::set_entrypoint(\"bash\").",
+        ];
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
         let kind_res = mf.kinds();
         assert_eq!(kind_res.errs[0].severity, Severity::Error);
-        assert!(kind_res.errs[0].message.contains("applied to invalid kind"));
+        assert!(kind_res.errs[0].message.contains("Expected kind: Image"));
     }
 }

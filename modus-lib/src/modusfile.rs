@@ -860,10 +860,7 @@ pub mod parser {
             // this may bloat the fragment list but likely worth the convenience of
             // using '$' without escaping it
             map(tag("$"), |span: Span| {
-                FormatStringFragment::StringContent(
-                    span.into(),
-                    span.fragment().to_string(),
-                )
+                FormatStringFragment::StringContent(span.into(), span.fragment().to_string())
             }),
             map(recognized_span(format_string_content), |(span, content)| {
                 FormatStringFragment::StringContent(span, content)
@@ -1550,7 +1547,7 @@ mod tests {
                     },
                     r#" foo bar\tbaz"#.to_string(),
                 ),
-            ]
+            ],
         };
 
         assert_eq!(expected, modus_term(Span::new(case)).unwrap().1);

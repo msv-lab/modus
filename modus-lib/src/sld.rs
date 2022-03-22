@@ -386,11 +386,13 @@ impl Proof {
                         crate::analysis::Kind::Logic => {
                             if b.predicate.is_operator() {
                                 if b.predicate.0.ends_with("_begin") {
-                                    let curr_scope_end_index = find_matching_end(b, i, &p.children).expect("begin operator has an end");
+                                    let curr_scope_end_index = find_matching_end(b, i, &p.children)
+                                        .expect("begin operator has an end");
 
                                     let curr_scope_start_index = i;
                                     if prev_scope_start_index + 1 == curr_scope_start_index
-                                        && curr_scope_end_index + 1 == prev_scope_end_index {
+                                        && curr_scope_end_index + 1 == prev_scope_end_index
+                                    {
                                         // if we are directly inside the previous scope, we won't need to start a new scope
                                         dont_close.insert(prev_scope_end_index);
                                     } else {
