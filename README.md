@@ -21,8 +21,9 @@ cargo install modus
 or 
 ``` sh
 git clone https://github.com/modus-continens/modus.git
-cargo install --path ./modus --profile release
+cargo install --path ./modus/modus --profile release
 ```
+Notice that this installs the binary at `modus/modus` (whereas the lib is in `modus/modus-lib`).
 
 Going forward, there will be pre-built executables for major platforms available with every Modus release.
 
