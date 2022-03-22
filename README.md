@@ -25,3 +25,8 @@ cargo install --path ./modus --profile release
 ```
 
 Going forward, there will be pre-built executables for major platforms available with every Modus release.
+
+## Development - Custom Buildkit Frontend
+
+For development purposes, you may wish to use a `--custom-buildkit-frontend` to `modus build` an image.
+Use your `modus` installation from above and follow the instructions [here](./DEVELOPMENT.md).
