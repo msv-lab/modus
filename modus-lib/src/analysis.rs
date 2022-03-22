@@ -178,13 +178,19 @@ impl ModusSemantics for Modusfile {
 
         /// Attempts to get the predicate kind of this expression, based on the current findings
         /// of the predicate kind map.
+        ///
         /// If assertion is Some(k), then we will either assume that it is of kind k if we don't know,
         /// or we will assert it.
+        ///
+        /// If head_pred is Some(p), we assume that this expression is the body of a corresponding
+        /// rule and modify pred_kind accordingly. This is used to assist in some recursive cases,
+        /// i.e. where we know that the top level expression outcome must be some kind k.
         fn evaluate_or_assert_expression(
             expression: &Expression,
             pred_kind: &mut HashMap<Predicate, Kind>,
             clauses: &[ModusClause],
             assertion: Option<Kind>,
+            head_pred: Option<&Predicate>
         ) -> Result<Kind, Diagnostic<()>> {
             fn get_expression_possibilities(
                 table: &[(Kind, Kind, Kind)],
@@ -259,12 +265,20 @@ impl ModusSemantics for Modusfile {
                                 ));
                             }
                         }
+                        if let Some(p) = head_pred {
+                            if !pred_kind.contains_key(&p) {
+                                pred_kind.insert(p.clone(), out_kind);
+                            } else {
+                                // could enforce existing is equal to assumption here
+                            }
+                        }
                         // assert that the input expression is as expected and return out_kind if no errors
                         let _ = evaluate_or_assert_expression(
                             expr,
                             pred_kind,
                             clauses,
                             Some(inp_kind),
+                            None,
                         )?;
                         Ok(out_kind)
                     } else {
@@ -273,39 +287,53 @@ impl ModusSemantics for Modusfile {
                     }
                 }
                 Expression::And(span, true, e1, e2) => {
-                    let sem1_res = evaluate_or_assert_expression(e1, pred_kind, clauses, None);
-                    let sem2_res = evaluate_or_assert_expression(e2, pred_kind, clauses, None);
+                    let sem1_res = evaluate_or_assert_expression(e1, pred_kind, clauses, None, None);
+                    let sem2_res = evaluate_or_assert_expression(e2, pred_kind, clauses, None, None);
 
                     let possibilities = get_expression_possibilities(
                         &AND_KIND_TABLE,
-                        sem1_res.ok(),
-                        sem2_res.ok(),
+                        sem1_res.clone().ok(),
+                        sem2_res.clone().ok(),
                         assertion,
                     );
                     if possibilities.len() == 1 {
                         let possibility = possibilities[0];
+
+                        if let Some(p) = head_pred {
+                            if !pred_kind.contains_key(&p) {
+                                pred_kind.insert(p.clone(), possibility.2);
+                            } else {
+                                // could enforce existing is equal to assumption here
+                            }
+                        }
+
                         let _ = evaluate_or_assert_expression(
                             e1,
                             pred_kind,
                             clauses,
                             Some(possibility.0),
+                            None,
                         )?;
                         let _ = evaluate_or_assert_expression(
                             e2,
                             pred_kind,
                             clauses,
                             Some(possibility.1),
+                            None,
                         )?;
                         Ok(possibility.2)
                     } else {
-                        let sem1 = evaluate_or_assert_expression(e1, pred_kind, clauses, None)?;
-                        let sem2 = evaluate_or_assert_expression(e2, pred_kind, clauses, None)?;
-                        Err(generate_err_diagnostic(span, e1, e2, &sem1, &sem2))
+                        match (sem1_res, sem2_res) {
+                            (Ok(sem1), Ok(sem2)) => {
+                                Err(generate_err_diagnostic(span, e1, e2, &sem1, &sem2))
+                            }
+                            (Err(e), _) | (_, Err(e)) => Err(e),
+                        }
                     }
                 }
                 Expression::Or(span, true, e1, e2) => {
-                    let sem1_res = evaluate_or_assert_expression(e1, pred_kind, clauses, assertion);
-                    let sem2_res = evaluate_or_assert_expression(e2, pred_kind, clauses, assertion);
+                    let sem1_res = evaluate_or_assert_expression(e1, pred_kind, clauses, assertion, None);
+                    let sem2_res = evaluate_or_assert_expression(e2, pred_kind, clauses, assertion, None);
 
                     let possibilities = get_expression_possibilities(
                         &OR_KIND_TABLE,
@@ -315,17 +343,28 @@ impl ModusSemantics for Modusfile {
                     );
                     if possibilities.len() == 1 {
                         let possibility = possibilities[0];
+
+                        if let Some(p) = head_pred {
+                            if !pred_kind.contains_key(&p) {
+                                pred_kind.insert(p.clone(), possibility.2);
+                            } else {
+                                // could enforce existing is equal to assumption here
+                            }
+                        }
+
                         let _ = evaluate_or_assert_expression(
                             e1,
                             pred_kind,
                             clauses,
                             Some(possibility.0),
+                            None,
                         )?;
                         let _ = evaluate_or_assert_expression(
                             e2,
                             pred_kind,
                             clauses,
                             Some(possibility.1),
+                            None,
                         )?;
                         Ok(possibility.2)
                     } else {
@@ -416,6 +455,7 @@ impl ModusSemantics for Modusfile {
                     &mut pred_kind,
                     &self.0,
                     maybe_existing_kind,
+                    Some(&c.head.predicate),
                 );
                 if let Ok(k) = k_res {
                     if maybe_existing_kind == None {
@@ -440,6 +480,7 @@ impl ModusSemantics for Modusfile {
                 &mut pred_kind,
                 &self.0,
                 assertion,
+                Some(&c.head.predicate),
             ) {
                 Ok(kind) => {
                     let pred = &c.head.predicate;
@@ -898,26 +939,24 @@ mod tests {
         );
     }
 
-    // Example of test case that doesn't work atm.
-    // TODO: implement this
-    // #[test]
-    // fn handles_disjunct_recursion_through_presumptions() {
-    //     let clauses = vec![
-    //         "foo(mode) :- ( \
-    //            mode=\"prod\",foo(\"dev\"),run(\"make prod\") \
-    //          ; \
-    //            mode=\"dev\",copy(\".\", \"/app\"),run(\"echo hello\") \
-    //          ).",
-    //     ];
-    //     let mf: Modusfile = clauses.join("\n").parse().unwrap();
+    #[test]
+    fn handles_disjunct_recursion_through_presumptions() {
+        let clauses = vec![
+            "foo(mode) :- ( \
+               mode=\"prod\",foo(\"dev\"),run(\"make prod\") \
+             ; \
+               mode=\"dev\",copy(\".\", \"/app\"),run(\"echo hello\") \
+             ).",
+        ];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
-    //     let kind_res = mf.kinds();
-    //     assert_eq!(kind_res.errs.len(), 0);
-    //     assert_eq!(
-    //         Some(&Kind::Layer),
-    //         kind_res.pred_kind.get(&Predicate("foo".into()))
-    //     );
-    // }
+        let kind_res = mf.kinds();
+        assert_eq!(kind_res.errs.len(), 0);
+        assert_eq!(
+            Some(&Kind::Layer),
+            kind_res.pred_kind.get(&Predicate("foo".into()))
+        );
+    }
 
     #[test]
     fn warns_recursion() {
