@@ -9,3 +9,25 @@ Modus is a language for building OCI/Docker container images. Modus uses logic p
 - [Discord community](https://discord.gg/bXxwfVE9Kj)
 
 Modus uses semantic versioning; until version 1.0 is declared, breaking changes are possible. The current version, 0.1, is a preview release. We welcome bug reports and feature requests submitted through [GitHub Issues](https://github.com/mechtaev/modus/issues).
+
+# Installation
+
+Building Modus requires the [latest stable version of Rust](https://www.whatrustisit.com/), although
+versions 1.59+ may also work.
+
+``` sh
+cargo install modus
+```
+or 
+``` sh
+git clone https://github.com/modus-continens/modus.git
+cargo install --path ./modus/modus --profile release
+```
+Notice that this installs the binary at `modus/modus` (whereas the lib is in `modus/modus-lib`).
+
+Going forward, there will be pre-built executables for major platforms available with every Modus release.
+
+## Development - Custom Buildkit Frontend
+
+For development purposes, you may wish to use a `--custom-buildkit-frontend` to `modus build` an image.
+Use your `modus` installation from above and follow the instructions [here](./DEVELOPMENT.md).
