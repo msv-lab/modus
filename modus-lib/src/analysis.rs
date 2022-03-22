@@ -190,7 +190,7 @@ impl ModusSemantics for Modusfile {
             pred_kind: &mut HashMap<Predicate, Kind>,
             clauses: &[ModusClause],
             assertion: Option<Kind>,
-            head_pred: Option<&Predicate>
+            head_pred: Option<&Predicate>,
         ) -> Result<Kind, Diagnostic<()>> {
             fn get_expression_possibilities(
                 table: &[(Kind, Kind, Kind)],
@@ -287,8 +287,10 @@ impl ModusSemantics for Modusfile {
                     }
                 }
                 Expression::And(span, true, e1, e2) => {
-                    let sem1_res = evaluate_or_assert_expression(e1, pred_kind, clauses, None, None);
-                    let sem2_res = evaluate_or_assert_expression(e2, pred_kind, clauses, None, None);
+                    let sem1_res =
+                        evaluate_or_assert_expression(e1, pred_kind, clauses, None, None);
+                    let sem2_res =
+                        evaluate_or_assert_expression(e2, pred_kind, clauses, None, None);
 
                     let possibilities = get_expression_possibilities(
                         &AND_KIND_TABLE,
@@ -332,8 +334,10 @@ impl ModusSemantics for Modusfile {
                     }
                 }
                 Expression::Or(span, true, e1, e2) => {
-                    let sem1_res = evaluate_or_assert_expression(e1, pred_kind, clauses, assertion, None);
-                    let sem2_res = evaluate_or_assert_expression(e2, pred_kind, clauses, assertion, None);
+                    let sem1_res =
+                        evaluate_or_assert_expression(e1, pred_kind, clauses, assertion, None);
+                    let sem2_res =
+                        evaluate_or_assert_expression(e2, pred_kind, clauses, assertion, None);
 
                     let possibilities = get_expression_possibilities(
                         &OR_KIND_TABLE,
