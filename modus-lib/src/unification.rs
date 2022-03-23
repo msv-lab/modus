@@ -46,7 +46,15 @@ pub trait RenameWithSubstitution<T> {
 impl Substitute<IRTerm> for IRTerm {
     type Output = IRTerm;
     fn substitute(&self, s: &Substitution<IRTerm>) -> Self::Output {
-        s.get(self).unwrap_or(self).clone()
+        // check hashmap first, in case intention was to replace entire
+        // the IRTerm::Array
+        if let Some(v) = s.get(self) {
+            v.clone()
+        } else if let IRTerm::Array(ts) = self {
+            IRTerm::Array(ts.iter().map(|t| t.substitute(s)).collect())
+        } else {
+            self.clone()
+        }
     }
 }
 
@@ -279,5 +287,19 @@ mod tests {
         assert!(l != m);
         assert!(m.args[0] == m.args[1]);
         assert!(m.args[0] != m.args[2]);
+    }
+
+    #[test]
+    #[serial]
+    fn complex_renaming() {
+        let l: logic::Literal = "a([ X, Y ], X)".parse().unwrap();
+        let (m, _) = l.rename_with_sub();
+        assert!(l != m);
+        if let IRTerm::Array(ts) = &m.args[0] {
+            assert_eq!(ts[0], m.args[1]);
+            assert_ne!(ts[1], m.args[1]);
+        } else {
+            panic!()
+        }
     }
 }

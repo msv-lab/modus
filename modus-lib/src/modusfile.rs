@@ -263,7 +263,7 @@ impl From<ModusTerm> for logic::IRTerm {
             }
             ModusTerm::UserVariable(v) => logic::IRTerm::UserVariable(v),
             ModusTerm::AnonymousVariable => sld::Auxiliary::aux(true),
-            ModusTerm::Array(_, xs) => todo!(),
+            ModusTerm::Array(_, _) => unimplemented!(),
         }
     }
 }

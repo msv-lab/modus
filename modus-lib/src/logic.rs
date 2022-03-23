@@ -62,6 +62,7 @@ impl Rename<IRTerm> for IRTerm {
     fn rename(&self) -> IRTerm {
         match self {
             IRTerm::Constant(_) => (*self).clone(),
+            IRTerm::Array(ts) => IRTerm::Array(ts.iter().map(|t| t.rename()).collect()),
             _ => {
                 let index = AVAILABLE_VARIABLE_INDEX.fetch_add(1, Ordering::SeqCst);
                 IRTerm::RenamedVariable(index, Box::new((*self).clone()))
@@ -481,8 +482,17 @@ pub mod parser {
         literal_identifier(i)
     }
 
+    fn array_term(i: Span) -> IResult<Span, Vec<IRTerm>> {
+        delimited(
+            terminated(tag("["), multispace0),
+            separated_list0(delimited(multispace0, tag(","), multispace0), term),
+            preceded(multispace0, tag("]")),
+        )(i)
+    }
+
     pub fn term(i: Span) -> IResult<Span, IRTerm> {
         alt((
+            map(array_term, IRTerm::Array),
             map(constant, |s| IRTerm::Constant(s.fragment().to_string())),
             map(is_a("_"), |_| sld::Auxiliary::aux(true)),
             map(variable, |s| IRTerm::UserVariable(s.fragment().to_string())),

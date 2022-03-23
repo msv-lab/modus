@@ -700,7 +700,7 @@ fn head_term_check(mf: &Modusfile) -> Result<(), Vec<Diagnostic<()>>> {
             match t {
                 ModusTerm::FormatString { position, .. } => {
                     return Err(generate_f_string_diag(position));
-                },
+                }
                 ModusTerm::Array(_, ts) => check_no_f_string(ts)?,
                 _ => (),
             }
@@ -720,7 +720,7 @@ fn head_term_check(mf: &Modusfile) -> Result<(), Vec<Diagnostic<()>>> {
                     if let Err(d) = check_no_f_string(ts) {
                         diags.push(d)
                     }
-                },
+                }
                 _ => (),
             }
         }
