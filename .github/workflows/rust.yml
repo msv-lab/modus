@@ -1,8 +1,10 @@
-name: Rust
+name: Modus Build and Release Workflow
 
 on:
   push:
     branches: [ main, ci ]
+    tags:
+      - "*.*.*"
   pull_request:
     branches: [ main ]
 
@@ -10,20 +12,148 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  build-x86_64:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
 
+    # For some reason, native musl toolchain (apt musl-tools) doesn't work
+    # (produce binaries that just segfault/crash with "no such file")
+    - name: Build tools setup
+      run: >
+        rustup target add x86_64-unknown-linux-musl &&
+        wget https://more.musl.cc/x86_64-linux-musl/x86_64-linux-musl-cross.tgz -O /tmp/musl.tgz &&
+        (
+          cd ~/ &&
+          tar xf /tmp/musl.tgz &&
+          cd x86_64-linux-musl-cross &&
+          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=$(pwd)/bin/x86_64-linux-musl-cc" >> $GITHUB_ENV &&
+          echo "CC_x86_64_unknown_linux_musl=$(pwd)/bin/x86_64-linux-musl-cc" >> $GITHUB_ENV
+        ) &&
+        export $(cat "$GITHUB_ENV")
+
+    - name: Compile
+      run: cargo build --verbose --release --target x86_64-unknown-linux-musl
+
+    - name: Upload binary
+      uses: actions/upload-artifact@v3
+      with:
+        name: x86_64-linux-musl
+        path: |
+          target/x86_64-unknown-linux-musl/release/modus
+          target/x86_64-unknown-linux-musl/release/buildkit-frontend
+
+
+  build-aarch64:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+
+    - name: Build tools setup
+      run: >
+        rustup target add aarch64-unknown-linux-musl &&
+        wget https://more.musl.cc/x86_64-linux-musl/aarch64-linux-musl-cross.tgz -O /tmp/musl.tgz &&
+        (
+          cd ~/ &&
+          tar xf /tmp/musl.tgz &&
+          cd aarch64-linux-musl-cross &&
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=$(pwd)/bin/aarch64-linux-musl-cc" >> $GITHUB_ENV &&
+          echo "CC_aarch64_unknown_linux_musl=$(pwd)/bin/aarch64-linux-musl-cc" >> $GITHUB_ENV
+        ) &&
+        export $(cat "$GITHUB_ENV")
+
+    - name: Compile
+      run: cargo build --verbose --release --target aarch64-unknown-linux-musl
+
+    - name: Upload binary
+      uses: actions/upload-artifact@v3
+      with:
+        name: aarch64-linux-musl
+        path: |
+          target/aarch64-unknown-linux-musl/release/modus
+          target/aarch64-unknown-linux-musl/release/buildkit-frontend
+
+  debug-build-and-test:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
+    - name: Checkout
+      uses: actions/checkout@v2
+
     - name: Debug Build
       run: cargo build --verbose
+
     - name: Run tests
       run: cargo test --verbose
-    - name: Generating Dockerfile from Modusfile
+
+    - name: Upload
+      uses: actions/upload-artifact@v3
+      with:
+        name: debug-build
+        path: target/debug/modus
+
+
+  build-image-and-test:
+    runs-on: ubuntu-latest
+    needs: [ build-x86_64, build-aarch64, debug-build-and-test ]
+
+    steps:
+
+    - name: Checkout
+      uses: actions/checkout@v2
+
+    - name: Download previously built binaries
+      uses: actions/download-artifact@v3
+
+    - run: |
+        set -e;
+        for name in *-linux-musl; do
+          chmod +x "$name/modus" "$name/buildkit-frontend";
+          cp "$name/modus" "modus-$name";
+        done;
+        chmod +x debug-build/modus;
+
+    - name: Quick smoke check
+      run: |
+        set -xe;
+        ./x86_64-linux-musl/modus --version;
+        ./debug-build/modus --version;
+
+    - name: Upload modus binaries for all arch
+      uses: actions/upload-artifact@v3
+      with:
+        name: modus-all
+        path: |
+          modus-*-linux-*
+
+    - name: Generate frontend image
+      run: |
+        set -e;
+        mkdir /tmp/frontend;
+        DOCKERFILE="/tmp/frontend/Dockerfile";
+        echo 'FROM alpine' >> $DOCKERFILE;
+        echo 'ARG TARGETARCH' >> $DOCKERFILE;
+        echo 'COPY "$TARGETARCH" "buildkit-frontend"' >> $DOCKERFILE;
+        echo 'ENTRYPOINT ["/buildkit-frontend"]' >> $DOCKERFILE;
+        cp aarch64-linux-musl/buildkit-frontend /tmp/frontend/arm64;
+        cp x86_64-linux-musl/buildkit-frontend /tmp/frontend/amd64;
+        cd /tmp/frontend;
+        echo "SHORT_SHA=$(echo $GITHUB_SHA | head -c 10)" >> $GITHUB_ENV;
+        echo "IMAGE_BASE=ghcr.io/$GITHUB_REPOSITORY-buildkit-frontend" >> $GITHUB_ENV;
+        export $(cat "$GITHUB_ENV");
+        echo "IMAGE_REF=$IMAGE_BASE:$SHORT_SHA" >> $GITHUB_ENV;
+        export $(cat "$GITHUB_ENV");
+        echo Image: $IMAGE_REF;
+        cat $DOCKERFILE;
+        docker buildx build --platform linux/amd64 . -o type=docker -t $IMAGE_REF;
+
+    - name: System tests
       run: >
-        target/debug/modus transpile Modusfile 'all("frontend", "release")' > /tmp/modus-frontend.Dockerfile && cat /tmp/modus-frontend.Dockerfile &&
-        target/debug/modus transpile Modusfile 'all("modus", "release")' > /tmp/modus.Dockerfile
+        export MODUS_EXECUTABLE=$PWD/debug-build/modus MODUS_BUILDKIT_FRONTEND=$IMAGE_REF &&
+        cd test && python -m unittest discover && cd ..
+
     - name: Login to GitHub Container Registry
       uses: docker/login-action@v1
       if: github.event_name != 'pull_request'
@@ -31,33 +161,23 @@ jobs:
         registry: ghcr.io
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-    - name: Docker build frontend
-      run: >
-        SHORT_SHA=$(echo $GITHUB_SHA | head -c 10) &&
-        IMAGE_BASE=ghcr.io/$GITHUB_REPOSITORY-buildkit-frontend &&
-        IMAGE_REF=$IMAGE_BASE:$SHORT_SHA &&
-        echo "IMAGE_BASE=$IMAGE_BASE" >> $GITHUB_ENV &&
-        echo "IMAGE_REF=$IMAGE_REF" >> $GITHUB_ENV &&
-        docker build -t $IMAGE_REF -f /tmp/modus-frontend.Dockerfile . &&
-        docker tag $IMAGE_REF $IMAGE_BASE:latest
-    - name: System tests
-      run: >
-        export MODUS_EXECUTABLE=$PWD/target/debug/modus MODUS_BUILDKIT_FRONTEND=$IMAGE_REF &&
-        cd test && python -m unittest discover && cd ..
-    - name: Extract binary release from docker image
-      run: >
-        export ARTIFACT_NAME=modus.x86_64-linux-musl &&
-        echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV &&
-        docker build -t modus -f /tmp/modus.Dockerfile . &&
-        docker run --rm -v $(pwd):/mnt --entrypoint sh modus -c "cp ./modus /mnt/$ARTIFACT_NAME" &&
-        ./$ARTIFACT_NAME --version
-    - name: Publish image
-      if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-      run: >
-        docker push $IMAGE_REF &&
-        docker push $IMAGE_BASE:latest
-    - name: Upload binary
-      uses: actions/upload-artifact@v3
+
+    - name: Build and publish the rest of the images
+      if: github.event_name != 'pull_request'
+      run: |
+        set -e;
+        cd /tmp/frontend;
+        docker buildx create --use;
+        docker buildx build --platform linux/arm64,linux/amd64 . -t $IMAGE_REF --push;
+        docker buildx build --platform linux/arm64,linux/amd64 . -t $IMAGE_BASE:latest --push;
+
+    - name: Make GitHub release
+      if: github.event_name == 'push' && github.ref_type == 'tag'
+      uses: "marvinpinto/action-automatic-releases@latest"
       with:
-        name: ${{ env.ARTIFACT_NAME }}
-        path: ${{ env.ARTIFACT_NAME }}
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        prerelease: true
+        draft: true
+        title: "${{ github.ref_name }}"
+        files: |
+          modus-*-linux-*
