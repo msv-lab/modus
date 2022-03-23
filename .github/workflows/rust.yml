@@ -3,6 +3,8 @@ name: Rust
 on:
   push:
     branches: [ main, ci, arm ]
+    tags:
+      - "*.*.*"
   pull_request:
     branches: [ main ]
 
@@ -168,3 +170,16 @@ jobs:
         docker buildx create --use;
         docker buildx build --platform linux/arm64,linux/amd64 . -t $IMAGE_REF --push;
         docker buildx build --platform linux/arm64,linux/amd64 . -t $IMAGE_BASE:latest --push;
+
+    - name: Make GitHub release
+      if: github.event_name == 'push' && github.ref_type == 'tag'
+      uses: "marvinpinto/action-automatic-releases@latest"
+      with:
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        prerelease: true
+        draft: true
+        title: "${{ github.ref_name }}"
+        body: |
+          This release is automatically generated from the build action.
+        files: |
+          modus-*-linux-*
