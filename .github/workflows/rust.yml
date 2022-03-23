@@ -67,18 +67,34 @@ jobs:
           target/aarch64-unknown-linux-musl/release/modus
           target/aarch64-unknown-linux-musl/release/buildkit-frontend
 
-  build-image-and-test:
+  debug-build-and-test:
     runs-on: ubuntu-latest
-    needs: [ build-x86_64, build-aarch64 ]
 
     steps:
-    - uses: actions/checkout@v2
+    - name: Checkout
+      uses: actions/checkout@v2
 
     - name: Debug Build
       run: cargo build --verbose
 
     - name: Run tests
       run: cargo test --verbose
+
+    - name: Upload
+      uses: actions/upload-artifact@v3
+      with:
+        name: debug-build
+        path: target/debug/modus
+
+
+  build-image-and-test:
+    runs-on: ubuntu-latest
+    needs: [ build-x86_64, build-aarch64, debug-build-and-test ]
+
+    steps:
+
+    - name: Checkout
+      uses: actions/checkout@v2
 
     - name: Download previously built binaries
       uses: actions/download-artifact@v3
@@ -113,11 +129,13 @@ jobs:
         echo "IMAGE_BASE=ghcr.io/$GITHUB_REPOSITORY-buildkit-frontend" >> $GITHUB_ENV;
         echo "IMAGE_REF=$IMAGE_BASE:$SHORT_SHA" >> $GITHUB_ENV;
         export $(cat "$GITHUB_ENV");
+        echo Image: $IMAGE_REF;
+        cat $DOCKERFILE;
         docker buildx build --platform linux/amd64 . -o type=docker -t $IMAGE_REF;
 
     - name: System tests
       run: >
-        export MODUS_EXECUTABLE=$PWD/target/debug/modus MODUS_BUILDKIT_FRONTEND=$IMAGE_REF &&
+        export MODUS_EXECUTABLE=$PWD/debug-build/modus MODUS_BUILDKIT_FRONTEND=$IMAGE_REF &&
         cd test && python -m unittest discover && cd ..
 
     - name: Login to GitHub Container Registry
