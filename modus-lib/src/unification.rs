@@ -190,34 +190,50 @@ pub fn compose_extend(l: &Substitution<IRTerm>, r: &Substitution<IRTerm>) -> Sub
 
 impl Literal<IRTerm> {
     pub fn unify(&self, other: &Literal<IRTerm>) -> Option<Substitution<IRTerm>> {
-        if self.signature() != other.signature() {
-            return None;
-        }
-        let mut s = Substitution::<IRTerm>::new();
-        for (i, self_term) in self.args.iter().enumerate() {
-            let other_term = &other.args[i];
-            let self_term_subs = self_term.substitute(&s);
-            let other_term_subs = other_term.substitute(&s);
-            if self_term_subs != other_term_subs {
-                match (self_term_subs.clone(), other_term_subs.clone()) {
-                    // cannot unify if they are both different constants
-                    (IRTerm::Constant(_), IRTerm::Constant(_)) => return None,
+        fn unify_arglist(current: &[IRTerm], other: &[IRTerm]) -> Option<Substitution<IRTerm>> {
+            let mut s = Substitution::<IRTerm>::new();
+            for (self_term, other_term) in current.iter().zip(other) {
+                let self_term_subs = self_term.substitute(&s);
+                let other_term_subs = other_term.substitute(&s);
+                if self_term_subs != other_term_subs {
+                    match (self_term_subs.clone(), other_term_subs.clone()) {
+                        // cannot unify if they are both different constants
+                        (IRTerm::Constant(_), IRTerm::Constant(_)) => return None,
 
-                    (IRTerm::Constant(_), v) => {
-                        let mut upd = Substitution::<IRTerm>::new();
-                        upd.insert(v.clone(), self_term_subs.clone());
-                        s = compose_extend(&s, &upd);
-                    }
-                    // FIXME
-                    (v1, v2) => {
-                        let mut upd = Substitution::<IRTerm>::new();
-                        upd.insert(v1.clone(), v2.clone());
-                        s = compose_extend(&s, &upd);
+                        (IRTerm::Array(terms1), IRTerm::Array(terms2)) => {
+                            if terms1.len() == terms2.len() {
+                                if let Some(new_sub) = unify_arglist(&terms1, &terms2) {
+                                    s = compose_extend(&s, &new_sub);
+                                } else {
+                                    return None;
+                                }
+                            } else {
+                                return None;
+                            }
+                        }
+                        // only valid branch of an array is if they're both arrays, as caught above
+                        (IRTerm::Array(_), _) | (_, IRTerm::Array(_)) => return None,
+
+                        (IRTerm::Constant(_), v) => {
+                            let mut upd = Substitution::<IRTerm>::new();
+                            upd.insert(v.clone(), self_term_subs.clone());
+                            s = compose_extend(&s, &upd);
+                        }
+                        (v1, v2) => {
+                            let mut upd = Substitution::<IRTerm>::new();
+                            upd.insert(v1.clone(), v2.clone());
+                            s = compose_extend(&s, &upd);
+                        }
                     }
                 }
             }
+            Some(s)
         }
-        Some(s)
+
+        if self.signature() != other.signature() {
+            return None;
+        }
+        unify_arglist(&self.args, &other.args)
     }
 }
 
@@ -260,6 +276,24 @@ mod tests {
         assert_eq!(
             mgu.get(&logic::IRTerm::UserVariable("W".into())),
             Some(&logic::IRTerm::UserVariable("U".into()))
+        );
+    }
+
+    #[test]
+    fn array_unifier() {
+        let l: logic::Literal = "p([X, \"b\"], X)".parse().unwrap();
+        let m: logic::Literal = "p([\"a\", Y], X)".parse().unwrap();
+        let result = l.unify(&m);
+        assert!(result.is_some());
+        let mgu = result.unwrap();
+        assert!(l.substitute(&mgu).eq_ignoring_position(&m.substitute(&mgu)));
+        assert_eq!(
+            mgu.get(&logic::IRTerm::UserVariable("X".into())),
+            Some(&logic::IRTerm::Constant("a".into()))
+        );
+        assert_eq!(
+            mgu.get(&logic::IRTerm::UserVariable("Y".into())),
+            Some(&logic::IRTerm::Constant("b".into()))
         );
     }
 
