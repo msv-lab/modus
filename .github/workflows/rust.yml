@@ -16,12 +16,19 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v2
 
+    # For some reason, native musl toolchain (apt musl-tools) doesn't work
+    # (produce binaries that just segfault/crash with "no such file")
     - name: Build tools setup
       run: >
-        sudo apt update && sudo apt install -y musl-tools &&
         rustup target add x86_64-unknown-linux-musl &&
-        echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=/usr/bin/musl-gcc" >> $GITHUB_ENV &&
-        echo "CC_x86_64_unknown_linux_musl=/usr/bin/musl-gcc" >> $GITHUB_ENV &&
+        wget https://more.musl.cc/x86_64-linux-musl/x86_64-linux-musl-cross.tgz -O /tmp/musl.tgz &&
+        (
+          cd ~/ &&
+          tar xf /tmp/musl.tgz &&
+          cd x86_64-linux-musl-cross &&
+          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=$(pwd)/bin/x86_64-linux-musl-cc" >> $GITHUB_ENV &&
+          echo "CC_x86_64_unknown_linux_musl=$(pwd)/bin/x86_64-linux-musl-cc" >> $GITHUB_ENV
+        ) &&
         export $(cat "$GITHUB_ENV")
 
     - name: Compile
@@ -44,7 +51,6 @@ jobs:
 
     - name: Build tools setup
       run: >
-        sudo apt update && sudo apt install -y musl-tools &&
         rustup target add aarch64-unknown-linux-musl &&
         wget https://more.musl.cc/x86_64-linux-musl/aarch64-linux-musl-cross.tgz -O /tmp/musl.tgz &&
         (
@@ -105,6 +111,13 @@ jobs:
           chmod +x "$name/modus" "$name/buildkit-frontend";
           cp "$name/modus" "modus-$name";
         done;
+        chmod +x debug-build/modus;
+
+    - name: Quick smoke check
+      run: |
+        set -xe;
+        ./x86_64-linux-musl/modus --version;
+        ./debug-build/modus --version;
 
     - name: Upload modus binaries for all arch
       uses: actions/upload-artifact@v3
