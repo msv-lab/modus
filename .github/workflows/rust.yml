@@ -109,7 +109,7 @@ jobs:
     - name: Upload modus binaries for all arch
       uses: actions/upload-artifact@v3
       with:
-        name: modus
+        name: modus-all
         path: |
           modus-*-linux-*
 
@@ -127,6 +127,7 @@ jobs:
         cd /tmp/frontend;
         echo "SHORT_SHA=$(echo $GITHUB_SHA | head -c 10)" >> $GITHUB_ENV;
         echo "IMAGE_BASE=ghcr.io/$GITHUB_REPOSITORY-buildkit-frontend" >> $GITHUB_ENV;
+        export $(cat "$GITHUB_ENV");
         echo "IMAGE_REF=$IMAGE_BASE:$SHORT_SHA" >> $GITHUB_ENV;
         export $(cat "$GITHUB_ENV");
         echo Image: $IMAGE_REF;
