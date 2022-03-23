@@ -2,7 +2,7 @@ name: Modus Build and Release Workflow
 
 on:
   push:
-    branches: [ main, ci, arm ]
+    branches: [ main, ci ]
     tags:
       - "*.*.*"
   pull_request:
@@ -179,7 +179,5 @@ jobs:
         prerelease: true
         draft: true
         title: "${{ github.ref_name }}"
-        body: |
-          This release is automatically generated from the build action.
         files: |
           modus-*-linux-*
