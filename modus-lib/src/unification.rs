@@ -200,7 +200,7 @@ impl Literal<IRTerm> {
                         upd.insert(v.clone(), self_term_subs.clone());
                         s = compose_extend(&s, &upd);
                     }
-
+                    // FIXME
                     (v1, v2) => {
                         let mut upd = Substitution::<IRTerm>::new();
                         upd.insert(v1.clone(), v2.clone());

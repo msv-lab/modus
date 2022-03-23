@@ -192,6 +192,7 @@ pub enum ModusTerm {
     },
     UserVariable(String),
     AnonymousVariable,
+    Array(SpannedPosition, Vec<ModusTerm>),
 }
 
 impl ModusTerm {
@@ -200,6 +201,13 @@ impl ModusTerm {
             ModusTerm::FormatString { .. } | ModusTerm::UserVariable(_) => true,
             _ => false,
         }
+    }
+
+    /// Returns `true` if the modus term is [`FormatString`].
+    ///
+    /// [`FormatString`]: ModusTerm::FormatString
+    pub fn is_format_string(&self) -> bool {
+        matches!(self, Self::FormatString { .. })
     }
 }
 
@@ -221,6 +229,14 @@ impl fmt::Display for ModusTerm {
                     .join("")
             ),
             ModusTerm::AnonymousVariable => write!(f, "_"),
+            ModusTerm::Array(_, ts) => write!(
+                f,
+                "[{}]",
+                ts.iter()
+                    .map(|t| t.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
         }
     }
 }
@@ -247,6 +263,7 @@ impl From<ModusTerm> for logic::IRTerm {
             }
             ModusTerm::UserVariable(v) => logic::IRTerm::UserVariable(v),
             ModusTerm::AnonymousVariable => sld::Auxiliary::aux(true),
+            ModusTerm::Array(_, xs) => todo!(),
         }
     }
 }
@@ -503,7 +520,7 @@ pub mod parser {
     use nom::character::complete::{multispace0, none_of, one_of};
     use nom::combinator::{cut, opt, recognize};
     use nom::error::context;
-    use nom::multi::{many0_count, many1, separated_list1};
+    use nom::multi::{many0_count, many1, separated_list0, separated_list1};
     use nom::sequence::{pair, tuple};
     use nom::{
         branch::alt,
@@ -897,9 +914,20 @@ pub mod parser {
         )(i)
     }
 
+    fn modus_array_term(i: Span) -> IResult<Span, Vec<ModusTerm>> {
+        delimited(
+            terminated(tag("["), token_sep0),
+            separated_list0(delimited(token_sep0, tag(","), token_sep0), modus_term),
+            preceded(token_sep0, tag("]")),
+        )(i)
+    }
+
     pub fn modus_term(i: Span) -> IResult<Span, ModusTerm> {
         alt((
             map(modus_const, ModusTerm::Constant),
+            map(recognized_span(modus_array_term), |(span, terms)| {
+                ModusTerm::Array(span, terms)
+            }),
             map(modus_format_string, |(position, fragments)| {
                 ModusTerm::FormatString {
                     position,
@@ -1631,6 +1659,35 @@ mod tests {
             )],
         };
 
+        assert_eq!(expected, modus_term(Span::new(case)).unwrap().1);
+    }
+
+    #[test]
+    fn modus_empty_array_term() {
+        let case = "[]";
+        let expected = ModusTerm::Array(
+            SpannedPosition {
+                offset: 0,
+                length: 2,
+            },
+            Vec::new(),
+        );
+        assert_eq!(expected, modus_term(Span::new(case)).unwrap().1);
+    }
+
+    #[test]
+    fn modus_simple_array_term() {
+        let case = r#"[ "javac", javacParam ]"#;
+        let expected = ModusTerm::Array(
+            SpannedPosition {
+                offset: 0,
+                length: 23,
+            },
+            vec![
+                ModusTerm::Constant("javac".to_string()),
+                ModusTerm::UserVariable("javacParam".to_string()),
+            ],
+        );
         assert_eq!(expected, modus_term(Span::new(case)).unwrap().1);
     }
 }

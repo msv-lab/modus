@@ -40,6 +40,14 @@ impl fmt::Display for IRTerm {
         match self {
             IRTerm::Constant(s) => write!(f, "\"{}\"", s),
             IRTerm::UserVariable(s) => write!(f, "{}", s),
+            IRTerm::Array(ts) => write!(
+                f,
+                "[{}]",
+                ts.iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             // there may be aux variables after translating to IR
             IRTerm::AuxiliaryVariable(i) => write!(f, "__AUX_{}", i),
             IRTerm::RenamedVariable(i, t) => write!(f, "{}_{}", t, i),
@@ -119,6 +127,7 @@ impl From<String> for Predicate {
 pub enum IRTerm {
     Constant(String),
     UserVariable(String),
+    Array(Vec<IRTerm>),
 
     /// Primarily used to establish f-string constraints.
     AuxiliaryVariable(u32),
@@ -249,11 +258,20 @@ pub trait Ground {
 
 impl IRTerm {
     pub fn variables(&self, include_anonymous: bool) -> HashSet<IRTerm> {
-        // the 'variables' of an IRTerm is just itself, if it's not a constant
         let mut set = HashSet::<IRTerm>::new();
-        if let IRTerm::Constant(_) = self {
-        } else if !self.is_anonymous_variable() || include_anonymous {
-            set.insert(self.clone());
+        match (self, include_anonymous) {
+            (IRTerm::AnonymousVariable(_), true) => {
+                set.insert(self.clone());
+            }
+            (IRTerm::Array(ts), b) => {
+                set.extend(ts.iter().flat_map(|t| t.variables(b)));
+            }
+            (IRTerm::AuxiliaryVariable(_), _)
+            | (IRTerm::RenamedVariable(..), _)
+            | (IRTerm::UserVariable(_), _) => {
+                set.insert(self.clone());
+            }
+            (IRTerm::Constant(_), _) | (IRTerm::AnonymousVariable(_), false) => (),
         }
         set
     }

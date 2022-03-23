@@ -146,6 +146,7 @@ fn translate_term(t: &ModusTerm) -> (IRTerm, Vec<logic::Literal>) {
         }
         ModusTerm::UserVariable(v) => (IRTerm::UserVariable(v.to_owned()), Vec::new()),
         ModusTerm::AnonymousVariable => (sld::Auxiliary::aux(true), Vec::new()),
+        ModusTerm::Array(position, xs) => todo!(),
     }
 }
 
