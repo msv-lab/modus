@@ -16,7 +16,7 @@
 
 use std::{fmt::Display, io::{Write, self}, path::Path};
 
-use serde::Serialize;
+use serde::{Serialize, ser::SerializeSeq};
 
 use modus_lib::{
     imagegen::BuildPlan,
@@ -25,10 +25,27 @@ use modus_lib::{
 
 pub type BuildResult = Vec<Image>;
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub enum ConstantTerm {
     Constant(String),
     Array(Vec<String>),
+}
+
+impl Serialize for ConstantTerm {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer {
+        match self {
+            ConstantTerm::Constant(c) => serializer.serialize_str(c),
+            ConstantTerm::Array(cs) => {
+                let mut seq = serializer.serialize_seq(Some(cs.len()))?;
+                for c in cs {
+                    seq.serialize_element(c)?;
+                }
+                seq.end()
+            },
+        }
+    }
 }
 
 #[derive(Serialize, Debug, Clone)]

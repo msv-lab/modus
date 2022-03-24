@@ -175,4 +175,4 @@ class TestSolver(ModusTestCase):
 
         images = self.build(md, 'app(["sh", "-c", "ash"])', should_succeed=True)
         self.assertEqual(len(images), 1)
-        self.assertIn(Fact("app", ('["sh", "-c", "ash"]',)), images)
+        self.assertIn(Fact("app", (("sh", "-c", "ash"),)), images)

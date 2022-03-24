@@ -103,7 +103,7 @@ class ModusTestCase(unittest.TestCase):
                     objects = json.load(StringIO(result.stdout))
                     images = { fact:img
                             for (fact, img)
-                            in [(Fact(obj["predicate"], tuple(obj["args"])), Image(obj["digest"]))
+                            in [(Fact(obj["predicate"], tuple([tuple(arg) if type(arg) == list else arg for arg in obj["args"]])), Image(obj["digest"]))
                                 for obj
                                 in objects] }
                     self._images.update([img.digest for img in images.values()])
