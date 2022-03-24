@@ -26,9 +26,15 @@ use modus_lib::{
 pub type BuildResult = Vec<Image>;
 
 #[derive(Serialize, Debug, Clone)]
+pub enum ConstantTerm {
+    Constant(String),
+    Array(Vec<String>),
+}
+
+#[derive(Serialize, Debug, Clone)]
 pub struct ConstantLiteral {
     pub predicate: String,
-    pub args: Vec<String>,
+    pub args: Vec<ConstantTerm>,
 }
 
 impl ConstantLiteral {
@@ -39,7 +45,12 @@ impl ConstantLiteral {
                 .args
                 .into_iter()
                 .map(|x| match x {
-                    IRTerm::Constant(x) => x,
+                    IRTerm::Constant(x) => ConstantTerm::Constant(x),
+                    IRTerm::Array(ts) => ConstantTerm::Array(
+                        ts.iter()
+                            .map(|t| t.as_constant().unwrap().to_owned())
+                            .collect(),
+                    ),
                     _ => panic!("Expected constant"),
                 })
                 .collect::<Vec<_>>(),
