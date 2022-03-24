@@ -247,7 +247,7 @@ fn main() {
     let config = codespan_reporting::term::Config::default();
 
     fn print_diagnostics<'files, F: codespan_reporting::files::Files<'files, FileId = ()>>(
-        diags: &Vec<Diagnostic<()>>,
+        diags: &[Diagnostic<()>],
         writer: &mut dyn WriteColor,
         config: &Config,
         files: &'files F,
@@ -374,7 +374,7 @@ fn main() {
                     w.set_color(ColorSpec::new().set_bold(true))?;
                     write!(w, "{}", e_str)?;
                     w.set_color(&ColorSpec::new())?;
-                    write!(w, "\n")?;
+                    writeln!(w)?;
                     w.flush()?;
                     Ok(())
                 })()
