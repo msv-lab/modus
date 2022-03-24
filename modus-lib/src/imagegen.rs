@@ -302,7 +302,7 @@ pub fn build_dag_from_proofs(
                     debug_assert!(substituted_lit
                         .args
                         .iter()
-                        .all(|x| x.as_constant().is_some()));
+                        .all(|x| x.is_constant_or_compound_constant()));
 
                     if !curr_state.has_base() {
                         // Do the optimization mentioned above.
