@@ -64,6 +64,9 @@ pub fn check_grounded_variables(
             .iter()
             .map(|t| match t {
                 IRTerm::Constant(_) => true,
+                IRTerm::Array(ts) => {
+                    ts.iter().all(|t| t.is_constant_or_compound_constant()) || body_vars.contains(t)
+                }
                 v => body_vars.contains(v),
             })
             .collect()
