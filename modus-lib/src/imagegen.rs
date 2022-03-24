@@ -676,7 +676,7 @@ pub fn build_dag_from_proofs(
     }
 
     for (query, proof) in query_and_proofs.into_iter() {
-        debug_assert!(query.args.iter().all(|x| x.as_constant().is_some()));
+        debug_assert!(query.args.iter().all(|x| x.is_constant_or_compound_constant()));
         if let Some(&existing_node_id) = image_literals.get(&query) {
             // TODO: unreachable?
             res.outputs.push(Output {
