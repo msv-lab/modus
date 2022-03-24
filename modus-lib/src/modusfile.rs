@@ -918,7 +918,7 @@ pub mod parser {
         delimited(
             terminated(tag("["), token_sep0),
             separated_list0(delimited(token_sep0, tag(","), token_sep0), modus_term),
-            preceded(token_sep0, tag("]")),
+            cut(preceded(token_sep0, tag("]"))),
         )(i)
     }
 

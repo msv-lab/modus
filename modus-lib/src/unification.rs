@@ -211,8 +211,13 @@ impl Literal<IRTerm> {
                                 return None;
                             }
                         }
-                        // only valid branch of an array is if they're both arrays, as caught above
-                        (IRTerm::Array(_), _) | (_, IRTerm::Array(_)) => return None,
+                        (IRTerm::Array(_), IRTerm::Constant(_))
+                        | (IRTerm::Constant(_), IRTerm::Array(_)) => return None,
+                        (IRTerm::Array(ts), v) | (v, IRTerm::Array(ts)) => {
+                            let mut upd = Substitution::<IRTerm>::new();
+                            upd.insert(v.clone(), IRTerm::Array(ts));
+                            s = compose_extend(&s, &upd);
+                        }
 
                         (IRTerm::Constant(_), v) => {
                             let mut upd = Substitution::<IRTerm>::new();
@@ -294,6 +299,27 @@ mod tests {
         assert_eq!(
             mgu.get(&logic::IRTerm::UserVariable("Y".into())),
             Some(&logic::IRTerm::Constant("b".into()))
+        );
+    }
+
+    #[test]
+    fn compex_array_unifier() {
+        let l: logic::Literal = "p(A, \"b\")".parse().unwrap();
+        let m: logic::Literal = "p([\"a\", X], X)".parse().unwrap();
+        let result = l.unify(&m);
+        assert!(result.is_some());
+        let mgu = result.unwrap();
+        assert!(l.substitute(&mgu).eq_ignoring_position(&m.substitute(&mgu)));
+        assert_eq!(
+            mgu.get(&logic::IRTerm::UserVariable("X".into())),
+            Some(&logic::IRTerm::Constant("b".into()))
+        );
+        assert_eq!(
+            mgu.get(&logic::IRTerm::UserVariable("A".into())),
+            Some(&logic::IRTerm::Array(vec![
+                IRTerm::Constant("a".into()),
+                IRTerm::Constant("b".into())
+            ]))
         );
     }
 

@@ -695,6 +695,15 @@ fn head_term_check(mf: &Modusfile) -> Result<(), Vec<Diagnostic<()>>> {
             )])
     }
 
+    fn generate_array_diag(pos: &SpannedPosition) -> Diagnostic<()> {
+        Diagnostic::warning()
+            .with_message("An array was found in a head literal. This is not supported currently.")
+            .with_labels(vec![Label::primary(
+                (),
+                pos.offset..pos.offset + pos.length,
+            )])
+    }
+
     fn check_no_f_string(terms: &[ModusTerm]) -> Result<(), Diagnostic<()>> {
         for t in terms {
             match t {
@@ -716,7 +725,8 @@ fn head_term_check(mf: &Modusfile) -> Result<(), Vec<Diagnostic<()>>> {
                 ModusTerm::FormatString { position, .. } => {
                     diags.push(generate_f_string_diag(position))
                 }
-                ModusTerm::Array(_, ts) => {
+                ModusTerm::Array(position, ts) => {
+                    diags.push(generate_array_diag(position));
                     if let Err(d) = check_no_f_string(ts) {
                         diags.push(d)
                     }
@@ -1033,6 +1043,17 @@ mod tests {
         let res = head_term_check(&mf);
         assert!(res.is_err());
         assert_eq!(4, res.err().unwrap().len()); // one for each arg
+    }
+
+    #[test]
+    fn errors_f_string_present_in_head_array() {
+        let clauses = vec!["fact_f([X, f\"foo ${X}\"], f\"${Y}\")."];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+
+        let res = head_term_check(&mf);
+        assert!(res.is_err());
+        assert_eq!(res.as_ref().err().unwrap()[0].severity, Severity::Warning);
+        assert_eq!(1 + 2, res.err().unwrap().len());
     }
 
     #[test]

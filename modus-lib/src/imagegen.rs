@@ -506,12 +506,15 @@ pub fn build_dag_from_proofs(
                             ));
                         }
                         "set_entrypoint" => {
-                            let entrypoint = lit
-                                .args
-                                .iter()
-                                .skip(1)
-                                .map(|x| x.as_constant().unwrap().to_owned())
-                                .collect::<Vec<_>>();
+                            let arg = &lit.args[1];
+                            let entrypoint = match arg {
+                                IRTerm::Constant(c) => vec![c.to_owned()],
+                                IRTerm::Array(ts) => ts
+                                    .iter()
+                                    .map(|t| t.as_constant().unwrap().to_owned())
+                                    .collect(),
+                                _ => panic!(),
+                            };
                             curr_state.set_node(res.new_node(
                                 BuildNode::SetEntrypoint {
                                     parent: img,

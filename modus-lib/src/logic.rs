@@ -148,6 +148,14 @@ impl IRTerm {
         matches!(self, Self::Constant(..))
     }
 
+    pub fn is_constant_or_compound_constant(&self) -> bool {
+        match self {
+            Self::Constant(_) => true,
+            Self::Array(ts) => ts.iter().all(|t| t.is_constant_or_compound_constant()),
+            _ => false,
+        }
+    }
+
     /// Returns `true` if the IRTerm is [`AnonymousVariable`] or it was
     /// renamed from an [`AnonymousVariable`].
     ///
