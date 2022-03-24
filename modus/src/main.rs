@@ -247,7 +247,7 @@ fn main() {
     let config = codespan_reporting::term::Config::default();
 
     fn print_diagnostics<'files, F: codespan_reporting::files::Files<'files, FileId = ()>>(
-        diags: &Vec<Diagnostic<()>>,
+        diags: &[Diagnostic<()>],
         writer: &mut dyn WriteColor,
         config: &Config,
         files: &'files F,
@@ -261,9 +261,20 @@ fn main() {
         ("transpile", sub) => {
             let input_file = sub.value_of("FILE").unwrap();
             let file = get_file_or_exit(Path::new(input_file));
-            let query: modusfile::Expression =
-                sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
-            let query = query.without_position();
+            let query: modusfile::Expression = match sub
+                .value_of("QUERY")
+                .map(|s| s.parse::<modusfile::Expression>())
+                .unwrap()
+            {
+                Ok(e) => e.without_position(),
+                Err(e) => {
+                    eprintln!("❌ Did not parse goal successfully",);
+                    let temp_file =
+                        SimpleFile::new("goal", sub.value_of("QUERY").unwrap_or_default());
+                    print_diagnostics(&e, &mut err_writer.lock(), &config, &temp_file);
+                    std::process::exit(1);
+                }
+            };
 
             let mf: Modusfile = match file.source().parse() {
                 Ok(mf) => mf,
@@ -305,9 +316,20 @@ fn main() {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| Path::new(context_dir).join("Modusfile"));
             let file = get_file_or_exit(input_file.as_path());
-            let query: modusfile::Expression =
-                sub.value_of("QUERY").map(|s| s.parse().unwrap()).unwrap();
-            let query = query.without_position();
+            let query: modusfile::Expression = match sub
+                .value_of("QUERY")
+                .map(|s| s.parse::<modusfile::Expression>())
+                .unwrap()
+            {
+                Ok(e) => e.without_position(),
+                Err(e) => {
+                    eprintln!("❌ Did not parse goal successfully",);
+                    let temp_file =
+                        SimpleFile::new("goal", sub.value_of("QUERY").unwrap_or_default());
+                    print_diagnostics(&e, &mut err_writer.lock(), &config, &temp_file);
+                    std::process::exit(1);
+                }
+            };
 
             let parse_start = Instant::now();
 
@@ -352,7 +374,7 @@ fn main() {
                     w.set_color(ColorSpec::new().set_bold(true))?;
                     write!(w, "{}", e_str)?;
                     w.set_color(&ColorSpec::new())?;
-                    write!(w, "\n")?;
+                    writeln!(w)?;
                     w.flush()?;
                     Ok(())
                 })()
@@ -463,15 +485,23 @@ fn main() {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| Path::new(context_dir).join("Modusfile"));
             let file = get_file_or_exit(input_file.as_path());
-            let query: Option<modusfile::Expression> =
-                sub.value_of("QUERY").map(|s| s.parse().unwrap());
-            let query = query.map(|q| q.without_position());
-
-            match (file.source().parse::<Modusfile>(), query) {
-                (Ok(modus_f), None) => {
-                    println!("Parsed successfully. Found {} clauses.", modus_f.0.len())
+            let query: modusfile::Expression = match sub
+                .value_of("QUERY")
+                .map(|s| s.parse::<modusfile::Expression>())
+                .unwrap()
+            {
+                Ok(e) => e.without_position(),
+                Err(e) => {
+                    eprintln!("❌ Did not parse goal successfully",);
+                    let temp_file =
+                        SimpleFile::new("goal", sub.value_of("QUERY").unwrap_or_default());
+                    print_diagnostics(&e, &mut err_writer.lock(), &config, &temp_file);
+                    std::process::exit(1);
                 }
-                (Ok(modus_f), Some(e)) => {
+            };
+
+            match file.source().parse::<Modusfile>() {
+                Ok(modus_f) => {
                     let kind_res = modus_f.kinds();
                     if !analysis::check_and_output_analysis(
                         &kind_res,
@@ -486,7 +516,7 @@ fn main() {
 
                     let max_depth = 175;
                     let (goal, clauses, sld_result) =
-                        tree_from_modusfile(modus_f, e.clone(), max_depth, true);
+                        tree_from_modusfile(modus_f, query.clone(), max_depth, true);
 
                     if should_output_graph {
                         render_tree(&clauses, sld_result, &mut out_writer.lock());
@@ -502,7 +532,7 @@ fn main() {
                                 println!(
                                     "{} proof(s) found for query {}",
                                     proofs.len(),
-                                    e.to_string().underline()
+                                    query.to_string().underline()
                                 );
 
                                 for (_, proof) in proofs {
@@ -520,7 +550,7 @@ fn main() {
                         }
                     }
                 }
-                (Err(e), _) => {
+                Err(e) => {
                     eprintln!("❌ Did not parse Modusfile successfully.",);
                     print_diagnostics(&e, &mut err_writer.lock(), &config, &file);
                     std::process::exit(1);
