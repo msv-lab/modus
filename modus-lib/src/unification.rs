@@ -46,7 +46,15 @@ pub trait RenameWithSubstitution<T> {
 impl Substitute<IRTerm> for IRTerm {
     type Output = IRTerm;
     fn substitute(&self, s: &Substitution<IRTerm>) -> Self::Output {
-        s.get(self).unwrap_or(self).clone()
+        // check hashmap first, in case intention was to replace entire
+        // the IRTerm::Array
+        if let Some(v) = s.get(self) {
+            v.clone()
+        } else if let IRTerm::Array(ts) = self {
+            IRTerm::Array(ts.iter().map(|t| t.substitute(s)).collect())
+        } else {
+            self.clone()
+        }
     }
 }
 
@@ -182,34 +190,55 @@ pub fn compose_extend(l: &Substitution<IRTerm>, r: &Substitution<IRTerm>) -> Sub
 
 impl Literal<IRTerm> {
     pub fn unify(&self, other: &Literal<IRTerm>) -> Option<Substitution<IRTerm>> {
-        if self.signature() != other.signature() {
-            return None;
-        }
-        let mut s = Substitution::<IRTerm>::new();
-        for (i, self_term) in self.args.iter().enumerate() {
-            let other_term = &other.args[i];
-            let self_term_subs = self_term.substitute(&s);
-            let other_term_subs = other_term.substitute(&s);
-            if self_term_subs != other_term_subs {
-                match (self_term_subs.clone(), other_term_subs.clone()) {
-                    // cannot unify if they are both different constants
-                    (IRTerm::Constant(_), IRTerm::Constant(_)) => return None,
+        fn unify_arglist(current: &[IRTerm], other: &[IRTerm]) -> Option<Substitution<IRTerm>> {
+            let mut s = Substitution::<IRTerm>::new();
+            for (self_term, other_term) in current.iter().zip(other) {
+                let self_term_subs = self_term.substitute(&s);
+                let other_term_subs = other_term.substitute(&s);
+                if self_term_subs != other_term_subs {
+                    match (self_term_subs.clone(), other_term_subs.clone()) {
+                        // cannot unify if they are both different constants
+                        (IRTerm::Constant(_), IRTerm::Constant(_)) => return None,
 
-                    (IRTerm::Constant(_), v) => {
-                        let mut upd = Substitution::<IRTerm>::new();
-                        upd.insert(v.clone(), self_term_subs.clone());
-                        s = compose_extend(&s, &upd);
-                    }
+                        (IRTerm::Array(terms1), IRTerm::Array(terms2)) => {
+                            if terms1.len() == terms2.len() {
+                                if let Some(new_sub) = unify_arglist(&terms1, &terms2) {
+                                    s = compose_extend(&s, &new_sub);
+                                } else {
+                                    return None;
+                                }
+                            } else {
+                                return None;
+                            }
+                        }
+                        (IRTerm::Array(_), IRTerm::Constant(_))
+                        | (IRTerm::Constant(_), IRTerm::Array(_)) => return None,
+                        (IRTerm::Array(ts), v) | (v, IRTerm::Array(ts)) => {
+                            let mut upd = Substitution::<IRTerm>::new();
+                            upd.insert(v.clone(), IRTerm::Array(ts));
+                            s = compose_extend(&s, &upd);
+                        }
 
-                    (v1, v2) => {
-                        let mut upd = Substitution::<IRTerm>::new();
-                        upd.insert(v1.clone(), v2.clone());
-                        s = compose_extend(&s, &upd);
+                        (IRTerm::Constant(_), v) => {
+                            let mut upd = Substitution::<IRTerm>::new();
+                            upd.insert(v.clone(), self_term_subs.clone());
+                            s = compose_extend(&s, &upd);
+                        }
+                        (v1, v2) => {
+                            let mut upd = Substitution::<IRTerm>::new();
+                            upd.insert(v1.clone(), v2.clone());
+                            s = compose_extend(&s, &upd);
+                        }
                     }
                 }
             }
+            Some(s)
         }
-        Some(s)
+
+        if self.signature() != other.signature() {
+            return None;
+        }
+        unify_arglist(&self.args, &other.args)
     }
 }
 
@@ -256,6 +285,45 @@ mod tests {
     }
 
     #[test]
+    fn array_unifier() {
+        let l: logic::Literal = "p([X, \"b\"], X)".parse().unwrap();
+        let m: logic::Literal = "p([\"a\", Y], X)".parse().unwrap();
+        let result = l.unify(&m);
+        assert!(result.is_some());
+        let mgu = result.unwrap();
+        assert!(l.substitute(&mgu).eq_ignoring_position(&m.substitute(&mgu)));
+        assert_eq!(
+            mgu.get(&logic::IRTerm::UserVariable("X".into())),
+            Some(&logic::IRTerm::Constant("a".into()))
+        );
+        assert_eq!(
+            mgu.get(&logic::IRTerm::UserVariable("Y".into())),
+            Some(&logic::IRTerm::Constant("b".into()))
+        );
+    }
+
+    #[test]
+    fn compex_array_unifier() {
+        let l: logic::Literal = "p(A, \"b\")".parse().unwrap();
+        let m: logic::Literal = "p([\"a\", X], X)".parse().unwrap();
+        let result = l.unify(&m);
+        assert!(result.is_some());
+        let mgu = result.unwrap();
+        assert!(l.substitute(&mgu).eq_ignoring_position(&m.substitute(&mgu)));
+        assert_eq!(
+            mgu.get(&logic::IRTerm::UserVariable("X".into())),
+            Some(&logic::IRTerm::Constant("b".into()))
+        );
+        assert_eq!(
+            mgu.get(&logic::IRTerm::UserVariable("A".into())),
+            Some(&logic::IRTerm::Array(vec![
+                IRTerm::Constant("a".into()),
+                IRTerm::Constant("b".into())
+            ]))
+        );
+    }
+
+    #[test]
     fn simple_non_unifiable() {
         let l: logic::Literal = "a(X, \"b\")".parse().unwrap();
         let m: logic::Literal = "a(Y)".parse().unwrap();
@@ -279,5 +347,19 @@ mod tests {
         assert!(l != m);
         assert!(m.args[0] == m.args[1]);
         assert!(m.args[0] != m.args[2]);
+    }
+
+    #[test]
+    #[serial]
+    fn complex_renaming() {
+        let l: logic::Literal = "a([ X, Y ], X)".parse().unwrap();
+        let (m, _) = l.rename_with_sub();
+        assert!(l != m);
+        if let IRTerm::Array(ts) = &m.args[0] {
+            assert_eq!(ts[0], m.args[1]);
+            assert_ne!(ts[1], m.args[1]);
+        } else {
+            panic!()
+        }
     }
 }

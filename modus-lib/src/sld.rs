@@ -652,11 +652,11 @@ pub fn sld(
             if let Some(lit_grounded) = lit_grounded {
                 debug_assert_eq!(lit_grounded.len(), literal.args.len());
                 if positive_or_grounded_negation
-                    && literal
-                        .args
-                        .iter()
-                        .zip(lit_grounded.iter())
-                        .all(|pair| matches!(pair, (_, true) | (IRTerm::Constant(_), false)))
+                    && literal.args.iter().zip(lit_grounded.iter()).all(
+                        |(term, allows_ungrounded)| {
+                            *allows_ungrounded || term.is_constant_or_compound_constant()
+                        },
+                    )
                 {
                     return Ok((id, lit.clone()));
                 } else {
@@ -1618,6 +1618,46 @@ mod tests {
         let is_match = matches!(
             sld_res.errors.iter().next(),
             Some(ResolutionError::UnknownPredicate(_))
+        );
+        assert!(is_match);
+    }
+
+    #[test]
+    #[serial]
+    fn arrays() {
+        let goal: Goal<logic::IRTerm> = vec!["app([\"sh\", \"--some-option\"])".parse().unwrap()];
+        let clauses: Vec<logic::Clause> = vec![
+            "app(entrypoint_params) :- from(\"alpine\")::set_entrypoint(entrypoint_params)."
+                .parse()
+                .unwrap(),
+        ];
+        let sld_res = sld(&clauses, &goal, 10, true);
+        let tree = sld_res.tree;
+        let solutions = solutions(&tree);
+        assert_eq!(solutions.len(), 1);
+
+        assert!(contains_ignoring_position(
+            &solutions,
+            &vec!["app([\"sh\", \"--some-option\"])"
+                .parse::<logic::Literal>()
+                .unwrap()]
+        ));
+    }
+
+    #[test]
+    #[serial]
+    fn arrays_error_when_ungrounded() {
+        let goal: Goal<logic::IRTerm> = vec!["app([\"sh\", someOption])".parse().unwrap()];
+        let clauses: Vec<logic::Clause> = vec![
+            "app(entrypoint_params) :- from(\"alpine\")::set_entrypoint(entrypoint_params)."
+                .parse()
+                .unwrap(),
+        ];
+        let sld_res = sld(&clauses, &goal, 10, true);
+        assert_eq!(sld_res.errors.len(), 1);
+        let is_match = matches!(
+            sld_res.errors.iter().next(),
+            Some(ResolutionError::InsufficientGroundness(_)),
         );
         assert!(is_match);
     }

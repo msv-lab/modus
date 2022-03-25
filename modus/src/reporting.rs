@@ -16,7 +16,7 @@
 
 use std::{fmt::Display, io::{Write, self}, path::Path};
 
-use serde::Serialize;
+use serde::{Serialize, ser::SerializeSeq};
 
 use modus_lib::{
     imagegen::BuildPlan,
@@ -25,10 +25,33 @@ use modus_lib::{
 
 pub type BuildResult = Vec<Image>;
 
+#[derive(Debug, Clone)]
+pub enum ConstantTerm {
+    Constant(String),
+    Array(Vec<String>),
+}
+
+impl Serialize for ConstantTerm {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer {
+        match self {
+            ConstantTerm::Constant(c) => serializer.serialize_str(c),
+            ConstantTerm::Array(cs) => {
+                let mut seq = serializer.serialize_seq(Some(cs.len()))?;
+                for c in cs {
+                    seq.serialize_element(c)?;
+                }
+                seq.end()
+            },
+        }
+    }
+}
+
 #[derive(Serialize, Debug, Clone)]
 pub struct ConstantLiteral {
     pub predicate: String,
-    pub args: Vec<String>,
+    pub args: Vec<ConstantTerm>,
 }
 
 impl ConstantLiteral {
@@ -39,7 +62,12 @@ impl ConstantLiteral {
                 .args
                 .into_iter()
                 .map(|x| match x {
-                    IRTerm::Constant(x) => x,
+                    IRTerm::Constant(x) => ConstantTerm::Constant(x),
+                    IRTerm::Array(ts) => ConstantTerm::Array(
+                        ts.iter()
+                            .map(|t| t.as_constant().unwrap().to_owned())
+                            .collect(),
+                    ),
                     _ => panic!("Expected constant"),
                 })
                 .collect::<Vec<_>>(),

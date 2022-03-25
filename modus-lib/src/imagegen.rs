@@ -302,7 +302,7 @@ pub fn build_dag_from_proofs(
                     debug_assert!(substituted_lit
                         .args
                         .iter()
-                        .all(|x| x.as_constant().is_some()));
+                        .all(|x| x.is_constant_or_compound_constant()));
 
                     if !curr_state.has_base() {
                         // Do the optimization mentioned above.
@@ -506,12 +506,15 @@ pub fn build_dag_from_proofs(
                             ));
                         }
                         "set_entrypoint" => {
-                            let entrypoint = lit
-                                .args
-                                .iter()
-                                .skip(1)
-                                .map(|x| x.as_constant().unwrap().to_owned())
-                                .collect::<Vec<_>>();
+                            let arg = &lit.args[1];
+                            let entrypoint = match arg {
+                                IRTerm::Constant(c) => vec![c.to_owned()],
+                                IRTerm::Array(ts) => ts
+                                    .iter()
+                                    .map(|t| t.as_constant().unwrap().to_owned())
+                                    .collect(),
+                                _ => panic!(),
+                            };
                             curr_state.set_node(res.new_node(
                                 BuildNode::SetEntrypoint {
                                     parent: img,
@@ -673,7 +676,10 @@ pub fn build_dag_from_proofs(
     }
 
     for (query, proof) in query_and_proofs.into_iter() {
-        debug_assert!(query.args.iter().all(|x| x.as_constant().is_some()));
+        debug_assert!(query
+            .args
+            .iter()
+            .all(|x| x.is_constant_or_compound_constant()));
         if let Some(&existing_node_id) = image_literals.get(&query) {
             // TODO: unreachable?
             res.outputs.push(Output {

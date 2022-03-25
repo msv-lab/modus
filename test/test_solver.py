@@ -167,3 +167,12 @@ class TestSolver(ModusTestCase):
         images = self.build(md, 'foo("alpine:3.15")', should_succeed=True)
         self.assertEqual(len(images), 1)
         self.assertIn(Fact("foo", ("alpine:3.15",)), images)
+
+    def test_supports_arrays(self):
+        md = dedent("""\
+            app(entrypoint_params) :- from(\"alpine\")::set_entrypoint(entrypoint_params).
+        """)
+
+        images = self.build(md, 'app(["sh", "-c", "ash"])', should_succeed=True)
+        self.assertEqual(len(images), 1)
+        self.assertIn(Fact("app", (("sh", "-c", "ash"),)), images)

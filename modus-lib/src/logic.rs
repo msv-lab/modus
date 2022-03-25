@@ -40,6 +40,14 @@ impl fmt::Display for IRTerm {
         match self {
             IRTerm::Constant(s) => write!(f, "\"{}\"", s),
             IRTerm::UserVariable(s) => write!(f, "{}", s),
+            IRTerm::Array(ts) => write!(
+                f,
+                "[{}]",
+                ts.iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             // there may be aux variables after translating to IR
             IRTerm::AuxiliaryVariable(i) => write!(f, "__AUX_{}", i),
             IRTerm::RenamedVariable(i, t) => write!(f, "{}_{}", t, i),
@@ -54,6 +62,7 @@ impl Rename<IRTerm> for IRTerm {
     fn rename(&self) -> IRTerm {
         match self {
             IRTerm::Constant(_) => (*self).clone(),
+            IRTerm::Array(ts) => IRTerm::Array(ts.iter().map(|t| t.rename()).collect()),
             _ => {
                 let index = AVAILABLE_VARIABLE_INDEX.fetch_add(1, Ordering::SeqCst);
                 IRTerm::RenamedVariable(index, Box::new((*self).clone()))
@@ -119,6 +128,7 @@ impl From<String> for Predicate {
 pub enum IRTerm {
     Constant(String),
     UserVariable(String),
+    Array(Vec<IRTerm>),
 
     /// Primarily used to establish f-string constraints.
     AuxiliaryVariable(u32),
@@ -136,6 +146,14 @@ impl IRTerm {
     /// [`Constant`]: IRTerm::Constant
     pub fn is_constant(&self) -> bool {
         matches!(self, Self::Constant(..))
+    }
+
+    pub fn is_constant_or_compound_constant(&self) -> bool {
+        match self {
+            Self::Constant(_) => true,
+            Self::Array(ts) => ts.iter().all(|t| t.is_constant_or_compound_constant()),
+            _ => false,
+        }
     }
 
     /// Returns `true` if the IRTerm is [`AnonymousVariable`] or it was
@@ -249,11 +267,20 @@ pub trait Ground {
 
 impl IRTerm {
     pub fn variables(&self, include_anonymous: bool) -> HashSet<IRTerm> {
-        // the 'variables' of an IRTerm is just itself, if it's not a constant
         let mut set = HashSet::<IRTerm>::new();
-        if let IRTerm::Constant(_) = self {
-        } else if !self.is_anonymous_variable() || include_anonymous {
-            set.insert(self.clone());
+        match (self, include_anonymous) {
+            (IRTerm::AnonymousVariable(_), true) => {
+                set.insert(self.clone());
+            }
+            (IRTerm::Array(ts), b) => {
+                set.extend(ts.iter().flat_map(|t| t.variables(b)));
+            }
+            (IRTerm::AuxiliaryVariable(_), _)
+            | (IRTerm::RenamedVariable(..), _)
+            | (IRTerm::UserVariable(_), _) => {
+                set.insert(self.clone());
+            }
+            (IRTerm::Constant(_), _) | (IRTerm::AnonymousVariable(_), false) => (),
         }
         set
     }
@@ -463,8 +490,17 @@ pub mod parser {
         literal_identifier(i)
     }
 
+    fn array_term(i: Span) -> IResult<Span, Vec<IRTerm>> {
+        delimited(
+            terminated(tag("["), multispace0),
+            separated_list0(delimited(multispace0, tag(","), multispace0), term),
+            preceded(multispace0, tag("]")),
+        )(i)
+    }
+
     pub fn term(i: Span) -> IResult<Span, IRTerm> {
         alt((
+            map(array_term, IRTerm::Array),
             map(constant, |s| IRTerm::Constant(s.fragment().to_string())),
             map(is_a("_"), |_| sld::Auxiliary::aux(true)),
             map(variable, |s| IRTerm::UserVariable(s.fragment().to_string())),

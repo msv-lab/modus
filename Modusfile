@@ -40,13 +40,13 @@ frontend_img(profile) :-
     # We need to transpile this to Dockerfile to bootstrap the frontend.
     # Normally just saying f"${target_folder}/..." is good enough.
     build(profile)::copy(f"/usr/src/app/${target_folder}/buildkit-frontend", "./buildkit-frontend")
-  )::set_entrypoint("./buildkit-frontend").
+  )::set_entrypoint(["./buildkit-frontend"]).
 
 modus(profile) :-
   (run_env,
     profile_to_target_folder(profile, target_folder),
     build(profile)::copy(f"/usr/src/app/${target_folder}/modus", "./modus")
-  )::set_entrypoint("./modus").
+  )::set_entrypoint(["./modus"]).
 
 profile_to_target_folder("debug", "target/debug").
 profile_to_target_folder("release", "target/release").

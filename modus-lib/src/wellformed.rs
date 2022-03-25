@@ -42,7 +42,6 @@ fn combine_groundness(g1: &[bool], g2: &[bool]) -> Vec<bool> {
 }
 
 // infer grounded variables, check if grounded variables are grounded in each rule
-//TODO: not sure what to do if there are variables inside compound terms
 pub fn check_grounded_variables(
     clauses: &[Clause<IRTerm>],
 ) -> Result<HashMap<Signature, Vec<bool>>, HashSet<Signature>> {
@@ -64,6 +63,12 @@ pub fn check_grounded_variables(
             .iter()
             .map(|t| match t {
                 IRTerm::Constant(_) => true,
+                IRTerm::Array(ts) => {
+                    // either the terms of this array are constant or contained in the body
+                    ts.iter()
+                        .all(|t| t.is_constant_or_compound_constant() || body_vars.contains(t))
+                        || body_vars.contains(t)
+                }
                 v => body_vars.contains(v),
             })
             .collect()

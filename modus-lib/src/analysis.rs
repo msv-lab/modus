@@ -685,8 +685,8 @@ fn check_negated_logic_kind(
     }
 }
 
-fn f_strings_present_in_head(mf: &Modusfile) -> Result<(), Vec<Diagnostic<()>>> {
-    fn generate_diag(pos: &SpannedPosition) -> Diagnostic<()> {
+fn head_term_check(mf: &Modusfile) -> Result<(), Vec<Diagnostic<()>>> {
+    fn generate_f_string_diag(pos: &SpannedPosition) -> Diagnostic<()> {
         Diagnostic::error()
             .with_message("A format string was found in a head literal.")
             .with_labels(vec![Label::primary(
@@ -695,12 +695,43 @@ fn f_strings_present_in_head(mf: &Modusfile) -> Result<(), Vec<Diagnostic<()>>> 
             )])
     }
 
+    fn generate_array_diag(pos: &SpannedPosition) -> Diagnostic<()> {
+        Diagnostic::error()
+            .with_message("An array was found in a head literal. This is not supported currently.")
+            .with_labels(vec![Label::primary(
+                (),
+                pos.offset..pos.offset + pos.length,
+            )])
+    }
+
+    fn check_no_f_string(terms: &[ModusTerm]) -> Result<(), Diagnostic<()>> {
+        for t in terms {
+            match t {
+                ModusTerm::FormatString { position, .. } => {
+                    return Err(generate_f_string_diag(position));
+                }
+                ModusTerm::Array(_, ts) => check_no_f_string(ts)?,
+                _ => (),
+            }
+        }
+        Ok(())
+    }
+
     let mut diags = Vec::new();
 
     for modus_clause in &mf.0 {
         for arg in &modus_clause.head.args {
-            if let ModusTerm::FormatString { position, .. } = arg {
-                diags.push(generate_diag(position));
+            match arg {
+                ModusTerm::FormatString { position, .. } => {
+                    diags.push(generate_f_string_diag(position))
+                }
+                ModusTerm::Array(position, ts) => {
+                    diags.push(generate_array_diag(position));
+                    if let Err(d) = check_no_f_string(ts) {
+                        diags.push(d)
+                    }
+                }
+                _ => (),
             }
         }
     }
@@ -731,10 +762,10 @@ pub fn check_and_output_analysis<
         }
     }
 
-    let f_string_head_res = f_strings_present_in_head(mf);
-    let f_string_head_errors = f_string_head_res.err().unwrap_or_default();
+    let head_check_res = head_term_check(mf);
+    let head_errors = head_check_res.err().unwrap_or_default();
 
-    let can_translate = f_string_head_errors.is_empty();
+    let can_translate = head_errors.is_empty();
 
     let negation_errors = if can_translate {
         let ir_clauses = translate_modusfile(mf);
@@ -749,7 +780,7 @@ pub fn check_and_output_analysis<
         .errs
         .iter()
         .chain(&negation_errors)
-        .chain(&f_string_head_errors)
+        .chain(&head_errors)
         .collect::<Vec<_>>();
     for err in &errs {
         term::emit(out, config, file, err).expect("Error when writing to stderr.");
@@ -1009,9 +1040,20 @@ mod tests {
         ];
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
-        let res = f_strings_present_in_head(&mf);
+        let res = head_term_check(&mf);
         assert!(res.is_err());
         assert_eq!(4, res.err().unwrap().len()); // one for each arg
+    }
+
+    #[test]
+    fn errors_f_string_present_in_head_array() {
+        let clauses = vec!["fact_f([X, f\"foo ${X}\"], f\"${Y}\")."];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+
+        let res = head_term_check(&mf);
+        assert!(res.is_err());
+        assert_eq!(res.as_ref().err().unwrap()[0].severity, Severity::Error);
+        assert_eq!(1 + 2, res.err().unwrap().len());
     }
 
     #[test]

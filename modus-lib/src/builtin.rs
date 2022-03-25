@@ -57,10 +57,11 @@ pub trait BuiltinPredicate {
             return SelectBuiltinResult::NoMatch;
         }
         if args.len() == self.arg_groundness().len()
-            && args
-                .iter()
-                .zip(self.arg_groundness().into_iter())
-                .all(|pair| matches!(pair, (_, true) | (IRTerm::Constant(_), false)))
+            && args.iter().zip(self.arg_groundness().into_iter()).all(
+                |(term, allows_ungrounded)| {
+                    *allows_ungrounded || term.is_constant_or_compound_constant()
+                },
+            )
         {
             SelectBuiltinResult::Match
         } else {
