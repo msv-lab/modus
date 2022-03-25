@@ -26,6 +26,7 @@
 //! is not an image kind, so we may as well assume it is and error later if needed.
 
 use std::collections::{HashMap, HashSet};
+use std::convert::TryInto;
 use std::io::Write;
 use std::ops::Range;
 
@@ -645,6 +646,47 @@ impl PredicateDependency for Modusfile {
         }
 
         Ok(())
+    }
+}
+
+pub trait MaxDepth {
+    /// Returns the maximum depth of the SLD tree.
+    fn max_depth(&self) -> usize;
+}
+
+impl MaxDepth for Modusfile {
+    /// Returns the maximum depth of the SLD tree.
+    /// This is computed as `predicateCount * numPossibleConstants^maxArity`.
+    /// The reasoning for this is that each node of a successful path in an SLD tree corresponds to
+    /// a proof of some literal (subgoal). So the depth can not exceed the number of possible literals.
+    /// There may be more accurate ways to compute this, but this is a reasonable approximation.
+    fn max_depth(&self) -> usize {
+        fn update(new_literal: &Literal<ModusTerm>, preds: &mut HashSet<Predicate>, possibleConstants: &mut HashSet<String>, maxArity: &mut usize) {
+            preds.insert(new_literal.predicate.clone());
+            if new_literal.args.len() > *maxArity {
+                *maxArity = new_literal.args.len();
+            }
+            for arg in &new_literal.args {
+                match arg {
+                    ModusTerm::Constant(c) => todo!(),
+                    ModusTerm::Array(_, ts) => todo!(),
+                    _ => (),
+                }
+            }
+        }
+
+        let mut preds: HashSet<Predicate> = HashSet::new();
+        let mut possibleConstants: HashSet<String> = HashSet::new();
+        let mut maxArity: usize = 0;
+        for clause in &self.0 {
+            update(&clause.head, &mut preds, &mut possibleConstants, &mut maxArity);
+            if let Some(b) = &clause.body {
+                for lit in b.literals() {
+                    update(&lit, &mut preds, &mut possibleConstants, &mut maxArity);
+                }
+            }
+        }
+        preds.len() * possibleConstants.len().pow(maxArity.try_into().unwrap())
     }
 }
 
