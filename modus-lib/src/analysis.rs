@@ -696,7 +696,7 @@ fn head_term_check(mf: &Modusfile) -> Result<(), Vec<Diagnostic<()>>> {
     }
 
     fn generate_array_diag(pos: &SpannedPosition) -> Diagnostic<()> {
-        Diagnostic::warning()
+        Diagnostic::error()
             .with_message("An array was found in a head literal. This is not supported currently.")
             .with_labels(vec![Label::primary(
                 (),
@@ -1052,7 +1052,7 @@ mod tests {
 
         let res = head_term_check(&mf);
         assert!(res.is_err());
-        assert_eq!(res.as_ref().err().unwrap()[0].severity, Severity::Warning);
+        assert_eq!(res.as_ref().err().unwrap()[0].severity, Severity::Error);
         assert_eq!(1 + 2, res.err().unwrap().len());
     }
 
