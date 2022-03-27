@@ -28,7 +28,7 @@ use codespan_reporting::{
     },
 };
 use colored::Colorize;
-use modus_lib::transpiler::render_tree;
+use modus_lib::{analysis::MaxDepth, transpiler::render_tree};
 use modus_lib::*;
 use modus_lib::{analysis::ModusSemantics, sld::tree_from_modusfile};
 use ptree::write_tree;
@@ -514,9 +514,8 @@ fn main() {
                         std::process::exit(1)
                     }
 
-                    let max_depth = 175;
                     let (goal, clauses, sld_result) =
-                        tree_from_modusfile(modus_f, query.clone(), max_depth, true);
+                        tree_from_modusfile(modus_f, query.clone(), true);
 
                     if should_output_graph {
                         render_tree(&clauses, sld_result, &mut out_writer.lock());

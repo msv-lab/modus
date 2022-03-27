@@ -18,7 +18,7 @@ use std::collections::{HashMap, HashSet};
 use std::iter::{self, FromIterator};
 use std::path::{Path, PathBuf};
 
-use crate::analysis::{Kind, ModusSemantics};
+use crate::analysis::{Kind, MaxDepth, ModusSemantics};
 use crate::logic::{Clause, IRTerm, Literal, Predicate};
 use crate::modusfile::{self, Modusfile};
 use crate::sld::{self, ClauseId, Proof, ResolutionError};
@@ -794,8 +794,6 @@ pub fn plan_from_modusfile(
         Ok(image_literal.clone())
     }
 
-    let max_depth = 175;
-
     let goal_pred = Predicate("_query".to_owned());
     let user_clause = modusfile::ModusClause {
         head: Literal {
@@ -808,6 +806,7 @@ pub fn plan_from_modusfile(
     };
 
     let mf_with_query = Modusfile(mf.0.into_iter().chain(iter::once(user_clause)).collect());
+    let max_depth = mf_with_query.max_depth();
     let ir_clauses: Vec<Clause> = translate_modusfile(&mf_with_query);
 
     let q_clause = ir_clauses

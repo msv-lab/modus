@@ -21,13 +21,7 @@ use std::{
     io, iter,
 };
 
-use crate::{
-    analysis, builtin,
-    logic::Predicate,
-    modusfile::{self, Modusfile},
-    translate::translate_modusfile,
-    unification::{compose_extend, compose_no_extend, Rename, Substitution},
-};
+use crate::{analysis::{self, MaxDepth}, builtin, logic::Predicate, modusfile::{self, Modusfile}, translate::translate_modusfile, unification::{compose_extend, compose_no_extend, Rename, Substitution}};
 use crate::{builtin::SelectBuiltinResult, unification::RenameWithSubstitution};
 use crate::{
     logic::{self, Signature},
@@ -1184,7 +1178,6 @@ pub fn proofs(tree: &Tree, rules: &[Clause], goal: &Goal) -> HashMap<Goal, Proof
 pub fn tree_from_modusfile(
     mf: Modusfile,
     query: modusfile::Expression,
-    max_depth: usize,
     full_tree: bool,
 ) -> (Goal, Vec<Clause>, SLDResult) {
     // 1. Create a new clause with a nullary goal '_query', with a body of the user's query.
@@ -1201,9 +1194,9 @@ pub fn tree_from_modusfile(
         },
         body: Some(query),
     };
-    let clauses: Vec<Clause> = translate_modusfile(&Modusfile(
-        mf.0.into_iter().chain(iter::once(user_clause)).collect(),
-    ));
+    let mf_with_query =  Modusfile(mf.0.into_iter().chain(iter::once(user_clause)).collect());
+    let max_depth = mf_with_query.max_depth();
+    let clauses: Vec<Clause> = translate_modusfile(&mf_with_query);
 
     let q_clause = clauses
         .iter()
@@ -1564,7 +1557,7 @@ mod tests {
             args: vec!["f\"alpine${X}\"".parse().unwrap()],
         });
 
-        let (_, _, sld_res) = tree_from_modusfile(mf, query, 20, true);
+        let (_, _, sld_res) = tree_from_modusfile(mf, query, true);
         assert!(sld_res.tree.is_success());
     }
 
