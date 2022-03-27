@@ -28,8 +28,8 @@ use codespan_reporting::{
     },
 };
 use colored::Colorize;
-use modus_lib::{analysis::MaxDepth, transpiler::render_tree};
 use modus_lib::*;
+use modus_lib::{analysis::MaxDepth, transpiler::render_tree};
 use modus_lib::{analysis::ModusSemantics, sld::tree_from_modusfile};
 use ptree::write_tree;
 use std::{ffi::OsStr, fs, path::Path, time::Instant};
