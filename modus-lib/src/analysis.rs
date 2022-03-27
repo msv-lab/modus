@@ -1165,4 +1165,13 @@ mod tests {
         let maxdepth = mf.max_depth();
         assert_eq!(maxdepth, 3 * (2 + 2 + 1) * 1);
     }
+
+    #[test]
+    fn ungrounded_approximate_maxdepth() {
+        let clauses = vec!["foo(X) :- bar(X).", "bar(X).", "_query :- foo(\"aba\")."];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+
+        let maxdepth = mf.max_depth();
+        assert_eq!(maxdepth, 3 * (2 + 2 + 1) * 1);
+    }
 }
