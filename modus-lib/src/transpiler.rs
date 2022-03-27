@@ -132,6 +132,16 @@ fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
                     }),
                     Instruction::Entrypoint(format!("{:?}", new_entrypoint)),
                 ],
+                BuildNode::SetCmd {
+                    parent,
+                    new_cmd,
+                } => vec![
+                    Instruction::From(From {
+                        parent: ResolvedParent::Stage(format!("n_{}", parent)),
+                        alias: Some(str_id),
+                    }),
+                    Instruction::Cmd(format!("{:?}", new_cmd)),
+                ],
                 BuildNode::SetLabel {
                     parent,
                     label,

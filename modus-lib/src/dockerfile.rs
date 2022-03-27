@@ -59,7 +59,7 @@ pub struct Workdir(pub String);
 pub enum Instruction<P> {
     From(From<P>),
     Run(Run),
-    //Cmd(String),
+    Cmd(String),
     Label(String, String),
     // Maintainer(String),
     // Expose(String),
@@ -204,6 +204,7 @@ where
                 Instruction::Env(s) => writeln!(f, "ENV {}", s),
                 Instruction::Workdir(s) => writeln!(f, "WORKDIR {}", s),
                 Instruction::Entrypoint(s) => writeln!(f, "ENTRYPOINT {}", s),
+                Instruction::Cmd(s) => writeln!(f, "CMD {}", s),
                 Instruction::Label(k, v) => writeln!(f, "LABEL {:?}={:?}", k, v),
             }?;
         }

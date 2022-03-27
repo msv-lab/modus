@@ -184,6 +184,10 @@ pub enum BuildNode {
         parent: NodeId,
         new_entrypoint: Vec<String>,
     },
+    SetCmd {
+        parent: NodeId,
+        new_cmd: Vec<String>,
+    },
     SetLabel {
         parent: NodeId,
         label: String,
@@ -481,7 +485,8 @@ pub fn build_dag_from_proofs(
                     // TODO: emit a warning if the tree inside attempts
                     // to build a fresh image - this is probably an incorrect usage.
                 }
-                "set_workdir" | "set_entrypoint" | "set_env" | "append_path" | "set_label" => {
+                "set_workdir" | "set_entrypoint" | "set_cmd" | "set_env" | "append_path"
+                | "set_label" => {
                     if curr_state.current_merge.is_some() {
                         panic!("You can not generate a new image inside a merge.");
                     }
@@ -513,12 +518,30 @@ pub fn build_dag_from_proofs(
                                     .iter()
                                     .map(|t| t.as_constant().unwrap().to_owned())
                                     .collect(),
-                                _ => panic!(),
+                                _ => unreachable!(),
                             };
                             curr_state.set_node(res.new_node(
                                 BuildNode::SetEntrypoint {
                                     parent: img,
                                     new_entrypoint: entrypoint,
+                                },
+                                vec![img],
+                            ));
+                        }
+                        "set_cmd" => {
+                            let arg = &lit.args[1];
+                            let cmd = match arg {
+                                IRTerm::Array(ts) => ts
+                                    .iter()
+                                    .map(|t| t.as_constant().unwrap().to_owned())
+                                    .collect::<Vec<_>>(),
+                                IRTerm::Constant(c) => vec![c.to_owned()],
+                                _ => unreachable!(),
+                            };
+                            curr_state.set_node(res.new_node(
+                                BuildNode::SetCmd {
+                                    parent: img,
+                                    new_cmd: cmd,
                                 },
                                 vec![img],
                             ));
