@@ -661,32 +661,68 @@ impl MaxDepth for Modusfile {
     /// a proof of some literal (subgoal). So the depth can not exceed the number of possible literals.
     /// There may be more accurate ways to compute this, but this is a reasonable approximation.
     fn max_depth(&self) -> usize {
-        fn update(new_literal: &Literal<ModusTerm>, preds: &mut HashSet<Predicate>, possibleConstants: &mut HashSet<String>, maxArity: &mut usize) {
+        /// O(n^2)
+        fn possible_substrings(s: &str) -> HashSet<&str> {
+            let mut output = HashSet::new();
+            for i in 0..s.len() {
+                for j in i + 1..=s.len() {
+                    output.insert(&s[i..j]);
+                }
+            }
+            output
+        }
+
+        fn flattened_constant_array(ts: &[ModusTerm]) -> Vec<&str> {
+            ts.iter()
+                .flat_map(|t| match t {
+                    ModusTerm::Constant(c) => vec![c.as_str()],
+                    ModusTerm::Array(_, ts) => flattened_constant_array(ts),
+                    _ => panic!(),
+                })
+                .collect()
+        }
+
+        fn update<'a>(
+            new_literal: &'a Literal<ModusTerm>,
+            preds: &mut HashSet<Predicate>,
+            possible_constants: &mut HashSet<&'a str>,
+            max_arity: &mut usize,
+        ) {
             preds.insert(new_literal.predicate.clone());
-            if new_literal.args.len() > *maxArity {
-                *maxArity = new_literal.args.len();
+            if new_literal.args.len() > *max_arity {
+                *max_arity = new_literal.args.len();
             }
             for arg in &new_literal.args {
                 match arg {
-                    ModusTerm::Constant(c) => todo!(),
-                    ModusTerm::Array(_, ts) => todo!(),
+                    ModusTerm::Constant(c) => possible_constants.extend(possible_substrings(c)),
+                    ModusTerm::Array(_, ts) => {
+                        for c in flattened_constant_array(ts) {
+                            possible_constants.extend(possible_substrings(c))
+                        }
+                    }
                     _ => (),
                 }
             }
         }
 
         let mut preds: HashSet<Predicate> = HashSet::new();
-        let mut possibleConstants: HashSet<String> = HashSet::new();
-        let mut maxArity: usize = 0;
+        let mut possible_constants: HashSet<&str> = HashSet::new();
+        let mut max_arity: usize = 0;
         for clause in &self.0 {
-            update(&clause.head, &mut preds, &mut possibleConstants, &mut maxArity);
+            update(
+                &clause.head,
+                &mut preds,
+                &mut possible_constants,
+                &mut max_arity,
+            );
             if let Some(b) = &clause.body {
                 for lit in b.literals() {
-                    update(&lit, &mut preds, &mut possibleConstants, &mut maxArity);
+                    update(&lit, &mut preds, &mut possible_constants, &mut max_arity);
                 }
             }
         }
-        preds.len() * possibleConstants.len().pow(maxArity.try_into().unwrap())
+
+        preds.len() * possible_constants.len().pow(max_arity.try_into().unwrap())
     }
 }
 
@@ -1119,5 +1155,14 @@ mod tests {
         let kind_res = mf.kinds();
         assert_eq!(kind_res.errs[0].severity, Severity::Error);
         assert!(kind_res.errs[0].message.contains("Expected kind: Image"));
+    }
+
+    #[test]
+    fn simple_approximate_maxdepth() {
+        let clauses = vec!["foo(X) :- bar(X).", "bar(\"aba\").", "_query :- foo(X)."];
+        let mf: Modusfile = clauses.join("\n").parse().unwrap();
+
+        let maxdepth = mf.max_depth();
+        assert_eq!(maxdepth, 3 * (2 + 2 + 1) * 1);
     }
 }

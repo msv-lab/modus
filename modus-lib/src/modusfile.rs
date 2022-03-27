@@ -112,9 +112,9 @@ impl Expression {
         }
     }
 
-    pub fn literals(&self) -> HashSet<Literal> {
+    pub fn literals(&self) -> HashSet<&Literal> {
         match self {
-            Expression::Literal(lit) => vec![lit.clone()].into_iter().collect(),
+            Expression::Literal(lit) => vec![lit].into_iter().collect(),
             Expression::OperatorApplication(_, e, _) => e.literals(),
             Expression::And(_, _, e1, e2) | Expression::Or(_, _, e1, e2) => e1
                 .literals()
