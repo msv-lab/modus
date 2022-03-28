@@ -204,6 +204,10 @@ pub enum BuildNode {
         key: String,
         value: String,
     },
+    SetUser {
+        parent: NodeId,
+        user: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -486,7 +490,7 @@ pub fn build_dag_from_proofs(
                     // to build a fresh image - this is probably an incorrect usage.
                 }
                 "set_workdir" | "set_entrypoint" | "set_cmd" | "set_env" | "append_path"
-                | "set_label" => {
+                | "set_label" | "set_user" => {
                     if curr_state.current_merge.is_some() {
                         panic!("You can not generate a new image inside a merge.");
                     }
@@ -580,6 +584,12 @@ pub fn build_dag_from_proofs(
                                 },
                                 vec![img],
                             ));
+                        }
+                        "set_user" => {
+                            let user = lit.args[1].as_constant().unwrap().to_owned();
+                            curr_state.set_node(
+                                res.new_node(BuildNode::SetUser { parent: img, user }, vec![img]),
+                            );
                         }
                         _ => unreachable!(),
                     }

@@ -17,6 +17,7 @@ build_deps(profile) :-
   copy("modus/Cargo.toml", "modus/"),
   copy("Cargo.toml", "."),
   copy("Cargo.lock", "."),
+  copy("rust-toolchain.toml", "."),
   run("mkdir modus-lib/src modus/src &&\
        echo 'pub struct Nothing;' > modus-lib/src/lib.rs &&\
        echo 'fn main () {}' > modus/src/main.rs &&\

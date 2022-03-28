@@ -59,7 +59,8 @@ use std::{
     convert::TryInto,
     fs::OpenOptions,
     path::{Path, PathBuf},
-    process::{Command, ExitStatus, Stdio}, time::Instant,
+    process::{Command, ExitStatus, Stdio},
+    time::Instant,
 };
 
 use spawn_wait::{ProcessSet, SignalHandler};

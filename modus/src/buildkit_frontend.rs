@@ -232,11 +232,15 @@ async fn handle_build_plan(
             let user = imgspec
                 .config
                 .as_ref()
-                .and_then(|x| x.user.as_ref().map(|x| &x[..]))
-                .unwrap_or("0");
-            cmd = cmd
-                .cwd(get_cwd_from_image_spec(&imgspec).join(this_cwd))
-                .user(user);
+                .and_then(|x| x.user.as_ref().map(|x| &x[..]));
+            cmd = cmd.cwd(get_cwd_from_image_spec(&imgspec).join(this_cwd));
+            if let Some(user) = user {
+                cmd = cmd.user(user);
+            } else {
+                // This seems to cause docker to not try to set uid (thereby
+                // trying to resolve usernames) at all, which is what we want.
+                cmd = cmd.user("");
+            }
             let envs = imgspec.config.as_ref().and_then(|x| x.env.as_ref());
             if let Some(env_map) = envs {
                 for (key, value) in env_map.iter() {
@@ -372,22 +376,15 @@ async fn handle_build_plan(
             } => {
                 let (p_out, p_conf) = translated_nodes[*parent].clone().unwrap();
                 let mut p_conf = (*p_conf).clone();
-                let img_conf = p_conf
-                    .config
-                    .get_or_insert_with(empty_image_config);
+                let img_conf = p_conf.config.get_or_insert_with(empty_image_config);
                 img_conf.entrypoint = Some(new_entrypoint.to_owned());
                 img_conf.cmd = None;
                 (p_out, Arc::new(p_conf))
             }
-            SetCmd {
-                parent,
-                new_cmd,
-            } => {
+            SetCmd { parent, new_cmd } => {
                 let (p_out, p_conf) = translated_nodes[*parent].clone().unwrap();
                 let mut p_conf = (*p_conf).clone();
-                let img_conf = p_conf
-                    .config
-                    .get_or_insert_with(empty_image_config);
+                let img_conf = p_conf.config.get_or_insert_with(empty_image_config);
                 img_conf.cmd = Some(new_cmd.to_owned());
                 (p_out, Arc::new(p_conf))
             }
@@ -536,6 +533,12 @@ async fn handle_build_plan(
                     .entry(key.to_owned())
                     .or_insert_with(String::new)
                     .push_str(&value);
+                (p_out, Arc::new(p_conf))
+            }
+            SetUser { parent, user } => {
+                let (p_out, p_conf) = translated_nodes[*parent].clone().unwrap();
+                let mut p_conf = (*p_conf).clone();
+                p_conf.config.get_or_insert_with(empty_image_config).user = Some(user.to_owned());
                 (p_out, Arc::new(p_conf))
             }
         };
