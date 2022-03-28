@@ -1,4 +1,4 @@
-name: Modus Build and Release Workflow
+name: CI
 
 on:
   push:
@@ -41,6 +41,7 @@ jobs:
           fi
 
   build-x86_64:
+    name: Build x86_64 binary
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
@@ -74,6 +75,7 @@ jobs:
 
 
   build-aarch64:
+    name: Build ARM binary
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
@@ -104,6 +106,7 @@ jobs:
           target/aarch64-unknown-linux-musl/release/buildkit-frontend
 
   debug-build-and-test:
+    name: cargo test
     runs-on: ubuntu-latest
 
     steps:
@@ -124,6 +127,7 @@ jobs:
 
 
   build-image-and-test:
+    name: Build frontend image and run system tests
     runs-on: ubuntu-latest
     needs: [ build-x86_64, build-aarch64, debug-build-and-test, precheck ]
 
