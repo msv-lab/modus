@@ -131,7 +131,7 @@ class TestSimple(ModusTestCase):
         img = self.build(mf, "b")[Fact("b", ())]
         self.assertEqual(img.read_file("/aa"), "content\n")
 
-        # just make sure we can actually output a if we wanted to.
+        # just to make sure we can actually output a if we wanted to.
         self.build(mf, "a")
 
     def test_from_scratch_property(self):
@@ -146,7 +146,7 @@ class TestSimple(ModusTestCase):
         img = self.build(mf, "b")[Fact("b", ())]
         self.assertEqual(img.read_file("/tmp/aa"), "content\n")
 
-        # just make sure we can actually output a if we wanted to.
+        # just to make sure we can actually output a if we wanted to.
         self.build(mf, "a")
 
     def test_many_outputs(self):
@@ -165,7 +165,10 @@ class TestSimple(ModusTestCase):
                 from("alpine")
                     ::set_label("com.modus-continens.label-test", "hello").
             """)
-        self.build(mf, "a")
+        imgs = self.build(mf, "a")
+        self.assertEqual(len(imgs), 1)
+        img = imgs[Fact("a", ())]
+        self.assertEqual(img.get_config()["Config"]["Labels"]["com.modus-continens.label-test"], "hello")
 
     def test_entrypoint(self):
         mf = dedent("""\
@@ -178,10 +181,15 @@ class TestSimple(ModusTestCase):
             d(X) :-
                 from("alpine")::set_entrypoint(X).
             """)
-        self.assertEqual(len(self.build(mf, "a")), 1)
-        self.assertEqual(len(self.build(mf, "b")), 1)
-        self.assertEqual(len(self.build(mf, 'c("aaa")')), 1)
-        self.assertEqual(len(self.build(mf, 'd(["/bin/echo", "aaa"])')), 1)
+        def assert_ep_is(imgs, ep):
+            self.assertEqual(len(imgs), 1)
+            img = next(iter(imgs.values()))
+            self.assertEqual(img.get_config()["Config"]["Entrypoint"], ep)
+            self.assertIsNone(img.get_config()["Config"]["Cmd"])
+        assert_ep_is(self.build(mf, "a"), ["/bin/echo"])
+        assert_ep_is(self.build(mf, "b"), ["/bin/echo", "hello"])
+        assert_ep_is(self.build(mf, 'c("aaa")'), ["/bin/echo", "aaa"])
+        assert_ep_is(self.build(mf, 'd(["/bin/echo", "aaa"])'), ["/bin/echo", "aaa"])
 
     def test_cmd(self):
         mf = dedent("""\
@@ -195,7 +203,12 @@ class TestSimple(ModusTestCase):
             d(X) :-
                 base::set_cmd(X).
             """)
-        self.assertEqual(len(self.build(mf, "a")), 1)
-        self.assertEqual(len(self.build(mf, "b")), 1)
-        self.assertEqual(len(self.build(mf, 'c("aaa")')), 1)
-        self.assertEqual(len(self.build(mf, 'd(["aaa", "bbb"])')), 1)
+        def assert_cmd_is(imgs, cmd):
+            self.assertEqual(len(imgs), 1)
+            img = next(iter(imgs.values()))
+            self.assertEqual(img.get_config()["Config"]["Entrypoint"], ["/bin/echo"])
+            self.assertEqual(img.get_config()["Config"]["Cmd"], cmd)
+        assert_cmd_is(self.build(mf, "a"), [])
+        assert_cmd_is(self.build(mf, "b"), ["hello"])
+        assert_cmd_is(self.build(mf, 'c("aaa")'), ["aaa"])
+        assert_cmd_is(self.build(mf, 'd(["aaa", "bbb"])'), ["aaa", "bbb"])

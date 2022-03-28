@@ -59,6 +59,14 @@ class Image:
         result = run(cmd, check=True, text=True, stdout=PIPE, stderr=DEVNULL)
         return result.stdout
 
+    def get_config(self):
+        cmd = ["docker", "inspect", self.digest]
+        result = run(cmd, check=True, text=True, stdout=PIPE, stderr=DEVNULL)
+        res = json.loads(result.stdout)
+        if len(res) != 1:
+            raise Exception("Invalid output from docker inspect")
+        return res[0]
+
 class Context(TemporaryDirectory):
 
     def add_file(self, path, content):

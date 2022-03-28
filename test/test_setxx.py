@@ -26,6 +26,7 @@ class TestSetXX(ModusTestCase):
         self.assertEqual(len(imgs), 1)
         first_img = imgs[Fact("final", ())]
         self.assertEqual(first_img.read_file("/result").strip(), expect_result)
+        return first_img
 
     def test_set_env(self):
         self.helper("""\
@@ -45,10 +46,14 @@ class TestSetXX(ModusTestCase):
 
     def test_in_env_2(self):
         # in_env does not change image property.
-        self.helper("""\
+        img = self.helper("""\
         final :- from("alpine"),
                     run("true")::in_env("A", "aaa"),
                     run("echo $A > /result").""", "")
+        envs = img.get_config()["Config"]["Env"]
+        for e in envs:
+            if e.startswith("A="):
+                raise AssertionError("A found in env")
 
     def test_append_path(self):
         mf = dedent("""\
