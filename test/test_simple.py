@@ -112,43 +112,6 @@ class TestSimple(ModusTestCase):
         mf = """a :- from("alpine"), run("exit 1")."""
         self.build(mf, "a", should_succeed=False)
 
-    def test_from_scratch_nothing(self):
-        mf = """a :- from("scratch")."""
-        self.build(mf, "a")
-
-    # For the following two tests, we use an alpine image as our final image, as
-    # read_file need a shell and cat.
-
-    def test_from_scratch_copy(self):
-        mf = dedent("""\
-            a :- from("scratch"),
-                 (
-                     from("alpine"),
-                     run("echo content > /aa")
-                 )::copy("/aa", "/aa").
-            b :- from("alpine"),
-                 a::copy("/aa", "/aa").""")
-        img = self.build(mf, "b")[Fact("b", ())]
-        self.assertEqual(img.read_file("/aa"), "content\n")
-
-        # just to make sure we can actually output a if we wanted to.
-        self.build(mf, "a")
-
-    def test_from_scratch_property(self):
-        mf = dedent("""\
-            a :- from("scratch")::set_workdir("/tmp"),
-                 (
-                     from("alpine"),
-                     run("echo content > /aa")
-                 )::copy("/aa", "aa").
-            b :- from("alpine"),
-                 a::copy("/tmp/aa", "/tmp/aa").""")
-        img = self.build(mf, "b")[Fact("b", ())]
-        self.assertEqual(img.read_file("/tmp/aa"), "content\n")
-
-        # just to make sure we can actually output a if we wanted to.
-        self.build(mf, "a")
-
     def test_many_outputs(self):
         mf = dedent("""\
             a(X) :-
