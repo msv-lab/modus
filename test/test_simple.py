@@ -131,7 +131,7 @@ class TestSimple(ModusTestCase):
         img = self.build(mf, "b")[Fact("b", ())]
         self.assertEqual(img.read_file("/aa"), "content\n")
 
-        # just make sure we can actually output a if we wanted to.
+        # just to make sure we can actually output a if we wanted to.
         self.build(mf, "a")
 
     def test_from_scratch_property(self):
@@ -146,7 +146,7 @@ class TestSimple(ModusTestCase):
         img = self.build(mf, "b")[Fact("b", ())]
         self.assertEqual(img.read_file("/tmp/aa"), "content\n")
 
-        # just make sure we can actually output a if we wanted to.
+        # just to make sure we can actually output a if we wanted to.
         self.build(mf, "a")
 
     def test_many_outputs(self):
@@ -158,44 +158,3 @@ class TestSimple(ModusTestCase):
             run(f"echo ${X}").""") + "\n".join(f"aa(\"{i}\")." for i in range(1, 21))
         imgs = self.build(mf, "a(X)")
         self.assertEqual(len(imgs), 20)
-
-    def test_label(self):
-        mf = dedent("""\
-            a :-
-                from("alpine")
-                    ::set_label("com.modus-continens.label-test", "hello").
-            """)
-        self.build(mf, "a")
-
-    def test_entrypoint(self):
-        mf = dedent("""\
-            a :-
-                from("alpine")::set_entrypoint("/bin/echo").
-            b :-
-                from("alpine")::set_entrypoint(["/bin/echo", "hello"]).
-            c(X) :-
-                from("alpine")::set_entrypoint(["/bin/echo", X]).
-            d(X) :-
-                from("alpine")::set_entrypoint(X).
-            """)
-        self.assertEqual(len(self.build(mf, "a")), 1)
-        self.assertEqual(len(self.build(mf, "b")), 1)
-        self.assertEqual(len(self.build(mf, 'c("aaa")')), 1)
-        self.assertEqual(len(self.build(mf, 'd(["/bin/echo", "aaa"])')), 1)
-
-    def test_cmd(self):
-        mf = dedent("""\
-            base :- from("alpine")::set_entrypoint("/bin/echo").
-            a :-
-                base::set_cmd([]).
-            b :-
-                base::set_cmd(["hello"]).
-            c(X) :-
-                base::set_cmd([X]).
-            d(X) :-
-                base::set_cmd(X).
-            """)
-        self.assertEqual(len(self.build(mf, "a")), 1)
-        self.assertEqual(len(self.build(mf, "b")), 1)
-        self.assertEqual(len(self.build(mf, 'c("aaa")')), 1)
-        self.assertEqual(len(self.build(mf, 'd(["aaa", "bbb"])')), 1)
