@@ -1624,7 +1624,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn arrays() {
+    fn lists() {
         let goal: Goal<logic::IRTerm> = vec!["app([\"sh\", \"--some-option\"])".parse().unwrap()];
         let clauses: Vec<logic::Clause> = vec![
             "app(entrypoint_params) :- from(\"alpine\")::set_entrypoint(entrypoint_params)."
@@ -1646,7 +1646,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn arrays_error_when_ungrounded() {
+    fn lists_error_when_ungrounded() {
         let goal: Goal<logic::IRTerm> = vec!["app([\"sh\", someOption])".parse().unwrap()];
         let clauses: Vec<logic::Clause> = vec![
             "app(entrypoint_params) :- from(\"alpine\")::set_entrypoint(entrypoint_params)."

@@ -40,7 +40,7 @@ impl fmt::Display for IRTerm {
         match self {
             IRTerm::Constant(s) => write!(f, "\"{}\"", s),
             IRTerm::UserVariable(s) => write!(f, "{}", s),
-            IRTerm::Array(ts) => write!(
+            IRTerm::List(ts) => write!(
                 f,
                 "[{}]",
                 ts.iter()
@@ -62,7 +62,7 @@ impl Rename<IRTerm> for IRTerm {
     fn rename(&self) -> IRTerm {
         match self {
             IRTerm::Constant(_) => (*self).clone(),
-            IRTerm::Array(ts) => IRTerm::Array(ts.iter().map(|t| t.rename()).collect()),
+            IRTerm::List(ts) => IRTerm::List(ts.iter().map(|t| t.rename()).collect()),
             _ => {
                 let index = AVAILABLE_VARIABLE_INDEX.fetch_add(1, Ordering::SeqCst);
                 IRTerm::RenamedVariable(index, Box::new((*self).clone()))
@@ -128,7 +128,7 @@ impl From<String> for Predicate {
 pub enum IRTerm {
     Constant(String),
     UserVariable(String),
-    Array(Vec<IRTerm>),
+    List(Vec<IRTerm>),
 
     /// Primarily used to establish f-string constraints.
     AuxiliaryVariable(u32),
@@ -151,7 +151,7 @@ impl IRTerm {
     pub fn is_constant_or_compound_constant(&self) -> bool {
         match self {
             Self::Constant(_) => true,
-            Self::Array(ts) => ts.iter().all(|t| t.is_constant_or_compound_constant()),
+            Self::List(ts) => ts.iter().all(|t| t.is_constant_or_compound_constant()),
             _ => false,
         }
     }
@@ -272,7 +272,7 @@ impl IRTerm {
             (IRTerm::AnonymousVariable(_), true) => {
                 set.insert(self.clone());
             }
-            (IRTerm::Array(ts), b) => {
+            (IRTerm::List(ts), b) => {
                 set.extend(ts.iter().flat_map(|t| t.variables(b)));
             }
             (IRTerm::AuxiliaryVariable(_), _)
@@ -490,7 +490,7 @@ pub mod parser {
         literal_identifier(i)
     }
 
-    fn array_term(i: Span) -> IResult<Span, Vec<IRTerm>> {
+    fn list_term(i: Span) -> IResult<Span, Vec<IRTerm>> {
         delimited(
             terminated(tag("["), multispace0),
             separated_list0(delimited(multispace0, tag(","), multispace0), term),
@@ -500,7 +500,7 @@ pub mod parser {
 
     pub fn term(i: Span) -> IResult<Span, IRTerm> {
         alt((
-            map(array_term, IRTerm::Array),
+            map(list_term, IRTerm::List),
             map(constant, |s| IRTerm::Constant(s.fragment().to_string())),
             map(is_a("_"), |_| sld::Auxiliary::aux(true)),
             map(variable, |s| IRTerm::UserVariable(s.fragment().to_string())),

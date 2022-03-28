@@ -518,7 +518,7 @@ pub fn build_dag_from_proofs(
                             let arg = &lit.args[1];
                             let entrypoint = match arg {
                                 IRTerm::Constant(c) => vec![c.to_owned()],
-                                IRTerm::Array(ts) => ts
+                                IRTerm::List(ts) => ts
                                     .iter()
                                     .map(|t| t.as_constant().unwrap().to_owned())
                                     .collect(),
@@ -535,7 +535,7 @@ pub fn build_dag_from_proofs(
                         "set_cmd" => {
                             let arg = &lit.args[1];
                             let cmd = match arg {
-                                IRTerm::Array(ts) => ts
+                                IRTerm::List(ts) => ts
                                     .iter()
                                     .map(|t| t.as_constant().unwrap().to_owned())
                                     .collect::<Vec<_>>(),
