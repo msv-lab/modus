@@ -127,3 +127,16 @@ class TestSetXX(ModusTestCase):
         assert_cmd_is(self.build(mf, "b"), ["hello"])
         assert_cmd_is(self.build(mf, 'c("aaa")'), ["aaa"])
         assert_cmd_is(self.build(mf, 'd(["aaa", "bbb"])'), ["aaa", "bbb"])
+
+    def test_user(self):
+        mf = dedent("""\
+            a :- (
+                from("alpine"),
+                run("adduser -D dev")
+            )::set_user("dev"),
+            run("id > ~/out").
+        """)
+        img = self.build(mf, "a")[Fact("a", ())]
+        self.assertEqual(img.get_config()["Config"]["User"], "dev")
+        out = img.read_file("/home/dev/out")
+        self.assertTrue("(dev)" in out)

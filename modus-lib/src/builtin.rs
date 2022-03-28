@@ -487,6 +487,18 @@ intrinsic_predicate!(
     false,
     false
 );
+intrinsic_predicate!(
+    _operator_set_user_begin,
+    crate::analysis::Kind::Image,
+    false,
+    false
+);
+intrinsic_predicate!(
+    _operator_set_user_end,
+    crate::analysis::Kind::Image,
+    false,
+    false
+);
 intrinsic_predicate!(copy, crate::analysis::Kind::Layer, false, false);
 intrinsic_predicate!(_operator_merge_begin, crate::analysis::Kind::Layer, false);
 intrinsic_predicate!(_operator_merge_end, crate::analysis::Kind::Layer, false);
@@ -540,6 +552,8 @@ pub fn select_builtin<'a>(
         _operator_in_env_end,
         _operator_append_path_begin,
         _operator_append_path_end,
+        _operator_set_user_begin,
+        _operator_set_user_end,
         copy,
         equality::StringEq1,
         equality::StringEq2,
@@ -568,6 +582,7 @@ lazy_static! {
         m.insert("set_cmd", (Kind::Image, Kind::Image));
         m.insert("set_workdir", (Kind::Image, Kind::Image));
         m.insert("set_label", (Kind::Image, Kind::Image));
+        m.insert("set_user", (Kind::Image, Kind::Image));
         m.insert("append_path", (Kind::Image, Kind::Image));
         m.insert("in_workdir", (Kind::Layer, Kind::Layer));
         m.insert("in_env", (Kind::Layer, Kind::Layer));

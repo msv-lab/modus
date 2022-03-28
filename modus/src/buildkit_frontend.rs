@@ -539,6 +539,12 @@ async fn handle_build_plan(
                     .push_str(&value);
                 (p_out, Arc::new(p_conf))
             }
+            SetUser { parent, user } => {
+                let (p_out, p_conf) = translated_nodes[*parent].clone().unwrap();
+                let mut p_conf = (*p_conf).clone();
+                p_conf.config.get_or_insert_with(empty_image_config).user = Some(user.to_owned());
+                (p_out, Arc::new(p_conf))
+            }
         };
         translated_nodes[node_id] = Some(new_node);
     }

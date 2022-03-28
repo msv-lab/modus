@@ -132,10 +132,7 @@ fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
                     }),
                     Instruction::Entrypoint(format!("{:?}", new_entrypoint)),
                 ],
-                BuildNode::SetCmd {
-                    parent,
-                    new_cmd,
-                } => vec![
+                BuildNode::SetCmd { parent, new_cmd } => vec![
                     Instruction::From(From {
                         parent: ResolvedParent::Stage(format!("n_{}", parent)),
                         alias: Some(str_id),
@@ -206,6 +203,7 @@ fn plan_to_docker(plan: &BuildPlan) -> ResolvedDockerfile {
                 BuildNode::AppendEnvValue { parent, key, value } => {
                     todo!()
                 }
+                BuildNode::SetUser { .. } => todo!(),
             }
         })
         .flatten()
