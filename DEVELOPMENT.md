@@ -36,7 +36,7 @@ To publish a new release, increment the version number in `modus/Cargo.toml` and
 
 and push the tag to trigger the workflow:
 
-    git pushs && git push --tags
+    git push && git push --tags
 
 Once the workflow is complete, publish the source code to crates.io with:
 
