@@ -376,22 +376,15 @@ async fn handle_build_plan(
             } => {
                 let (p_out, p_conf) = translated_nodes[*parent].clone().unwrap();
                 let mut p_conf = (*p_conf).clone();
-                let img_conf = p_conf
-                    .config
-                    .get_or_insert_with(empty_image_config);
+                let img_conf = p_conf.config.get_or_insert_with(empty_image_config);
                 img_conf.entrypoint = Some(new_entrypoint.to_owned());
                 img_conf.cmd = None;
                 (p_out, Arc::new(p_conf))
             }
-            SetCmd {
-                parent,
-                new_cmd,
-            } => {
+            SetCmd { parent, new_cmd } => {
                 let (p_out, p_conf) = translated_nodes[*parent].clone().unwrap();
                 let mut p_conf = (*p_conf).clone();
-                let img_conf = p_conf
-                    .config
-                    .get_or_insert_with(empty_image_config);
+                let img_conf = p_conf.config.get_or_insert_with(empty_image_config);
                 img_conf.cmd = Some(new_cmd.to_owned());
                 (p_out, Arc::new(p_conf))
             }

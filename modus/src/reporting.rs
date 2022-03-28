@@ -14,9 +14,13 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{fmt::Display, io::{Write, self}, path::Path};
+use std::{
+    fmt::Display,
+    io::{self, Write},
+    path::Path,
+};
 
-use serde::{Serialize, ser::SerializeSeq};
+use serde::{ser::SerializeSeq, Serialize};
 
 use modus_lib::{
     imagegen::BuildPlan,
@@ -34,7 +38,8 @@ pub enum ConstantTerm {
 impl Serialize for ConstantTerm {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer {
+        S: serde::Serializer,
+    {
         match self {
             ConstantTerm::Constant(c) => serializer.serialize_str(c),
             ConstantTerm::Array(cs) => {
@@ -43,7 +48,7 @@ impl Serialize for ConstantTerm {
                     seq.serialize_element(c)?;
                 }
                 seq.end()
-            },
+            }
         }
     }
 }
