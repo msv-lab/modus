@@ -233,10 +233,13 @@ async fn handle_build_plan(
                 .config
                 .as_ref()
                 .and_then(|x| x.user.as_ref().map(|x| &x[..]));
-            cmd = cmd
-                .cwd(get_cwd_from_image_spec(&imgspec).join(this_cwd));
+            cmd = cmd.cwd(get_cwd_from_image_spec(&imgspec).join(this_cwd));
             if let Some(user) = user {
                 cmd = cmd.user(user);
+            } else {
+                // This seems to cause docker to not try to set uid (thereby
+                // trying to resolve usernames) at all, which is what we want.
+                cmd = cmd.user("");
             }
             let envs = imgspec.config.as_ref().and_then(|x| x.env.as_ref());
             if let Some(env_map) = envs {

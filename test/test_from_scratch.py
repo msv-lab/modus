@@ -64,11 +64,11 @@ class TestFromScratch(ModusTestCase):
             scratch_with_shell :-
                 (
                     from("scratch"),
-                    bbox::copy("sh", "/bin/sh"),
-                    bbox::copy("cat", "/bin/cat")
-                )::append_path("/bin"),
-                bbox::copy("/etc/passwd", "/etc/passwd"),
-                bbox::copy("/etc/group", "/etc/group").
+                    (
+                        bbox::copy("sh", "sh"),
+                        bbox::copy("cat", "cat")
+                    )::in_workdir("/bin")
+                )::append_path("/bin").
             a :- scratch_with_shell, run("echo hello > /aa").
         """)
         img = self.build(mf, "a")[Fact("a", ())]
@@ -82,8 +82,6 @@ class TestFromScratch(ModusTestCase):
                     from("scratch"),
                     bbox::copy("sh", "/bin/sh"),
                     bbox::copy("cp", "/bin/cp"),
-                    bbox::copy("/etc/passwd", "/etc/passwd"),
-                    bbox::copy("/etc/group", "/etc/group"),
                     (
                         bbox::copy("cat", "/bin/cat"),
                         run("echo hello > /aa")
