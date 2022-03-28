@@ -28,13 +28,15 @@ Use the environment variable `MODUS_EXECUTABLE` to specify the modus executable 
 
 ## Making a New Release
 
-All building, tests and release making are handled by the GitHub Actions workflow except for `cargo publish`. To publish a new release, simply create a new git tag with the next version number, e.g.:
+All building, tests and release making are handled by the GitHub Actions workflow except for `cargo publish`. Version numbers also need to be incremented manually.
+
+To publish a new release, increment the version number in `modus/Cargo.toml` and `modus-lib/Cargo.toml`. Note that the `modus-lib` dependency in `modus/Cargo.toml` also need to have its version incremented. Commit these changes, then create a new git tag with the next version number, e.g.:
 
     git tag 0.1.2
 
 and push the tag to trigger the workflow:
 
-    git push --tags
+    git pushs && git push --tags
 
 Once the workflow is complete, publish the source code to crates.io with:
 
