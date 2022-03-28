@@ -124,6 +124,18 @@ impl Expression {
         }
     }
 
+    pub fn operators(&self) -> HashSet<&Operator> {
+        match self {
+            Expression::OperatorApplication(_, _, op) => vec![op].into_iter().collect(),
+            Expression::And(_, _, e1, e2) | Expression::Or(_, _, e1, e2) => e1
+                .operators()
+                .into_iter()
+                .chain(e2.operators().into_iter())
+                .collect(),
+            _ => HashSet::new(),
+        }
+    }
+
     /// Negates at the current expression level.
     /// So, does not apply De Morgan's laws.
     pub fn negate_current(&self) -> Expression {

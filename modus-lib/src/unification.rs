@@ -200,17 +200,7 @@ impl Literal<IRTerm> {
                         // cannot unify if they are both different constants
                         (IRTerm::Constant(_), IRTerm::Constant(_)) => return None,
 
-                        (IRTerm::List(terms1), IRTerm::List(terms2)) => {
-                            if terms1.len() == terms2.len() {
-                                if let Some(new_sub) = unify_arglist(&terms1, &terms2) {
-                                    s = compose_extend(&s, &new_sub);
-                                } else {
-                                    return None;
-                                }
-                            } else {
-                                return None;
-                            }
-                        }
+                        (IRTerm::List(_), IRTerm::List(_)) => unimplemented!("TODO: borrow unification from Prolog."),
                         (IRTerm::List(_), IRTerm::Constant(_))
                         | (IRTerm::Constant(_), IRTerm::List(_)) => return None,
                         (IRTerm::List(ts), v) | (v, IRTerm::List(ts)) => {
@@ -281,24 +271,6 @@ mod tests {
         assert_eq!(
             mgu.get(&logic::IRTerm::UserVariable("W".into())),
             Some(&logic::IRTerm::UserVariable("U".into()))
-        );
-    }
-
-    #[test]
-    fn list_unifier() {
-        let l: logic::Literal = "p([X, \"b\"], X)".parse().unwrap();
-        let m: logic::Literal = "p([\"a\", Y], X)".parse().unwrap();
-        let result = l.unify(&m);
-        assert!(result.is_some());
-        let mgu = result.unwrap();
-        assert!(l.substitute(&mgu).eq_ignoring_position(&m.substitute(&mgu)));
-        assert_eq!(
-            mgu.get(&logic::IRTerm::UserVariable("X".into())),
-            Some(&logic::IRTerm::Constant("a".into()))
-        );
-        assert_eq!(
-            mgu.get(&logic::IRTerm::UserVariable("Y".into())),
-            Some(&logic::IRTerm::Constant("b".into()))
         );
     }
 
