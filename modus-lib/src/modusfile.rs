@@ -124,6 +124,18 @@ impl Expression {
         }
     }
 
+    pub fn operators(&self) -> HashSet<&Operator> {
+        match self {
+            Expression::OperatorApplication(_, _, op) => vec![op].into_iter().collect(),
+            Expression::And(_, _, e1, e2) | Expression::Or(_, _, e1, e2) => e1
+                .operators()
+                .into_iter()
+                .chain(e2.operators().into_iter())
+                .collect(),
+            _ => HashSet::new(),
+        }
+    }
+
     /// Negates at the current expression level.
     /// So, does not apply De Morgan's laws.
     pub fn negate_current(&self) -> Expression {
@@ -192,7 +204,7 @@ pub enum ModusTerm {
     },
     UserVariable(String),
     AnonymousVariable,
-    Array(SpannedPosition, Vec<ModusTerm>),
+    List(SpannedPosition, Vec<ModusTerm>),
 }
 
 impl ModusTerm {
@@ -229,7 +241,7 @@ impl fmt::Display for ModusTerm {
                     .join("")
             ),
             ModusTerm::AnonymousVariable => write!(f, "_"),
-            ModusTerm::Array(_, ts) => write!(
+            ModusTerm::List(_, ts) => write!(
                 f,
                 "[{}]",
                 ts.iter()
@@ -263,7 +275,7 @@ impl From<ModusTerm> for logic::IRTerm {
             }
             ModusTerm::UserVariable(v) => logic::IRTerm::UserVariable(v),
             ModusTerm::AnonymousVariable => sld::Auxiliary::aux(true),
-            ModusTerm::Array(_, _) => unimplemented!(),
+            ModusTerm::List(_, _) => unimplemented!(),
         }
     }
 }
@@ -341,6 +353,23 @@ impl fmt::Display for Operator {
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Modusfile(pub Vec<ModusClause>);
+
+impl Modusfile {
+    /// Adds a rule with a head literal that serves as the goal `_query :- [body]`.
+    /// Note: does not check whether there is an existing goal, or other checks.
+    pub fn add_goal(&mut self, goal: Expression) -> &mut Self {
+        self.0.push(ModusClause {
+            head: Literal {
+                positive: true,
+                position: None,
+                predicate: Predicate("_query".into()),
+                args: Vec::new(),
+            },
+            body: Some(goal),
+        });
+        self
+    }
+}
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Version {
@@ -914,7 +943,7 @@ pub mod parser {
         )(i)
     }
 
-    fn modus_array_term(i: Span) -> IResult<Span, Vec<ModusTerm>> {
+    fn modus_list_term(i: Span) -> IResult<Span, Vec<ModusTerm>> {
         delimited(
             terminated(tag("["), token_sep0),
             separated_list0(delimited(token_sep0, tag(","), token_sep0), modus_term),
@@ -925,8 +954,8 @@ pub mod parser {
     pub fn modus_term(i: Span) -> IResult<Span, ModusTerm> {
         alt((
             map(modus_const, ModusTerm::Constant),
-            map(recognized_span(modus_array_term), |(span, terms)| {
-                ModusTerm::Array(span, terms)
+            map(recognized_span(modus_list_term), |(span, terms)| {
+                ModusTerm::List(span, terms)
             }),
             map(modus_format_string, |(position, fragments)| {
                 ModusTerm::FormatString {
@@ -1663,9 +1692,9 @@ mod tests {
     }
 
     #[test]
-    fn modus_empty_array_term() {
+    fn modus_empty_list_term() {
         let case = "[]";
-        let expected = ModusTerm::Array(
+        let expected = ModusTerm::List(
             SpannedPosition {
                 offset: 0,
                 length: 2,
@@ -1676,9 +1705,9 @@ mod tests {
     }
 
     #[test]
-    fn modus_simple_array_term() {
+    fn modus_simple_list_term() {
         let case = r#"[ "javac", javacParam ]"#;
-        let expected = ModusTerm::Array(
+        let expected = ModusTerm::List(
             SpannedPosition {
                 offset: 0,
                 length: 23,

@@ -27,6 +27,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
+use std::iter;
 use std::ops::Range;
 
 use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
@@ -685,7 +686,7 @@ fn check_negated_logic_kind(
     }
 }
 
-fn head_term_check(mf: &Modusfile) -> Result<(), Vec<Diagnostic<()>>> {
+fn term_check(mf: &Modusfile) -> Result<(), Vec<Diagnostic<()>>> {
     fn generate_f_string_diag(pos: &SpannedPosition) -> Diagnostic<()> {
         Diagnostic::error()
             .with_message("A format string was found in a head literal.")
@@ -695,9 +696,9 @@ fn head_term_check(mf: &Modusfile) -> Result<(), Vec<Diagnostic<()>>> {
             )])
     }
 
-    fn generate_array_diag(pos: &SpannedPosition) -> Diagnostic<()> {
+    fn generate_list_diag(pos: &SpannedPosition) -> Diagnostic<()> {
         Diagnostic::error()
-            .with_message("An array was found in a head literal. This is not supported currently.")
+            .with_message("A list was found here. This is not supported currently.")
             .with_labels(vec![Label::primary(
                 (),
                 pos.offset..pos.offset + pos.length,
@@ -710,29 +711,82 @@ fn head_term_check(mf: &Modusfile) -> Result<(), Vec<Diagnostic<()>>> {
                 ModusTerm::FormatString { position, .. } => {
                     return Err(generate_f_string_diag(position));
                 }
-                ModusTerm::Array(_, ts) => check_no_f_string(ts)?,
+                ModusTerm::List(_, ts) => check_no_f_string(ts)?,
                 _ => (),
             }
         }
         Ok(())
     }
 
+    fn head_term_check(head_lit: &Literal<ModusTerm>) -> Vec<Diagnostic<()>> {
+        head_lit
+            .args
+            .iter()
+            .flat_map(|arg| match arg {
+                ModusTerm::FormatString { position, .. } => {
+                    vec![generate_f_string_diag(position)]
+                }
+                ModusTerm::List(position, ts) => {
+                    let mut v = vec![generate_list_diag(position)];
+                    if let Err(d) = check_no_f_string(ts) {
+                        v.push(d);
+                    }
+                    v
+                }
+                _ => Vec::new(),
+            })
+            .collect()
+    }
+
+    fn body_term_check(body_lit: &Literal<ModusTerm>) -> Vec<Diagnostic<()>> {
+        body_lit
+            .args
+            .iter()
+            .filter_map(|arg| match arg {
+                ModusTerm::List(position, _) => Some(generate_list_diag(position)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn op_term_check(op: &Operator) -> Vec<Diagnostic<()>> {
+        let allowed_list_ops = vec![
+            Predicate("set_entrypoint".into()),
+            Predicate("set_cmd".into()),
+        ];
+
+        if !allowed_list_ops.contains(&op.predicate) {
+            op.args
+                .iter()
+                .filter_map(|arg| match arg {
+                    ModusTerm::List(position, _) => Some(generate_list_diag(position)),
+                    _ => None,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
     let mut diags = Vec::new();
 
     for modus_clause in &mf.0 {
-        for arg in &modus_clause.head.args {
-            match arg {
-                ModusTerm::FormatString { position, .. } => {
-                    diags.push(generate_f_string_diag(position))
-                }
-                ModusTerm::Array(position, ts) => {
-                    diags.push(generate_array_diag(position));
-                    if let Err(d) = check_no_f_string(ts) {
-                        diags.push(d)
-                    }
-                }
-                _ => (),
-            }
+        diags.extend(head_term_check(&modus_clause.head));
+        for lit in modus_clause
+            .body
+            .as_ref()
+            .map(|b| b.literals())
+            .unwrap_or_default()
+        {
+            diags.extend(body_term_check(&lit));
+        }
+        for op in modus_clause
+            .body
+            .as_ref()
+            .map(|b| b.operators())
+            .unwrap_or_default()
+        {
+            diags.extend(op_term_check(&op));
         }
     }
 
@@ -751,6 +805,7 @@ pub fn check_and_output_analysis<
 >(
     kind_res: &KindResult,
     mf: &Modusfile,
+    goal: Option<&Expression>,
     verbose: bool,
     out: &mut W,
     config: &Config,
@@ -762,13 +817,18 @@ pub fn check_and_output_analysis<
         }
     }
 
-    let head_check_res = head_term_check(mf);
-    let head_errors = head_check_res.err().unwrap_or_default();
+    // perform analysis including the goal
+    let mut mf = mf.clone();
+    if let Some(e) = goal {
+        mf.add_goal(e.clone());
+    }
+    let term_check_res = term_check(&mf);
+    let term_errors = term_check_res.err().unwrap_or_default();
 
-    let can_translate = head_errors.is_empty();
+    let can_translate = term_errors.is_empty();
 
     let negation_errors = if can_translate {
-        let ir_clauses = translate_modusfile(mf);
+        let ir_clauses = translate_modusfile(&mf);
         check_negated_logic_kind(&ir_clauses, &kind_res.pred_kind)
             .err()
             .unwrap_or_default()
@@ -780,7 +840,7 @@ pub fn check_and_output_analysis<
         .errs
         .iter()
         .chain(&negation_errors)
-        .chain(&head_errors)
+        .chain(&term_errors)
         .collect::<Vec<_>>();
     for err in &errs {
         term::emit(out, config, file, err).expect("Error when writing to stderr.");
@@ -1040,17 +1100,17 @@ mod tests {
         ];
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
-        let res = head_term_check(&mf);
+        let res = term_check(&mf);
         assert!(res.is_err());
         assert_eq!(4, res.err().unwrap().len()); // one for each arg
     }
 
     #[test]
-    fn errors_f_string_present_in_head_array() {
+    fn errors_f_string_present_in_head_list() {
         let clauses = vec!["fact_f([X, f\"foo ${X}\"], f\"${Y}\")."];
         let mf: Modusfile = clauses.join("\n").parse().unwrap();
 
-        let res = head_term_check(&mf);
+        let res = term_check(&mf);
         assert!(res.is_err());
         assert_eq!(res.as_ref().err().unwrap()[0].severity, Severity::Error);
         assert_eq!(1 + 2, res.err().unwrap().len());

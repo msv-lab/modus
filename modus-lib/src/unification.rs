@@ -47,11 +47,11 @@ impl Substitute<IRTerm> for IRTerm {
     type Output = IRTerm;
     fn substitute(&self, s: &Substitution<IRTerm>) -> Self::Output {
         // check hashmap first, in case intention was to replace entire
-        // the IRTerm::Array
+        // the IRTerm::List
         if let Some(v) = s.get(self) {
             v.clone()
-        } else if let IRTerm::Array(ts) = self {
-            IRTerm::Array(ts.iter().map(|t| t.substitute(s)).collect())
+        } else if let IRTerm::List(ts) = self {
+            IRTerm::List(ts.iter().map(|t| t.substitute(s)).collect())
         } else {
             self.clone()
         }
@@ -200,22 +200,14 @@ impl Literal<IRTerm> {
                         // cannot unify if they are both different constants
                         (IRTerm::Constant(_), IRTerm::Constant(_)) => return None,
 
-                        (IRTerm::Array(terms1), IRTerm::Array(terms2)) => {
-                            if terms1.len() == terms2.len() {
-                                if let Some(new_sub) = unify_arglist(&terms1, &terms2) {
-                                    s = compose_extend(&s, &new_sub);
-                                } else {
-                                    return None;
-                                }
-                            } else {
-                                return None;
-                            }
+                        (IRTerm::List(_), IRTerm::List(_)) => {
+                            unimplemented!("TODO: borrow unification from Prolog.")
                         }
-                        (IRTerm::Array(_), IRTerm::Constant(_))
-                        | (IRTerm::Constant(_), IRTerm::Array(_)) => return None,
-                        (IRTerm::Array(ts), v) | (v, IRTerm::Array(ts)) => {
+                        (IRTerm::List(_), IRTerm::Constant(_))
+                        | (IRTerm::Constant(_), IRTerm::List(_)) => return None,
+                        (IRTerm::List(ts), v) | (v, IRTerm::List(ts)) => {
                             let mut upd = Substitution::<IRTerm>::new();
-                            upd.insert(v.clone(), IRTerm::Array(ts));
+                            upd.insert(v.clone(), IRTerm::List(ts));
                             s = compose_extend(&s, &upd);
                         }
 
@@ -285,25 +277,7 @@ mod tests {
     }
 
     #[test]
-    fn array_unifier() {
-        let l: logic::Literal = "p([X, \"b\"], X)".parse().unwrap();
-        let m: logic::Literal = "p([\"a\", Y], X)".parse().unwrap();
-        let result = l.unify(&m);
-        assert!(result.is_some());
-        let mgu = result.unwrap();
-        assert!(l.substitute(&mgu).eq_ignoring_position(&m.substitute(&mgu)));
-        assert_eq!(
-            mgu.get(&logic::IRTerm::UserVariable("X".into())),
-            Some(&logic::IRTerm::Constant("a".into()))
-        );
-        assert_eq!(
-            mgu.get(&logic::IRTerm::UserVariable("Y".into())),
-            Some(&logic::IRTerm::Constant("b".into()))
-        );
-    }
-
-    #[test]
-    fn compex_array_unifier() {
+    fn complex_list_unifier() {
         let l: logic::Literal = "p(A, \"b\")".parse().unwrap();
         let m: logic::Literal = "p([\"a\", X], X)".parse().unwrap();
         let result = l.unify(&m);
@@ -316,7 +290,7 @@ mod tests {
         );
         assert_eq!(
             mgu.get(&logic::IRTerm::UserVariable("A".into())),
-            Some(&logic::IRTerm::Array(vec![
+            Some(&logic::IRTerm::List(vec![
                 IRTerm::Constant("a".into()),
                 IRTerm::Constant("b".into())
             ]))
@@ -355,7 +329,7 @@ mod tests {
         let l: logic::Literal = "a([ X, Y ], X)".parse().unwrap();
         let (m, _) = l.rename_with_sub();
         assert!(l != m);
-        if let IRTerm::Array(ts) = &m.args[0] {
+        if let IRTerm::List(ts) = &m.args[0] {
             assert_eq!(ts[0], m.args[1]);
             assert_ne!(ts[1], m.args[1]);
         } else {

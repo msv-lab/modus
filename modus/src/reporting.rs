@@ -32,7 +32,7 @@ pub type BuildResult = Vec<Image>;
 #[derive(Debug, Clone)]
 pub enum ConstantTerm {
     Constant(String),
-    Array(Vec<String>),
+    List(Vec<String>),
 }
 
 impl Serialize for ConstantTerm {
@@ -42,7 +42,7 @@ impl Serialize for ConstantTerm {
     {
         match self {
             ConstantTerm::Constant(c) => serializer.serialize_str(c),
-            ConstantTerm::Array(cs) => {
+            ConstantTerm::List(cs) => {
                 let mut seq = serializer.serialize_seq(Some(cs.len()))?;
                 for c in cs {
                     seq.serialize_element(c)?;
@@ -68,7 +68,7 @@ impl ConstantLiteral {
                 .into_iter()
                 .map(|x| match x {
                     IRTerm::Constant(x) => ConstantTerm::Constant(x),
-                    IRTerm::Array(ts) => ConstantTerm::Array(
+                    IRTerm::List(ts) => ConstantTerm::List(
                         ts.iter()
                             .map(|t| t.as_constant().unwrap().to_owned())
                             .collect(),

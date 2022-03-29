@@ -1192,18 +1192,9 @@ pub fn tree_from_modusfile(
     // 3. Use the body of the IR clause with the '_query' head predicate as the goal.
 
     let goal_pred = Predicate("_query".to_owned());
-    let user_clause = modusfile::ModusClause {
-        head: Literal {
-            positive: true,
-            position: None,
-            predicate: goal_pred.clone(),
-            args: Vec::new(),
-        },
-        body: Some(query),
-    };
-    let clauses: Vec<Clause> = translate_modusfile(&Modusfile(
-        mf.0.into_iter().chain(iter::once(user_clause)).collect(),
-    ));
+    let mut mf = mf.clone();
+    mf.add_goal(query);
+    let clauses: Vec<Clause> = translate_modusfile(&mf);
 
     let q_clause = clauses
         .iter()
@@ -1624,7 +1615,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn arrays() {
+    fn lists() {
         let goal: Goal<logic::IRTerm> = vec!["app([\"sh\", \"--some-option\"])".parse().unwrap()];
         let clauses: Vec<logic::Clause> = vec![
             "app(entrypoint_params) :- from(\"alpine\")::set_entrypoint(entrypoint_params)."
@@ -1646,7 +1637,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn arrays_error_when_ungrounded() {
+    fn lists_error_when_ungrounded() {
         let goal: Goal<logic::IRTerm> = vec!["app([\"sh\", someOption])".parse().unwrap()];
         let clauses: Vec<logic::Clause> = vec![
             "app(entrypoint_params) :- from(\"alpine\")::set_entrypoint(entrypoint_params)."

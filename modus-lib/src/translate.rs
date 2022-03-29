@@ -146,7 +146,7 @@ fn translate_term(t: &ModusTerm) -> (IRTerm, Vec<logic::Literal>) {
         }
         ModusTerm::UserVariable(v) => (IRTerm::UserVariable(v.to_owned()), Vec::new()),
         ModusTerm::AnonymousVariable => (sld::Auxiliary::aux(true), Vec::new()),
-        ModusTerm::Array(_, ts) => {
+        ModusTerm::List(_, ts) => {
             let mut new_terms = Vec::new();
             let mut new_literals = Vec::new();
             for term in ts {
@@ -154,7 +154,7 @@ fn translate_term(t: &ModusTerm) -> (IRTerm, Vec<logic::Literal>) {
                 new_terms.push(new_term);
                 new_literals.extend(new_lits);
             }
-            (IRTerm::Array(new_terms), new_literals)
+            (IRTerm::List(new_terms), new_literals)
         }
     }
 }

@@ -518,7 +518,7 @@ pub fn build_dag_from_proofs(
                             let arg = &lit.args[1];
                             let entrypoint = match arg {
                                 IRTerm::Constant(c) => vec![c.to_owned()],
-                                IRTerm::Array(ts) => ts
+                                IRTerm::List(ts) => ts
                                     .iter()
                                     .map(|t| t.as_constant().unwrap().to_owned())
                                     .collect(),
@@ -535,7 +535,7 @@ pub fn build_dag_from_proofs(
                         "set_cmd" => {
                             let arg = &lit.args[1];
                             let cmd = match arg {
-                                IRTerm::Array(ts) => ts
+                                IRTerm::List(ts) => ts
                                     .iter()
                                     .map(|t| t.as_constant().unwrap().to_owned())
                                     .collect::<Vec<_>>(),
@@ -830,17 +830,8 @@ pub fn plan_from_modusfile(
     let max_depth = 175;
 
     let goal_pred = Predicate("_query".to_owned());
-    let user_clause = modusfile::ModusClause {
-        head: Literal {
-            positive: true,
-            position: None,
-            predicate: goal_pred.clone(),
-            args: Vec::new(),
-        },
-        body: Some(query.clone()),
-    };
-
-    let mf_with_query = Modusfile(mf.0.into_iter().chain(iter::once(user_clause)).collect());
+    let mut mf_with_query = mf.clone();
+    mf_with_query.add_goal(query.clone());
     let ir_clauses: Vec<Clause> = translate_modusfile(&mf_with_query);
 
     let q_clause = ir_clauses
