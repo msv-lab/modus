@@ -104,7 +104,8 @@ class TestSetXX(ModusTestCase):
         assert_ep_is(self.build(mf, "a"), ["/bin/echo"])
         assert_ep_is(self.build(mf, "b"), ["/bin/echo", "hello"])
         assert_ep_is(self.build(mf, 'c("aaa")'), ["/bin/echo", "aaa"])
-        assert_ep_is(self.build(mf, 'd(["/bin/echo", "aaa"])'), ["/bin/echo", "aaa"])
+
+        self.build(mf, 'd(["/bin/echo", "aaa"])', should_succeed=False)
 
     def test_cmd(self):
         mf = dedent("""\
@@ -126,7 +127,8 @@ class TestSetXX(ModusTestCase):
         assert_cmd_is(self.build(mf, "a"), [])
         assert_cmd_is(self.build(mf, "b"), ["hello"])
         assert_cmd_is(self.build(mf, 'c("aaa")'), ["aaa"])
-        assert_cmd_is(self.build(mf, 'd(["aaa", "bbb"])'), ["aaa", "bbb"])
+
+        self.build(mf, 'd(["aaa", "bbb"])', should_succeed=False)
 
     def test_user(self):
         mf = dedent("""\
