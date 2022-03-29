@@ -200,7 +200,9 @@ impl Literal<IRTerm> {
                         // cannot unify if they are both different constants
                         (IRTerm::Constant(_), IRTerm::Constant(_)) => return None,
 
-                        (IRTerm::List(_), IRTerm::List(_)) => unimplemented!("TODO: borrow unification from Prolog."),
+                        (IRTerm::List(_), IRTerm::List(_)) => {
+                            unimplemented!("TODO: borrow unification from Prolog.")
+                        }
                         (IRTerm::List(_), IRTerm::Constant(_))
                         | (IRTerm::Constant(_), IRTerm::List(_)) => return None,
                         (IRTerm::List(ts), v) | (v, IRTerm::List(ts)) => {

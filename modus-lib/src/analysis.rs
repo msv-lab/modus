@@ -718,28 +718,34 @@ fn term_check(mf: &Modusfile) -> Result<(), Vec<Diagnostic<()>>> {
     }
 
     fn head_term_check(head_lit: &Literal<ModusTerm>) -> Vec<Diagnostic<()>> {
-        head_lit.args.iter().flat_map(|arg| match arg {
-            ModusTerm::FormatString { position, .. } => {
-                vec![generate_f_string_diag(position)]
-            }
-            ModusTerm::List(position, ts) => {
-                let mut v = vec![generate_list_diag(position)];
-                if let Err(d) = check_no_f_string(ts) {
-                    v.push(d);
+        head_lit
+            .args
+            .iter()
+            .flat_map(|arg| match arg {
+                ModusTerm::FormatString { position, .. } => {
+                    vec![generate_f_string_diag(position)]
                 }
-                v
-            }
-            _ => Vec::new(),
-        }).collect()
+                ModusTerm::List(position, ts) => {
+                    let mut v = vec![generate_list_diag(position)];
+                    if let Err(d) = check_no_f_string(ts) {
+                        v.push(d);
+                    }
+                    v
+                }
+                _ => Vec::new(),
+            })
+            .collect()
     }
 
     fn body_term_check(body_lit: &Literal<ModusTerm>) -> Vec<Diagnostic<()>> {
-        body_lit.args.iter().filter_map(|arg| match arg {
-            ModusTerm::List(position, _) => {
-                Some(generate_list_diag(position))
-            }
-            _ => None,
-        }).collect()
+        body_lit
+            .args
+            .iter()
+            .filter_map(|arg| match arg {
+                ModusTerm::List(position, _) => Some(generate_list_diag(position)),
+                _ => None,
+            })
+            .collect()
     }
 
     fn op_term_check(op: &Operator) -> Vec<Diagnostic<()>> {
@@ -749,12 +755,13 @@ fn term_check(mf: &Modusfile) -> Result<(), Vec<Diagnostic<()>>> {
         ];
 
         if !allowed_list_ops.contains(&op.predicate) {
-            op.args.iter().filter_map(|arg| match arg {
-                ModusTerm::List(position, _) => {
-                    Some(generate_list_diag(position))
-                },
-                _ => None,
-            }).collect()
+            op.args
+                .iter()
+                .filter_map(|arg| match arg {
+                    ModusTerm::List(position, _) => Some(generate_list_diag(position)),
+                    _ => None,
+                })
+                .collect()
         } else {
             Vec::new()
         }
@@ -764,10 +771,20 @@ fn term_check(mf: &Modusfile) -> Result<(), Vec<Diagnostic<()>>> {
 
     for modus_clause in &mf.0 {
         diags.extend(head_term_check(&modus_clause.head));
-        for lit in modus_clause.body.as_ref().map(|b| b.literals()).unwrap_or_default() {
+        for lit in modus_clause
+            .body
+            .as_ref()
+            .map(|b| b.literals())
+            .unwrap_or_default()
+        {
             diags.extend(body_term_check(&lit));
         }
-        for op in modus_clause.body.as_ref().map(|b| b.operators()).unwrap_or_default() {
+        for op in modus_clause
+            .body
+            .as_ref()
+            .map(|b| b.operators())
+            .unwrap_or_default()
+        {
             diags.extend(op_term_check(&op));
         }
     }
