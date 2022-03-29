@@ -354,6 +354,23 @@ impl fmt::Display for Operator {
 #[derive(Clone, PartialEq, Debug)]
 pub struct Modusfile(pub Vec<ModusClause>);
 
+impl Modusfile {
+    /// Adds a rule with a head literal that serves as the goal `_query :- [body]`.
+    /// Note: does not check whether there is an existing goal, or other checks.
+    pub fn add_goal(&mut self, goal: Expression) -> &mut Self {
+        self.0.push(ModusClause {
+            head: Literal {
+                positive: true,
+                position: None,
+                predicate: Predicate("_query".into()),
+                args: Vec::new(),
+            },
+            body: Some(goal),
+        });
+        self
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub struct Version {
     major: u32,

@@ -288,6 +288,7 @@ fn main() {
             if !analysis::check_and_output_analysis(
                 &kind_res,
                 &mf,
+                Some(&query),
                 false,
                 &mut err_writer.lock(),
                 &config,
@@ -345,6 +346,7 @@ fn main() {
             if !analysis::check_and_output_analysis(
                 &kind_res,
                 &mf,
+                Some(&query),
                 false,
                 &mut err_writer.lock(),
                 &config,
@@ -506,6 +508,7 @@ fn main() {
                     if !analysis::check_and_output_analysis(
                         &kind_res,
                         &modus_f,
+                        Some(&query),
                         false,
                         &mut err_writer.lock(),
                         &config,
@@ -573,6 +576,7 @@ fn main() {
                     if !analysis::check_and_output_analysis(
                         &kind_res,
                         &mf,
+                        None,
                         is_verbose,
                         &mut err_writer.lock(),
                         &config,

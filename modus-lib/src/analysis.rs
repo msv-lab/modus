@@ -27,6 +27,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
+use std::iter;
 use std::ops::Range;
 
 use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
@@ -804,6 +805,7 @@ pub fn check_and_output_analysis<
 >(
     kind_res: &KindResult,
     mf: &Modusfile,
+    goal: Option<&Expression>,
     verbose: bool,
     out: &mut W,
     config: &Config,
@@ -815,13 +817,18 @@ pub fn check_and_output_analysis<
         }
     }
 
-    let term_check_res = term_check(mf);
+    // perform analysis including the goal
+    let mut mf = mf.clone();
+    if let Some(e) = goal {
+        mf.add_goal(e.clone());
+    }
+    let term_check_res = term_check(&mf);
     let term_errors = term_check_res.err().unwrap_or_default();
 
     let can_translate = term_errors.is_empty();
 
     let negation_errors = if can_translate {
-        let ir_clauses = translate_modusfile(mf);
+        let ir_clauses = translate_modusfile(&mf);
         check_negated_logic_kind(&ir_clauses, &kind_res.pred_kind)
             .err()
             .unwrap_or_default()
