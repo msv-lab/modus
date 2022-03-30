@@ -104,6 +104,7 @@ class TestSetXX(ModusTestCase):
         assert_ep_is(self.build(mf, "a"), ["/bin/echo"])
         assert_ep_is(self.build(mf, "b"), ["/bin/echo", "hello"])
         assert_ep_is(self.build(mf, 'c("aaa")'), ["/bin/echo", "aaa"])
+        assert_ep_is(self.build(mf, 'd("aaa")'), ["aaa"])
 
         self.build(mf, 'd(["/bin/echo", "aaa"])', should_succeed=False)
 
@@ -127,6 +128,7 @@ class TestSetXX(ModusTestCase):
         assert_cmd_is(self.build(mf, "a"), [])
         assert_cmd_is(self.build(mf, "b"), ["hello"])
         assert_cmd_is(self.build(mf, 'c("aaa")'), ["aaa"])
+        assert_cmd_is(self.build(mf, 'd("aaa")'), ["aaa"])
 
         self.build(mf, 'd(["aaa", "bbb"])', should_succeed=False)
 
