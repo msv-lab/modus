@@ -24,6 +24,7 @@ use nom_supreme::error::StackContext;
 
 use std::collections::HashSet;
 use std::fmt;
+use std::ops::Range;
 use std::str;
 
 use crate::logic;
@@ -396,13 +397,43 @@ fn better_convert_error(e: ErrorTree<Span>) -> Vec<Diagnostic<()>> {
         Label::primary((), span.location_offset()..span.location_offset() + length)
     }
 
+    /// Generate labels for diagnostic messages using the given stack context.
+    /// Assumes that the base of the stack is in the given `base_range`, and will not
+    /// create labels that go beyond the end of that range.
+    fn generate_labels(
+        contexts: Vec<(Span, StackContext)>,
+        base_range: Range<usize>,
+    ) -> Vec<Label<()>> {
+        let mut labels = Vec::new();
+        // Add labels to highlight the context - where this occured in their program.
+        // If a context does not have a new span, then it does not really add any information
+        // so we do not display it.
+        let mut seen_spans = HashSet::new();
+        for (span, stack_context) in contexts {
+            if !seen_spans.contains(&span) {
+                labels.push(
+                    Label::secondary((), span.location_offset()..base_range.end)
+                        .with_message(stack_context.to_string()),
+                );
+            }
+            seen_spans.insert(span);
+        }
+        labels
+    }
+
     fn inner(e: ErrorTree<Span>, contexts: Vec<(Span, StackContext)>) -> Vec<Diagnostic<()>> {
         let mut diags = Vec::new();
         match e {
             ErrorTree::Base { location, kind } => {
+                let base_label = generate_base_label(&location, &kind);
+                let base_range = base_label.range.clone();
+                let labels = vec![base_label]
+                    .into_iter()
+                    .chain(generate_labels(contexts, base_range))
+                    .collect();
                 let diag = Diagnostic::error()
                     .with_message(kind.to_string())
-                    .with_labels(vec![generate_base_label(&location, &kind)]);
+                    .with_labels(labels);
                 diags.push(diag);
             }
             ErrorTree::Stack {
@@ -437,19 +468,10 @@ fn better_convert_error(e: ErrorTree<Span>) -> Vec<Diagnostic<()>> {
                     }
                 }
 
-                // Add labels to highlight the context - where this occured in their program.
-                // If a context does not have a new span, then it does not really add any information
-                // so we do not display it.
-                let mut seen_spans = HashSet::new();
-                for (span, stack_context) in new_contexts.into_iter().chain(contexts) {
-                    if !seen_spans.contains(&span) {
-                        labels.push(
-                            Label::secondary((), span.location_offset()..base_range.end)
-                                .with_message(stack_context.to_string()),
-                        );
-                    }
-                    seen_spans.insert(span);
-                }
+                labels.extend(generate_labels(
+                    new_contexts.into_iter().chain(contexts).collect(),
+                    base_range,
+                ));
                 diags.push(diag.with_labels(labels))
             }
             ErrorTree::Alt(alts) => {
@@ -669,7 +691,10 @@ pub mod parser {
     }
 
     fn modus_literal(i: Span) -> IResult<Span, Expression> {
-        map(literal(modus_term, token_sep0), Expression::Literal)(i)
+        context(
+            stringify!(modus_literal),
+            map(literal(modus_term, token_sep0), Expression::Literal),
+        )(i)
     }
 
     /// Parses a parenthesized expression, taking into account any preceding negation.
