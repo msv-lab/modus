@@ -20,6 +20,7 @@ use nom::character::complete::line_ending;
 use nom::character::complete::not_line_ending;
 use nom_supreme::error::BaseErrorKind;
 use nom_supreme::error::ErrorTree;
+use nom_supreme::error::StackContext;
 
 use std::collections::HashSet;
 use std::fmt;
@@ -395,50 +396,73 @@ fn better_convert_error(e: ErrorTree<Span>) -> Vec<Diagnostic<()>> {
         Label::primary((), span.location_offset()..span.location_offset() + length)
     }
 
-    let mut diags = Vec::new();
-    match e {
-        ErrorTree::Base { location, kind } => {
-            let diag = Diagnostic::error()
-                .with_message(kind.to_string())
-                .with_labels(vec![generate_base_label(&location, &kind)]);
-            diags.push(diag);
-        }
-        ErrorTree::Stack { base, contexts } => {
-            let mut labels = Vec::new();
-            let diag;
-
-            let base_range;
-            match *base {
-                ErrorTree::Base { location, kind } => {
-                    labels.push(generate_base_label(&location, &kind));
-                    base_range = labels[0].range.clone();
-                    diag = Diagnostic::error().with_message(kind.to_string());
-                }
-                ErrorTree::Stack { .. } => panic!("base of an error stack was a stack"),
-                ErrorTree::Alt(alts) => {
-                    return alts
-                        .into_iter()
-                        .flat_map(|a| better_convert_error(a))
-                        .collect()
-                }
+    fn inner(e: ErrorTree<Span>, contexts: Vec<(Span, StackContext)>) -> Vec<Diagnostic<()>> {
+        let mut diags = Vec::new();
+        match e {
+            ErrorTree::Base { location, kind } => {
+                let diag = Diagnostic::error()
+                    .with_message(kind.to_string())
+                    .with_labels(vec![generate_base_label(&location, &kind)]);
+                diags.push(diag);
             }
+            ErrorTree::Stack {
+                base,
+                contexts: new_contexts,
+            } => {
+                let mut labels = Vec::new();
+                let diag;
 
-            for (span, stack_context) in contexts.iter() {
-                labels.push(
-                    Label::secondary((), span.location_offset()..base_range.end)
-                        .with_message(stack_context.to_string()),
+                let base_range;
+                match *base {
+                    ErrorTree::Base { location, kind } => {
+                        labels.push(generate_base_label(&location, &kind));
+                        base_range = labels[0].range.clone();
+                        diag = Diagnostic::error().with_message(kind.to_string());
+                    }
+                    ErrorTree::Stack { .. } => panic!("base of an error stack was a stack"),
+                    ErrorTree::Alt(alts) => {
+                        return alts
+                            .into_iter()
+                            .flat_map(|a| {
+                                inner(
+                                    a,
+                                    new_contexts
+                                        .clone()
+                                        .into_iter()
+                                        .chain(contexts.clone())
+                                        .collect(),
+                                )
+                            })
+                            .collect()
+                    }
+                }
+
+                // Add labels to highlight the context - where this occured in their program.
+                // If a context does not have a new span, then it does not really add any information
+                // so we do not display it.
+                let mut seen_spans = HashSet::new();
+                for (span, stack_context) in new_contexts.into_iter().chain(contexts) {
+                    if !seen_spans.contains(&span) {
+                        labels.push(
+                            Label::secondary((), span.location_offset()..base_range.end)
+                                .with_message(stack_context.to_string()),
+                        );
+                    }
+                    seen_spans.insert(span);
+                }
+                diags.push(diag.with_labels(labels))
+            }
+            ErrorTree::Alt(alts) => {
+                diags.extend(
+                    alts.into_iter()
+                        .flat_map(|alt_tree| inner(alt_tree, contexts.clone())),
                 );
             }
-            diags.push(diag.with_labels(labels))
         }
-        ErrorTree::Alt(alts) => {
-            diags.extend(
-                alts.into_iter()
-                    .flat_map(|alt_tree| better_convert_error(alt_tree)),
-            );
-        }
+        diags
     }
-    diags
+
+    inner(e, Vec::new())
 }
 
 impl str::FromStr for Modusfile {
@@ -718,8 +742,8 @@ pub mod parser {
             },
         );
         alt((
-            unification_expr_parser,
-            op_application_parser,
+            context("unification", unification_expr_parser),
+            context("op_application", op_application_parser),
             modus_literal,
             parenthesized_expr,
         ))(i)
@@ -727,7 +751,10 @@ pub mod parser {
 
     pub fn body(i: Span) -> IResult<Span, Expression> {
         let comma_separated_exprs = map(
-            separated_list1(delimited(comments, tag(","), comments), expression_inner),
+            separated_list1(
+                delimited(token_sep0, tag(","), token_sep0),
+                expression_inner,
+            ),
             |es| {
                 es.into_iter()
                     .reduce(|e1, e2| {
@@ -747,7 +774,7 @@ pub mod parser {
         );
         let semi_separated_exprs = map(
             separated_list1(
-                delimited(comments, tag(";"), comments),
+                delimited(token_sep0, tag(";"), token_sep0),
                 comma_separated_exprs,
             ),
             |es| {
@@ -767,7 +794,7 @@ pub mod parser {
         );
         // Parses the body as a semicolon separated list of comma separated inner expressions.
         // This resolves ambiguity by making commas/and higher precedence.
-        preceded(comments, semi_separated_exprs)(i)
+        preceded(token_sep0, semi_separated_exprs)(i)
     }
 
     fn fact(i: Span) -> IResult<Span, ModusClause> {
@@ -798,13 +825,13 @@ pub mod parser {
                 separated_pair(
                     head,
                     delimited(token_sep0, tag(":-"), token_sep0),
-                    context(
+                    cut(context(
                         "rule_body",
-                        cut(terminated(
+                        terminated(
                             body,
-                            terminated(nom::character::complete::char('.'), token_sep0),
-                        )),
-                    ),
+                            cut(terminated(nom::character::complete::char('.'), token_sep0)),
+                        ),
+                    )),
                 ),
                 |(head, body)| ModusClause {
                     head,
@@ -952,22 +979,25 @@ pub mod parser {
     }
 
     pub fn modus_term(i: Span) -> IResult<Span, ModusTerm> {
-        alt((
-            map(modus_const, ModusTerm::Constant),
-            map(recognized_span(modus_list_term), |(span, terms)| {
-                ModusTerm::List(span, terms)
-            }),
-            map(modus_format_string, |(position, fragments)| {
-                ModusTerm::FormatString {
-                    position,
-                    fragments,
-                }
-            }),
-            map(is_a("_"), |_| ModusTerm::AnonymousVariable),
-            map(modus_var, |s| {
-                ModusTerm::UserVariable(s.fragment().to_string())
-            }),
-        ))(i)
+        context(
+            stringify!(modus_term),
+            alt((
+                map(modus_const, ModusTerm::Constant),
+                map(recognized_span(modus_list_term), |(span, terms)| {
+                    ModusTerm::List(span, terms)
+                }),
+                map(modus_format_string, |(position, fragments)| {
+                    ModusTerm::FormatString {
+                        position,
+                        fragments,
+                    }
+                }),
+                map(is_a("_"), |_| ModusTerm::AnonymousVariable),
+                map(modus_var, |s| {
+                    ModusTerm::UserVariable(s.fragment().to_string())
+                }),
+            )),
+        )(i)
     }
 
     pub fn modus_clause(i: Span) -> IResult<Span, ModusClause> {
