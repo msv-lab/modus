@@ -157,6 +157,28 @@ impl Expression {
             }
         }
     }
+
+    /// Variables that can be referred to by a string.
+    /// A convenient method to get all the variables that a user may actually care about.
+    pub fn variable_strings(&self) -> Vec<&str> {
+        match self {
+            Expression::Literal(l) => l
+                .args
+                .iter()
+                .flat_map(|arg| arg.variable_strings())
+                .collect(),
+            Expression::OperatorApplication(_, e, op) => e
+                .variable_strings()
+                .into_iter()
+                .chain(op.variable_strings())
+                .collect(),
+            Expression::And(_, _, e1, e2) | Expression::Or(_, _, e1, e2) => e1
+                .variable_strings()
+                .into_iter()
+                .chain(e2.variable_strings())
+                .collect(),
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -183,6 +205,7 @@ pub enum FormatStringFragment {
     StringContent(SpannedPosition, String),
     /// A variable as a string, and its span.
     InterpolatedVariable(SpannedPosition, String),
+    InterpolatedAnonymousVariable(SpannedPosition),
 }
 
 impl fmt::Display for FormatStringFragment {
@@ -190,6 +213,7 @@ impl fmt::Display for FormatStringFragment {
         match self {
             FormatStringFragment::StringContent(_, s) => write!(f, "{s}"),
             FormatStringFragment::InterpolatedVariable(_, v) => write!(f, "${{{v}}}"),
+            FormatStringFragment::InterpolatedAnonymousVariable(_) => write!(f, "${{_}}"),
         }
     }
 }
@@ -214,6 +238,23 @@ impl ModusTerm {
         match self {
             ModusTerm::FormatString { .. } | ModusTerm::UserVariable(_) => true,
             _ => false,
+        }
+    }
+
+    /// Excludes anonymous variables.
+    pub fn variable_strings(&self) -> Vec<&str> {
+        match self {
+            ModusTerm::FormatString { fragments, .. } => fragments
+                .iter()
+                .filter_map(|fragment| match fragment {
+                    FormatStringFragment::StringContent(_, _)
+                    | FormatStringFragment::InterpolatedAnonymousVariable(_) => None,
+                    FormatStringFragment::InterpolatedVariable(_, s) => Some(s.as_str()),
+                })
+                .collect(),
+            ModusTerm::UserVariable(s) => vec![s],
+            ModusTerm::List(_, _) => todo!(),
+            ModusTerm::Constant(_) | ModusTerm::AnonymousVariable => Vec::new(),
         }
     }
 
@@ -332,6 +373,13 @@ impl Operator {
 
     pub fn with_position(self, position: Option<SpannedPosition>) -> Operator {
         Operator { position, ..self }
+    }
+
+    pub fn variable_strings(&self) -> Vec<&str> {
+        self.args
+            .iter()
+            .flat_map(|arg| arg.variable_strings())
+            .collect()
     }
 }
 
@@ -942,18 +990,16 @@ pub mod parser {
     }
 
     fn format_string_fragment(i: Span) -> IResult<Span, FormatStringFragment> {
-        let interpolation = delimited(
-            terminated(tag("${"), token_sep0),
-            cut(modus_var),
-            cut(preceded(token_sep0, tag("}"))),
-        );
-
         alt((
-            map(interpolation, |v_span| {
-                FormatStringFragment::InterpolatedVariable(
-                    v_span.into(),
-                    v_span.fragment().to_string(),
-                )
+            map(string_interpolation, |v_span| {
+                if v_span.fragment().chars().all(|c| c == '_') {
+                    FormatStringFragment::InterpolatedAnonymousVariable(v_span.into())
+                } else {
+                    FormatStringFragment::InterpolatedVariable(
+                        v_span.into(),
+                        v_span.fragment().to_string(),
+                    )
+                }
             }),
             // this may bloat the fragment list but likely worth the convenience of
             // using '$' without escaping it
@@ -990,7 +1036,7 @@ pub mod parser {
     pub fn string_interpolation(i: Span) -> IResult<Span, Span> {
         delimited(
             terminated(tag("${"), token_sep0),
-            modus_var,
+            cut(modus_var),
             cut(preceded(token_sep0, tag("}"))),
         )(i)
     }
@@ -1317,6 +1363,29 @@ mod tests {
             ],
         };
         let actual: Literal = "l(\"foo\", _)".parse().unwrap();
+        assert!(expected.eq_ignoring_position(&actual));
+    }
+
+    #[test]
+    fn anonymous_variables_in_format_string() {
+        let expected = Literal {
+            positive: true,
+            position: None,
+            predicate: Predicate("l".into()),
+            args: vec![ModusTerm::FormatString {
+                position: SpannedPosition {
+                    offset: 2,
+                    length: 7,
+                },
+                fragments: vec![FormatStringFragment::InterpolatedAnonymousVariable(
+                    SpannedPosition {
+                        offset: 6,
+                        length: 1,
+                    },
+                )],
+            }],
+        };
+        let actual: Literal = "l(f\"${_}\")".parse().unwrap();
         assert!(expected.eq_ignoring_position(&actual));
     }
 

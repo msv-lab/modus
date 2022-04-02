@@ -14,7 +14,9 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{collections::HashMap, sync::atomic::AtomicUsize};
+use std::{collections::HashSet, sync::atomic::AtomicUsize};
+
+use itertools::Itertools;
 
 use crate::{
     logic::{self, IRTerm, Predicate, SpannedPosition},
@@ -65,6 +67,21 @@ fn convert_format_string(
                 ],
             })
         }
+        Some(FormatStringFragment::InterpolatedAnonymousVariable(span)) => {
+            new_literals.push(logic::Literal {
+                positive: true,
+                position: Some(SpannedPosition {
+                    offset: f_string_start,
+                    length: span.offset + span.length - f_string_start,
+                }),
+                predicate: concat_predicate.clone(),
+                args: vec![
+                    IRTerm::Constant("".to_owned()),
+                    sld::Auxiliary::aux(true),
+                    prev_variable.clone(),
+                ],
+            })
+        }
         None => (),
     }
 
@@ -80,6 +97,9 @@ fn convert_format_string(
                 ),
                 FormatStringFragment::InterpolatedVariable(span, v) => {
                     (span, IRTerm::UserVariable(v.to_string()))
+                }
+                FormatStringFragment::InterpolatedAnonymousVariable(span) => {
+                    (span, sld::Auxiliary::aux(true))
                 }
             };
             new_literals.push(logic::Literal {
@@ -161,12 +181,43 @@ fn translate_term(t: &ModusTerm) -> (IRTerm, Vec<logic::Literal>) {
 
 /// Replaces negation on expressions with literals and new clauses.
 fn handle_negation(modus_clause: &modusfile::ModusClause) -> Vec<modusfile::ModusClause> {
+    fn new_head_literal_for_negation(args: Vec<ModusTerm>) -> logic::Literal<ModusTerm> {
+        logic::Literal {
+            positive: true,
+            position: None,
+            predicate: Predicate(format!("_negate_{}", fetch_add_negation_literal_id())),
+            args: args.into_iter().unique().collect(),
+        }
+    }
+
     fn handle_expression(
         expr: &modusfile::Expression,
         clauses: &mut Vec<modusfile::ModusClause>,
     ) -> modusfile::Expression {
         match expr {
-            Expression::Literal(l) => Expression::Literal(l.clone()),
+            Expression::Literal(l) => {
+                if l.positive {
+                    Expression::Literal(l.clone())
+                } else {
+                    let new_negate_literal = new_head_literal_for_negation(
+                        expr.variable_strings()
+                            .iter()
+                            .map(|s| ModusTerm::UserVariable(s.to_string()))
+                            .collect(),
+                    );
+                    let new_clause = modusfile::ModusClause {
+                        head: new_negate_literal.clone(),
+                        body: Some(expr.negate_current()),
+                    };
+
+                    clauses.extend(handle_negation(&new_clause));
+                    Expression::Literal(logic::Literal {
+                        positive: false,
+                        position: l.position.clone(),
+                        ..new_negate_literal
+                    })
+                }
+            }
             Expression::OperatorApplication(s, e, op) => Expression::OperatorApplication(
                 s.clone(),
                 Box::new(handle_expression(e, clauses)),
@@ -186,12 +237,12 @@ fn handle_negation(modus_clause: &modusfile::ModusClause) -> Vec<modusfile::Modu
             ),
 
             Expression::And(s, false, _, _) | Expression::Or(s, false, _, _) => {
-                let new_negate_literal = logic::Literal {
-                    positive: true,
-                    position: None,
-                    predicate: Predicate(format!("_negate_{}", fetch_add_negation_literal_id())),
-                    args: vec![], // will need to expose the variables later
-                };
+                let new_negate_literal = new_head_literal_for_negation(
+                    expr.variable_strings()
+                        .iter()
+                        .map(|s| ModusTerm::UserVariable(s.to_string()))
+                        .collect(),
+                );
                 let new_clause = modusfile::ModusClause {
                     head: new_negate_literal.clone(),
                     body: Some(expr.negate_current()),
@@ -337,74 +388,13 @@ impl From<&crate::modusfile::ModusClause> for Vec<logic::Clause> {
             }
         }
 
-        /// Converts clauses like `_negate_id :- ...` into `_negate_id(X, Y) :- ...`.
-        /// But doesn't expose anonymous variables.
-        fn exposed_negate_clauses(ir_clauses: Vec<logic::Clause>) -> Vec<logic::Clause> {
-            let mut negated_lit_args: HashMap<&Predicate, Vec<IRTerm>> = HashMap::new();
-            for ir_clause in &ir_clauses {
-                if ir_clause.head.predicate.0.starts_with("_negate_") {
-                    let curr_args = negated_lit_args
-                        .entry(&ir_clause.head.predicate)
-                        .or_insert(Vec::new());
-                    let new_args = ir_clause.variables(false);
-                    for arg in new_args {
-                        if !curr_args.contains(&arg) {
-                            curr_args.push(arg);
-                        }
-                    }
-                }
-            }
-
-            ir_clauses
-                .iter()
-                .cloned()
-                .map(|clause| logic::Clause {
-                    head: logic::Literal {
-                        args: negated_lit_args
-                            .get(&clause.head.predicate)
-                            .map(|xs| {
-                                let mut v: Vec<logic::IRTerm> = xs.to_vec();
-                                v.sort();
-                                v
-                            })
-                            .unwrap_or(clause.head.args),
-                        ..clause.head
-                    },
-                    body: clause
-                        .body
-                        .iter()
-                        .cloned()
-                        .map(|lit| {
-                            if let Some(args) = negated_lit_args.get(&lit.predicate) {
-                                logic::Literal {
-                                    args: {
-                                        let mut v: Vec<logic::IRTerm> = args.to_vec();
-                                        v.sort();
-                                        v
-                                    },
-                                    ..lit
-                                }
-                            } else {
-                                lit
-                            }
-                        })
-                        .collect(),
-                })
-                .collect()
-        }
-
         // convert negated expressions into negated literals, then perform translation as normal
         let without_expr_negation = handle_negation(modus_clause);
         let ir_clauses: Vec<logic::Clause> = without_expr_negation
             .iter()
             .flat_map(handle_clause)
             .collect();
-
-        // We perform this exactly twice because of nested negation.
-        // The second time would include variables that are newly exposed in _negate_id.
-        // This isn't a fixpoint, it should require exactly two calls.
-        let exposed_1 = exposed_negate_clauses(ir_clauses);
-        exposed_negate_clauses(exposed_1)
+        ir_clauses
     }
 }
 
@@ -576,6 +566,25 @@ mod tests {
 
     #[test]
     #[serial]
+    fn translates_negated_literal() {
+        setup();
+
+        let modus_clause: ModusClause = "foo :- !bar.".parse().unwrap();
+        let expected: Vec<logic::Clause> = vec![
+            "_negate_0 :- bar.".parse().unwrap(),
+            "foo :- !_negate_0.".parse().unwrap(),
+        ];
+
+        let actual: Vec<logic::Clause> = (&modus_clause).into();
+        assert_eq!(expected.len(), actual.len());
+        assert!(expected
+            .iter()
+            .zip(actual)
+            .all(|(a, b)| a.eq_ignoring_position(&b)));
+    }
+
+    #[test]
+    #[serial]
     fn translates_negated_and() {
         setup();
 
@@ -604,6 +613,25 @@ mod tests {
             "_negate_0 :- b.".parse().unwrap(),
             "_negate_0 :- c.".parse().unwrap(),
             "foo :- !_negate_0.".parse().unwrap(),
+        ];
+
+        let actual: Vec<logic::Clause> = (&modus_clause).into();
+        assert_eq!(expected.len(), actual.len());
+        assert!(expected
+            .iter()
+            .zip(actual)
+            .all(|(a, b)| a.eq_ignoring_position(&b)));
+    }
+
+    #[test]
+    #[serial]
+    fn translates_literal_with_variable() {
+        setup();
+
+        let modus_clause: ModusClause = "foo :- !bar(version), x(version).".parse().unwrap();
+        let expected: Vec<logic::Clause> = vec![
+            "_negate_0(version) :- bar(version).".parse().unwrap(),
+            "foo :- !_negate_0(version), x(version).".parse().unwrap(),
         ];
 
         let actual: Vec<logic::Clause> = (&modus_clause).into();
@@ -672,10 +700,10 @@ mod tests {
         let modus_clause: ModusClause = "foo :- !(a(Z) , !(b(X), c(Y))), x(X).".parse().unwrap();
         let expected: Vec<logic::Clause> = vec![
             "_negate_1(X, Y) :- b(X), c(Y).".parse().unwrap(),
-            "_negate_0(X, Y, Z) :- a(Z), !_negate_1(X, Y)."
+            "_negate_0(Z, X, Y) :- a(Z), !_negate_1(X, Y)."
                 .parse()
                 .unwrap(),
-            "foo :- !_negate_0(X, Y, Z), x(X).".parse().unwrap(),
+            "foo :- !_negate_0(Z, X, Y), x(X).".parse().unwrap(),
         ];
 
         let actual: Vec<logic::Clause> = (&modus_clause).into();
