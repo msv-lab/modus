@@ -253,7 +253,7 @@ impl ModusTerm {
                 })
                 .collect(),
             ModusTerm::UserVariable(s) => vec![s],
-            ModusTerm::List(_, _) => todo!(),
+            ModusTerm::List(_, ts) => ts.iter().flat_map(ModusTerm::variable_strings).collect(),
             ModusTerm::Constant(_) | ModusTerm::AnonymousVariable => Vec::new(),
         }
     }
