@@ -150,7 +150,7 @@ class TestSolver(ModusTestCase):
 
     def test_supports_f_strings_with_anonymous_variables(self):
         md = dedent("""\
-            foo(version) :- version != f"5.${_}".
+            foo(version) :- version != f"5.${_}", from("ubuntu").
         """)
 
         self.build(md, 'foo("5.1")', should_succeed=False)
