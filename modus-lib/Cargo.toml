@@ -25,6 +25,7 @@ fp-core = "0.1.9"
 dot = "0.1.4" # graphviz library
 thiserror = "1.0"
 ptree = { version = "0.4", default-features = false, features = ["petgraph", "ansi", "value"] } # pretty-print trees
+itertools = "0.10.3"
 petgraph = "0.6.0"
 rand = "0.8"
 serde = "^1.0"

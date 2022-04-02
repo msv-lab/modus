@@ -148,6 +148,16 @@ class TestSolver(ModusTestCase):
         self.assertEqual(len(images), 1)
         self.assertIn(Fact("my_app", ("alpine:3.15",)), images)
 
+    def test_supports_f_strings_with_anonymous_variables(self):
+        md = dedent("""\
+            foo(version) :- version != f"5.${_}", from("ubuntu").
+        """)
+
+        self.build(md, 'foo("5.1")', should_succeed=False)
+        images = self.build(md, 'foo("1.1")', should_succeed=True)
+        self.assertEqual(len(images), 1)
+        self.assertIn(Fact("foo", ("1.1",)), images)
+
     def test_enforces_stratification(self):
         md = dedent("""\
             foo(X) :- bar(X).
