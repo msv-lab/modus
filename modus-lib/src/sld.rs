@@ -60,6 +60,15 @@ pub enum ClauseId {
     NegationCheck(Literal<IRTerm>),
 }
 
+impl ClauseId {
+    /// Returns `true` if the clause id is [`Builtin`].
+    ///
+    /// [`Builtin`]: ClauseId::Builtin
+    pub fn is_builtin(&self) -> bool {
+        matches!(self, Self::Builtin(..))
+    }
+}
+
 /// A literal origin can be uniquely identified through its source clause and its index in the clause body
 #[derive(Clone, PartialEq, Debug)]
 pub struct LiteralOrigin {
@@ -170,6 +179,60 @@ impl Tree {
 
     /// Returns a string explaining the SLD tree, using indentation, etc.
     pub fn explain(&self, rules: &[Clause]) -> StringItem {
+        /// Takes string_concat literals.
+        ///
+        /// Relies on the ordering of f-strings to represent some of the string_concats as f-strings
+        /// instead, which should be more compact.
+        /// Also returns any unhandled concats.
+        fn concat_to_f_string(concats: &[&Literal]) -> Option<Vec<String>> {
+            let mut output = Vec::new();
+            let (mut prev_string, mut prev_term) = (String::new(), None);
+            for concat in concats {
+                if concat.args.len() != 3 {
+                    return None;
+                }
+
+                if !concat.args[0].is_constant_or_compound_constant()
+                    && Some(&concat.args[0]) == prev_term
+                {
+                    prev_string += if concat.args[1].is_constant_or_compound_constant() {
+                        let as_string = concat.args[1].to_string();
+                        format!("{}", &as_string[1..as_string.len()-1])
+                    } else {
+                        format!("${{{}}}", concat.args[1])
+                    }
+                    .as_str();
+                } else {
+                    if let Some(t) = prev_term {
+                        let new_out = format!("\"{prev_string}\" = {}", t);
+                        output.push(new_out);
+                    }
+                    prev_string = format!(
+                        "{}{}",
+                        if concat.args[0].is_constant_or_compound_constant() {
+                            let as_string = concat.args[0].to_string();
+                            format!("{}", &as_string[1..as_string.len()-1])
+                        } else {
+                            format!("${{{}}}", concat.args[0])
+                        },
+                        if concat.args[1].is_constant_or_compound_constant() {
+                            let as_string = concat.args[1].to_string();
+                            format!("{}", &as_string[1..as_string.len()-1])
+                        } else {
+                            format!("${{{}}}", concat.args[1])
+                        }
+                    )
+                }
+                prev_term = Some(&concat.args[2]);
+            }
+            if let Some(t) = prev_term {
+                let new_out = format!("\"{prev_string}\" = {}", t);
+                output.push(new_out);
+            }
+            Some(output)
+        }
+
+        // TODO: use maxdepth, put goals on separate lines
         fn dfs(t: &Tree, rules: &[Clause], builder: &mut TreeBuilder) {
             if t.goal.is_empty() {
                 builder.add_empty_child(format!("{}", "Success".green()));
@@ -197,7 +260,19 @@ impl Tree {
                             .substitute(&substitution_map)
                             .body
                             .iter()
+                            .filter(|x| x.predicate.0 != "string_concat")
                             .map(|x| x.to_string())
+                            .chain(
+                                concat_to_f_string(
+                                    &rules[*rid]
+                                        .substitute(&substitution_map)
+                                        .body
+                                        .iter()
+                                        .filter(|x| x.predicate.0 == "string_concat")
+                                        .collect::<Vec<_>>(),
+                                )
+                                .expect("string_concat should have exactly 3 args at this point"),
+                            )
                             .collect::<Vec<_>>()
                             .join(", "),
                         ClauseId::Query => unimplemented!(),
@@ -216,14 +291,21 @@ impl Tree {
                         }
                     );
 
-                    let new_child = if let Some(e) = &v.2.error {
-                        format!("{}", e.to_string().bright_red())
+                    let new_child = if v.2.error.is_some() && !v.2.resolvents().is_empty() {
+                        format!("{}", v.2.error.as_ref().unwrap().to_string().bright_red())
                     } else {
                         curr_attempt
                     };
-                    builder.begin_child(new_child);
+
+                    // If we've resolved with a builtin - it means it was successful, so I don't think it adds
+                    // any useful information to the SLD tree.
+                    if !cid.is_builtin() {
+                        builder.begin_child(new_child);
+                    }
                     dfs(&v.2, rules, builder);
-                    builder.end_child();
+                    if !cid.is_builtin() {
+                        builder.end_child();
+                    }
                 }
             }
         }
