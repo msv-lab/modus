@@ -171,52 +171,60 @@ impl Tree {
     /// Returns a string explaining the SLD tree, using indentation, etc.
     pub fn explain(&self, rules: &[Clause]) -> StringItem {
         fn dfs(t: &Tree, rules: &[Clause], builder: &mut TreeBuilder) {
-            let mut resolvent_pairs = t.resolvents().into_iter().collect::<Vec<_>>();
-            resolvent_pairs.sort_by_key(|(k, _)| k.0);
-
-            for (k, v) in &resolvent_pairs {
-                let (goal_id, cid) = k;
-
-                let substitution_map: HashMap<_, _> =
-                    v.0.iter()
-                        .map(|(t1, t2)| (t1.get_original().clone(), t2.clone()))
-                        .collect();
-
-                let requirement = match cid {
-                    ClauseId::Rule(rid) => rules[*rid]
-                        .substitute(&substitution_map)
-                        .body
-                        .iter()
-                        .map(|x| x.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    ClauseId::Query => unimplemented!(),
-                    ClauseId::Builtin(lit) => lit.substitute(&v.0).to_string(),
-                    ClauseId::NegationCheck(lit) => {
-                        format!("{} to have no proof", lit)
-                    }
-                };
-                let curr_attempt = format!(
-                    "{} requires {}",
-                    t.goal[*goal_id].literal,
-                    if requirement.is_empty() {
-                        "nothing, it's a fact.".to_owned().italic()
-                    } else {
-                        requirement.italic()
-                    }
-                );
-
-                if let Some(e) = &v.2.error {
-                    builder.begin_child(format!("{}", e.to_string().bright_red()));
-                } else {
-                    builder.begin_child(curr_attempt);
-                }
-                dfs(&v.2, rules, builder);
-                builder.end_child();
-            }
-
             if t.goal.is_empty() {
                 builder.add_empty_child(format!("{}", "Success".green()));
+            } else if !t.goal.is_empty() && t.resolvents().is_empty() {
+                let err = t
+                    .error
+                    .as_ref()
+                    .expect("Failed path should store SLD error.");
+                let error_msg = err.to_string();
+                builder.begin_child(format!("{}", error_msg.bright_red()));
+            } else {
+                let mut resolvent_pairs = t.resolvents().into_iter().collect::<Vec<_>>();
+                resolvent_pairs.sort_by_key(|(k, _)| k.0);
+
+                for (k, v) in &resolvent_pairs {
+                    let (goal_id, cid) = k;
+
+                    let substitution_map: HashMap<_, _> =
+                        v.0.iter()
+                            .map(|(t1, t2)| (t1.get_original().clone(), t2.clone()))
+                            .collect();
+
+                    let requirement = match cid {
+                        ClauseId::Rule(rid) => rules[*rid]
+                            .substitute(&substitution_map)
+                            .body
+                            .iter()
+                            .map(|x| x.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        ClauseId::Query => unimplemented!(),
+                        ClauseId::Builtin(lit) => lit.substitute(&v.0).to_string(),
+                        ClauseId::NegationCheck(lit) => {
+                            format!("{} to have no proof", lit)
+                        }
+                    };
+                    let curr_attempt = format!(
+                        "{} {}",
+                        t.goal[*goal_id].literal,
+                        if requirement.is_empty() {
+                            "is a fact.".to_owned().italic()
+                        } else {
+                            format!("requires {}", requirement).italic()
+                        }
+                    );
+
+                    let new_child = if let Some(e) = &v.2.error {
+                        format!("{}", e.to_string().bright_red())
+                    } else {
+                        curr_attempt
+                    };
+                    builder.begin_child(new_child);
+                    dfs(&v.2, rules, builder);
+                    builder.end_child();
+                }
             }
         }
 
