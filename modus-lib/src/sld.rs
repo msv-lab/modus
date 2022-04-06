@@ -197,7 +197,7 @@ impl Tree {
                 {
                     prev_string += if concat.args[1].is_constant_or_compound_constant() {
                         let as_string = concat.args[1].to_string();
-                        format!("{}", &as_string[1..as_string.len()-1])
+                        format!("{}", &as_string[1..as_string.len() - 1])
                     } else {
                         format!("${{{}}}", concat.args[1])
                     }
@@ -211,13 +211,13 @@ impl Tree {
                         "{}{}",
                         if concat.args[0].is_constant_or_compound_constant() {
                             let as_string = concat.args[0].to_string();
-                            format!("{}", &as_string[1..as_string.len()-1])
+                            format!("{}", &as_string[1..as_string.len() - 1])
                         } else {
                             format!("${{{}}}", concat.args[0])
                         },
                         if concat.args[1].is_constant_or_compound_constant() {
                             let as_string = concat.args[1].to_string();
-                            format!("{}", &as_string[1..as_string.len()-1])
+                            format!("{}", &as_string[1..as_string.len() - 1])
                         } else {
                             format!("${{{}}}", concat.args[1])
                         }
@@ -240,8 +240,20 @@ impl Tree {
                     .error
                     .as_ref()
                     .expect("Failed path should store SLD error.");
+                let maybe_data = err.get_data_list();
                 let error_msg = err.to_string();
-                builder.add_empty_child(format!("{}", error_msg.bright_red()));
+                builder.add_empty_child(format!(
+                    "{}{}",
+                    error_msg.bright_red(),
+                    if let Some(xs) = maybe_data {
+                        ":\n".to_owned()
+                            + &" ".repeat(depth * 3)
+                            + &"- "
+                            + &xs.join(&("\n".to_owned() + &" ".repeat(depth * 3) + &"- "))
+                    } else {
+                        "".to_string()
+                    }.bright_red()
+                ));
             } else {
                 let mut resolvent_pairs = t.resolvents().into_iter().collect::<Vec<_>>();
                 resolvent_pairs.sort_by_key(|(k, _)| k.0);
@@ -273,7 +285,7 @@ impl Tree {
                                 .expect("string_concat should have exactly 3 args at this point"),
                             )
                             .collect::<Vec<_>>()
-                            .join(&("\n".to_owned() + &" ".repeat(depth*3) + "- ")),
+                            .join(&("\n".to_owned() + &" ".repeat(depth * 3) + "- ")),
                         ClauseId::Query => unimplemented!(),
                         ClauseId::Builtin(lit) => lit.substitute(&v.0).to_string(),
                         ClauseId::NegationCheck(lit) => {
@@ -286,12 +298,12 @@ impl Tree {
                         if requirement.is_empty() {
                             "is a fact.".to_owned().italic()
                         } else {
-                            format!("requires:\n{}- {}", " ".repeat(depth*3), requirement).italic()
+                            format!("requires:\n{}- {}", " ".repeat(depth * 3), requirement)
+                                .italic()
                         }
                     );
 
                     let new_child = if v.2.error.is_some() && !v.2.resolvents().is_empty() {
-                        // TODO: use get_data_list
                         format!("{}", v.2.error.as_ref().unwrap().to_string().bright_red())
                     } else {
                         curr_attempt
@@ -615,11 +627,15 @@ impl ResolutionError {
     fn get_data_list(&self) -> Option<Vec<String>> {
         match self {
             ResolutionError::UnknownPredicate(_) => None,
-            ResolutionError::InsufficientGroundness(ls) => Some(ls.iter().map(|x| x.to_string()).collect()),
+            ResolutionError::InsufficientGroundness(ls) => {
+                Some(ls.iter().map(|x| x.to_string()).collect())
+            }
             ResolutionError::MaximumDepthExceeded(_, _) => None,
             ResolutionError::BuiltinFailure(_, _) => None,
             ResolutionError::InsufficientRules(_) => None,
-            ResolutionError::InconsistentGroundnessSignature(sigs) => Some(sigs.into_iter().map(|x| x.to_string()).collect()),
+            ResolutionError::InconsistentGroundnessSignature(sigs) => {
+                Some(sigs.into_iter().map(|x| x.to_string()).collect())
+            }
             ResolutionError::NegationProof(_) => None,
         }
     }
