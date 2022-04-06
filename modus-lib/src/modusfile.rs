@@ -753,7 +753,7 @@ pub mod parser {
         map(
             pair(
                 many0_count(terminated(nom::character::complete::char('!'), token_sep0)),
-                delimited(l_paren_with_comments, body, r_paren_with_comments),
+                delimited(l_paren_with_comments, cut(body), r_paren_with_comments),
             ),
             |(neg_count, expr)| {
                 if neg_count % 2 == 0 {
