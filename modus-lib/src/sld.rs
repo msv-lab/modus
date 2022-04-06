@@ -204,7 +204,7 @@ impl Tree {
                     .as_str();
                 } else {
                     if let Some(t) = prev_term {
-                        let new_out = format!("\"{prev_string}\" = {}", t);
+                        let new_out = format!("f\"{prev_string}\" = {}", t);
                         output.push(new_out);
                     }
                     prev_string = format!(
@@ -226,14 +226,13 @@ impl Tree {
                 prev_term = Some(&concat.args[2]);
             }
             if let Some(t) = prev_term {
-                let new_out = format!("\"{prev_string}\" = {}", t);
+                let new_out = format!("f\"{prev_string}\" = {}", t);
                 output.push(new_out);
             }
             Some(output)
         }
 
-        // TODO: use maxdepth, put goals on separate lines
-        fn dfs(t: &Tree, rules: &[Clause], builder: &mut TreeBuilder) {
+        fn dfs(t: &Tree, rules: &[Clause], depth: usize, builder: &mut TreeBuilder) {
             if t.goal.is_empty() {
                 builder.add_empty_child(format!("{}", "Success".green()));
             } else if !t.goal.is_empty() && t.resolvents().is_empty() {
@@ -242,7 +241,7 @@ impl Tree {
                     .as_ref()
                     .expect("Failed path should store SLD error.");
                 let error_msg = err.to_string();
-                builder.begin_child(format!("{}", error_msg.bright_red()));
+                builder.add_empty_child(format!("{}", error_msg.bright_red()));
             } else {
                 let mut resolvent_pairs = t.resolvents().into_iter().collect::<Vec<_>>();
                 resolvent_pairs.sort_by_key(|(k, _)| k.0);
@@ -274,7 +273,7 @@ impl Tree {
                                 .expect("string_concat should have exactly 3 args at this point"),
                             )
                             .collect::<Vec<_>>()
-                            .join(", "),
+                            .join(&("\n".to_owned() + &" ".repeat(depth*3) + "- ")),
                         ClauseId::Query => unimplemented!(),
                         ClauseId::Builtin(lit) => lit.substitute(&v.0).to_string(),
                         ClauseId::NegationCheck(lit) => {
@@ -287,11 +286,12 @@ impl Tree {
                         if requirement.is_empty() {
                             "is a fact.".to_owned().italic()
                         } else {
-                            format!("requires {}", requirement).italic()
+                            format!("requires:\n{}- {}", " ".repeat(depth*3), requirement).italic()
                         }
                     );
 
                     let new_child = if v.2.error.is_some() && !v.2.resolvents().is_empty() {
+                        // TODO: use get_data_list
                         format!("{}", v.2.error.as_ref().unwrap().to_string().bright_red())
                     } else {
                         curr_attempt
@@ -302,7 +302,7 @@ impl Tree {
                     if !cid.is_builtin() {
                         builder.begin_child(new_child);
                     }
-                    dfs(&v.2, rules, builder);
+                    dfs(&v.2, rules, depth + (!cid.is_builtin() as usize), builder);
                     if !cid.is_builtin() {
                         builder.end_child();
                     }
@@ -318,7 +318,7 @@ impl Tree {
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
-        dfs(self, rules, &mut builder);
+        dfs(self, rules, 1, &mut builder);
         builder.build()
     }
 }
@@ -608,6 +608,22 @@ impl fmt::Display for ResolutionError {
 }
 
 impl ResolutionError {
+    /// A list of strings providing relevant data about this error.
+    /// If there is no useful list of data about this error, return None.
+    /// E.g. `NegationProof` probably needs no more explanation than what's given
+    /// by it's `fmt::Display` output.
+    fn get_data_list(&self) -> Option<Vec<String>> {
+        match self {
+            ResolutionError::UnknownPredicate(_) => None,
+            ResolutionError::InsufficientGroundness(ls) => Some(ls.iter().map(|x| x.to_string()).collect()),
+            ResolutionError::MaximumDepthExceeded(_, _) => None,
+            ResolutionError::BuiltinFailure(_, _) => None,
+            ResolutionError::InsufficientRules(_) => None,
+            ResolutionError::InconsistentGroundnessSignature(sigs) => Some(sigs.into_iter().map(|x| x.to_string()).collect()),
+            ResolutionError::NegationProof(_) => None,
+        }
+    }
+
     pub fn get_diagnostic(self) -> Diagnostic<()> {
         fn get_position_labels(literals: &[Literal]) -> Vec<Label<()>> {
             literals
