@@ -60,6 +60,15 @@ pub enum ClauseId {
     NegationCheck(Literal<IRTerm>),
 }
 
+impl ClauseId {
+    /// Returns `true` if the clause id is [`Builtin`].
+    ///
+    /// [`Builtin`]: ClauseId::Builtin
+    pub fn is_builtin(&self) -> bool {
+        matches!(self, Self::Builtin(..))
+    }
+}
+
 /// A literal origin can be uniquely identified through its source clause and its index in the clause body
 #[derive(Clone, PartialEq, Debug)]
 pub struct LiteralOrigin {
@@ -170,53 +179,146 @@ impl Tree {
 
     /// Returns a string explaining the SLD tree, using indentation, etc.
     pub fn explain(&self, rules: &[Clause]) -> StringItem {
-        fn dfs(t: &Tree, rules: &[Clause], builder: &mut TreeBuilder) {
-            let mut resolvent_pairs = t.resolvents().into_iter().collect::<Vec<_>>();
-            resolvent_pairs.sort_by_key(|(k, _)| k.0);
-
-            for (k, v) in &resolvent_pairs {
-                let (goal_id, cid) = k;
-
-                let substitution_map: HashMap<_, _> =
-                    v.0.iter()
-                        .map(|(t1, t2)| (t1.get_original().clone(), t2.clone()))
-                        .collect();
-
-                let requirement = match cid {
-                    ClauseId::Rule(rid) => rules[*rid]
-                        .substitute(&substitution_map)
-                        .body
-                        .iter()
-                        .map(|x| x.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    ClauseId::Query => unimplemented!(),
-                    ClauseId::Builtin(lit) => lit.substitute(&v.0).to_string(),
-                    ClauseId::NegationCheck(lit) => {
-                        format!("{} to have no proof", lit)
-                    }
-                };
-                let curr_attempt = format!(
-                    "{} requires {}",
-                    t.goal[*goal_id].literal,
-                    if requirement.is_empty() {
-                        "nothing, it's a fact.".to_owned().italic()
-                    } else {
-                        requirement.italic()
-                    }
-                );
-
-                if let Some(e) = &v.2.error {
-                    builder.begin_child(format!("{}", e.to_string().bright_red()));
-                } else {
-                    builder.begin_child(curr_attempt);
+        /// Takes string_concat literals.
+        ///
+        /// Relies on the ordering of f-strings to represent some of the string_concats as f-strings
+        /// instead, which should be more compact.
+        /// Also returns any unhandled concats.
+        fn concat_to_f_string(concats: &[&Literal]) -> Option<Vec<String>> {
+            let mut output = Vec::new();
+            let (mut prev_string, mut prev_term) = (String::new(), None);
+            for concat in concats {
+                if concat.args.len() != 3 {
+                    return None;
                 }
-                dfs(&v.2, rules, builder);
-                builder.end_child();
-            }
 
+                if !concat.args[0].is_constant_or_compound_constant()
+                    && Some(&concat.args[0]) == prev_term
+                {
+                    prev_string += if concat.args[1].is_constant_or_compound_constant() {
+                        let as_string = concat.args[1].to_string();
+                        format!("{}", &as_string[1..as_string.len() - 1])
+                    } else {
+                        format!("${{{}}}", concat.args[1])
+                    }
+                    .as_str();
+                } else {
+                    if let Some(t) = prev_term {
+                        let new_out = format!("f\"{prev_string}\" = {}", t);
+                        output.push(new_out);
+                    }
+                    prev_string = format!(
+                        "{}{}",
+                        if concat.args[0].is_constant_or_compound_constant() {
+                            let as_string = concat.args[0].to_string();
+                            format!("{}", &as_string[1..as_string.len() - 1])
+                        } else {
+                            format!("${{{}}}", concat.args[0])
+                        },
+                        if concat.args[1].is_constant_or_compound_constant() {
+                            let as_string = concat.args[1].to_string();
+                            format!("{}", &as_string[1..as_string.len() - 1])
+                        } else {
+                            format!("${{{}}}", concat.args[1])
+                        }
+                    )
+                }
+                prev_term = Some(&concat.args[2]);
+            }
+            if let Some(t) = prev_term {
+                let new_out = format!("f\"{prev_string}\" = {}", t);
+                output.push(new_out);
+            }
+            Some(output)
+        }
+
+        fn dfs(t: &Tree, rules: &[Clause], depth: usize, builder: &mut TreeBuilder) {
             if t.goal.is_empty() {
                 builder.add_empty_child(format!("{}", "Success".green()));
+            } else if !t.goal.is_empty() && t.resolvents().is_empty() {
+                let err = t
+                    .error
+                    .as_ref()
+                    .expect("Failed path should store SLD error.");
+                let maybe_data = err.get_data_list();
+                let error_msg = err.to_string();
+                builder.add_empty_child(format!(
+                    "{}{}",
+                    error_msg.bright_red(),
+                    if let Some(xs) = maybe_data {
+                        ":\n".to_owned()
+                            + &" ".repeat(depth * 3)
+                            + &"- "
+                            + &xs.join(&("\n".to_owned() + &" ".repeat(depth * 3) + &"- "))
+                    } else {
+                        "".to_string()
+                    }.bright_red()
+                ));
+            } else {
+                let mut resolvent_pairs = t.resolvents().into_iter().collect::<Vec<_>>();
+                resolvent_pairs.sort_by_key(|(k, _)| k.0);
+
+                for (k, v) in &resolvent_pairs {
+                    let (goal_id, cid) = k;
+
+                    let substitution_map: HashMap<_, _> =
+                        v.0.iter()
+                            .map(|(t1, t2)| (t1.get_original().clone(), t2.clone()))
+                            .collect();
+
+                    let requirement = match cid {
+                        ClauseId::Rule(rid) => rules[*rid]
+                            .substitute(&substitution_map)
+                            .body
+                            .iter()
+                            .filter(|x| x.predicate.0 != "string_concat")
+                            .map(|x| x.to_string())
+                            .chain(
+                                concat_to_f_string(
+                                    &rules[*rid]
+                                        .substitute(&substitution_map)
+                                        .body
+                                        .iter()
+                                        .filter(|x| x.predicate.0 == "string_concat")
+                                        .collect::<Vec<_>>(),
+                                )
+                                .expect("string_concat should have exactly 3 args at this point"),
+                            )
+                            .collect::<Vec<_>>()
+                            .join(&("\n".to_owned() + &" ".repeat(depth * 3) + "- ")),
+                        ClauseId::Query => unimplemented!(),
+                        ClauseId::Builtin(lit) => lit.substitute(&v.0).to_string(),
+                        ClauseId::NegationCheck(lit) => {
+                            format!("{} to have no proof", lit)
+                        }
+                    };
+                    let curr_attempt = format!(
+                        "{} {}",
+                        t.goal[*goal_id].literal,
+                        if requirement.is_empty() {
+                            "is a fact.".to_owned().italic()
+                        } else {
+                            format!("requires:\n{}- {}", " ".repeat(depth * 3), requirement)
+                                .italic()
+                        }
+                    );
+
+                    let new_child = if v.2.error.is_some() && !v.2.resolvents().is_empty() {
+                        format!("{}", v.2.error.as_ref().unwrap().to_string().bright_red())
+                    } else {
+                        curr_attempt
+                    };
+
+                    // If we've resolved with a builtin - it means it was successful, so I don't think it adds
+                    // any useful information to the SLD tree.
+                    if !cid.is_builtin() {
+                        builder.begin_child(new_child);
+                    }
+                    dfs(&v.2, rules, depth + (!cid.is_builtin() as usize), builder);
+                    if !cid.is_builtin() {
+                        builder.end_child();
+                    }
+                }
             }
         }
 
@@ -228,7 +330,7 @@ impl Tree {
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
-        dfs(self, rules, &mut builder);
+        dfs(self, rules, 1, &mut builder);
         builder.build()
     }
 }
@@ -518,6 +620,26 @@ impl fmt::Display for ResolutionError {
 }
 
 impl ResolutionError {
+    /// A list of strings providing relevant data about this error.
+    /// If there is no useful list of data about this error, return None.
+    /// E.g. `NegationProof` probably needs no more explanation than what's given
+    /// by it's `fmt::Display` output.
+    fn get_data_list(&self) -> Option<Vec<String>> {
+        match self {
+            ResolutionError::UnknownPredicate(_) => None,
+            ResolutionError::InsufficientGroundness(ls) => {
+                Some(ls.iter().map(|x| x.to_string()).collect())
+            }
+            ResolutionError::MaximumDepthExceeded(_, _) => None,
+            ResolutionError::BuiltinFailure(_, _) => None,
+            ResolutionError::InsufficientRules(_) => None,
+            ResolutionError::InconsistentGroundnessSignature(sigs) => {
+                Some(sigs.into_iter().map(|x| x.to_string()).collect())
+            }
+            ResolutionError::NegationProof(_) => None,
+        }
+    }
+
     pub fn get_diagnostic(self) -> Diagnostic<()> {
         fn get_position_labels(literals: &[Literal]) -> Vec<Label<()>> {
             literals
