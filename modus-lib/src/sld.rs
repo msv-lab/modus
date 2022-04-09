@@ -36,6 +36,7 @@ use crate::{
 };
 use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
 use colored::Colorize;
+use lscolors::{LsColors, Style};
 use logic::{Clause, IRTerm, Literal};
 use ptree::{item::StringItem, print_tree, TreeBuilder, TreeItem};
 
@@ -447,7 +448,11 @@ impl Proof {
             let mut prev_scope_start_index = 0;
             let mut prev_scope_end_index = 0;
             let mut dont_close: HashSet<usize> = HashSet::new();
-
+            let colors = LsColors::from_env().unwrap_or_default();
+            let dir_style = colors.style_for_indicator(lscolors::Indicator::Directory);
+            let normal_style = colors.style_for_indicator(lscolors::Indicator::Normal);
+            let dir_ansi = dir_style.map(Style::to_ansi_term_style).unwrap_or_default();
+            let normal_ansi = normal_style.map(Style::to_ansi_term_style).unwrap_or_default();
             for (i, child) in p.children.iter().enumerate() {
                 match &child.clause {
                     ClauseId::Rule(rid) => {
@@ -458,9 +463,9 @@ impl Proof {
                                 if pred_kind.get(&clauses[*rid].head.predicate)
                                     == Some(&analysis::Kind::Image)
                                 {
-                                    s.cyan()
+                                    dir_ansi.paint(s)
                                 } else {
-                                    s.normal()
+                                    normal_ansi.paint(s)
                                 },
                             ));
                         }
@@ -476,7 +481,7 @@ impl Proof {
                         crate::analysis::Kind::Image => {
                             builder.add_empty_child(format!(
                                 "{}",
-                                b.substitute(&child.valuation).to_string().cyan()
+                                dir_ansi.paint(b.substitute(&child.valuation).to_string())
                             ));
                         }
                         crate::analysis::Kind::Layer => {
