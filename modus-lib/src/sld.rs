@@ -36,6 +36,7 @@ use crate::{
 };
 use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
 use colored::Colorize;
+use itertools::Itertools;
 use logic::{Clause, IRTerm, Literal};
 use ptree::{item::StringItem, print_tree, TreeBuilder, TreeItem};
 
@@ -707,6 +708,21 @@ impl ResolutionError {
             .with_labels(labels)
             .with_notes(notes)
     }
+
+    /// Returns a normalized version of a resolution error --- should be better for hash equality.
+    /// Without this, may get a lot of resolution errors, for example, that are identical except for a different
+    /// auxiliary variable index.
+    fn normalize(self) -> ResolutionError {
+        match self {
+            ResolutionError::UnknownPredicate(l) => ResolutionError::UnknownPredicate(l.normalized_terms()),
+            ResolutionError::InsufficientGroundness(ls) => ResolutionError::InsufficientGroundness(ls.into_iter().map(|x| x.normalized_terms()).collect()),
+            ResolutionError::MaximumDepthExceeded(ls, s) => ResolutionError::MaximumDepthExceeded(ls.into_iter().map(|x| x.normalized_terms()).collect(), s),
+            ResolutionError::BuiltinFailure(l, s) => ResolutionError::BuiltinFailure(l.normalized_terms(), s),
+            ResolutionError::InsufficientRules(l) => ResolutionError::InsufficientRules(l.normalized_terms()),
+            ResolutionError::InconsistentGroundnessSignature(sigs) => ResolutionError::InconsistentGroundnessSignature(sigs.to_vec()),
+            ResolutionError::NegationProof(l) => ResolutionError::NegationProof(l.normalized_terms()),
+        }
+    }
 }
 
 /// Result of building the SLD tree.
@@ -726,6 +742,8 @@ impl From<SLDResult> for Result<Tree, Vec<Diagnostic<()>>> {
             Err(sld_result
                 .errors
                 .into_iter()
+                .map(ResolutionError::normalize)
+                .unique()
                 .map(ResolutionError::get_diagnostic)
                 .collect::<Vec<_>>())
         }
