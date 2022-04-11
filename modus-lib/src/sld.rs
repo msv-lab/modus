@@ -600,8 +600,8 @@ impl fmt::Display for ResolutionError {
             ResolutionError::MaximumDepthExceeded(_, max_depth) => {
                 write!(f, "exceeded maximum depth of {}", max_depth)
             }
-            ResolutionError::BuiltinFailure(_, builtin_name) => {
-                write!(f, "builtin {} failed to apply or unify", builtin_name)
+            ResolutionError::BuiltinFailure(l, builtin_name) => {
+                write!(f, "builtin {builtin_name} failed to apply or unify: {l}")
             }
             ResolutionError::InsufficientRules(literal) => write!(
                 f,
