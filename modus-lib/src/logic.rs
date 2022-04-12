@@ -189,16 +189,6 @@ impl IRTerm {
     pub fn is_anonymous_variable(&self) -> bool {
         matches!(self, Self::AnonymousVariable(..))
     }
-
-    pub fn normalized(&self) -> IRTerm {
-        match self {
-            IRTerm::AuxiliaryVariable(_) => IRTerm::AuxiliaryVariable(0),
-            IRTerm::RenamedVariable(_, _) => self.get_original().normalized(),
-            IRTerm::AnonymousVariable(_) => IRTerm::AnonymousVariable(0),
-            IRTerm::List(l) => IRTerm::List(l.iter().map(|x| x.normalized()).collect()),
-            c => c.clone(),
-        }
-    }
 }
 
 /// Structure that holds information about the position of some section of the source code.
@@ -332,10 +322,11 @@ impl Literal {
         }
     }
 
-    /// Returns a copy of the literal with the terms normalized.
+    /// Returns a copy of the literal with the terms 'normalized'.
+    /// Currently this means just getting the original terms for any renamed terms.
     pub fn normalized_terms(self) -> Literal {
         Literal {
-            args: self.args.iter().map(|t| t.normalized()).collect(),
+            args: self.args.iter().map(|t| t.get_original().clone()).collect(),
             ..self
         }
     }
