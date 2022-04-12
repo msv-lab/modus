@@ -253,7 +253,8 @@ impl Tree {
                             + &xs.join(&("\n".to_owned() + &" ".repeat(depth * 3) + &"- "))
                     } else {
                         "".to_string()
-                    }.bright_red()
+                    }
+                    .bright_red()
                 ));
             } else {
                 let mut resolvent_pairs = t.resolvents().into_iter().collect::<Vec<_>>();
@@ -612,8 +613,8 @@ impl fmt::Display for ResolutionError {
             ResolutionError::MaximumDepthExceeded(_, max_depth) => {
                 write!(f, "exceeded maximum depth of {}", max_depth)
             }
-            ResolutionError::BuiltinFailure(_, builtin_name) => {
-                write!(f, "builtin {} failed to apply or unify", builtin_name)
+            ResolutionError::BuiltinFailure(l, builtin_name) => {
+                write!(f, "builtin {builtin_name} failed to apply or unify: {l}")
             }
             ResolutionError::InsufficientRules(literal) => write!(
                 f,
@@ -720,6 +721,36 @@ impl ResolutionError {
             .with_labels(labels)
             .with_notes(notes)
     }
+
+    /// Returns a normalized version of a resolution error --- should be better for hash equality.
+    /// Without this, may get a lot of resolution errors, for example, that are identical except for a different
+    /// auxiliary variable index.
+    fn normalize(self) -> ResolutionError {
+        match self {
+            ResolutionError::UnknownPredicate(l) => {
+                ResolutionError::UnknownPredicate(l.normalized_terms())
+            }
+            ResolutionError::InsufficientGroundness(ls) => ResolutionError::InsufficientGroundness(
+                ls.into_iter().map(|x| x.normalized_terms()).collect(),
+            ),
+            ResolutionError::MaximumDepthExceeded(ls, s) => ResolutionError::MaximumDepthExceeded(
+                ls.into_iter().map(|x| x.normalized_terms()).collect(),
+                s,
+            ),
+            ResolutionError::BuiltinFailure(l, s) => {
+                ResolutionError::BuiltinFailure(l.normalized_terms(), s)
+            }
+            ResolutionError::InsufficientRules(l) => {
+                ResolutionError::InsufficientRules(l.normalized_terms())
+            }
+            ResolutionError::InconsistentGroundnessSignature(sigs) => {
+                ResolutionError::InconsistentGroundnessSignature(sigs.to_vec())
+            }
+            ResolutionError::NegationProof(l) => {
+                ResolutionError::NegationProof(l.normalized_terms())
+            }
+        }
+    }
 }
 
 /// Result of building the SLD tree.
@@ -739,6 +770,8 @@ impl From<SLDResult> for Result<Tree, Vec<Diagnostic<()>>> {
             Err(sld_result
                 .errors
                 .into_iter()
+                .map(ResolutionError::normalize)
+                .unique()
                 .map(ResolutionError::get_diagnostic)
                 .collect::<Vec<_>>())
         }
