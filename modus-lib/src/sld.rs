@@ -115,12 +115,16 @@ pub struct Tree {
 impl Tree {
     /// true if this is a successful SLD tree
     fn is_success(&self) -> bool {
-        self.goal.is_empty() || (!self.success_resolvents.is_empty() && !self.contains_error_severity())
+        self.goal.is_empty()
+            || (!self.success_resolvents.is_empty() && !self.contains_error_severity())
     }
 
     fn contains_error_severity(&self) -> bool {
         self.error.as_ref().map(|e| e.severity()) == Some(Severity::Error)
-            || self.fail_resolvents.values().any(|(_, _, t)| t.contains_error_severity())
+            || self
+                .fail_resolvents
+                .values()
+                .any(|(_, _, t)| t.contains_error_severity())
     }
 
     fn resolvents(
@@ -144,9 +148,31 @@ impl Tree {
             let curr_label = t
                 .goal
                 .iter()
-                .map(|l| l.literal.to_string())
+                .filter_map(|l| {
+                    if l.literal.predicate.0 != "string_concat" {
+                        Some(l.literal.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .chain(
+                    Tree::concat_to_f_string(
+                        &t.goal
+                            .iter()
+                            .filter_map(|l| {
+                                if l.literal.predicate.0 == "string_concat" {
+                                    Some(&l.literal)
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                    .unwrap(),
+                )
                 .collect::<Vec<_>>()
                 .join(",\n");
+
             nodes.push(curr_label);
             let curr_index = nodes.len() - 1;
 
@@ -184,61 +210,61 @@ impl Tree {
         Graph { name, nodes, edges }
     }
 
-    /// Returns a string explaining the SLD tree, using indentation, etc.
-    pub fn explain(&self, rules: &[Clause]) -> StringItem {
-        /// Takes string_concat literals.
-        ///
-        /// Relies on the ordering of f-strings to represent some of the string_concats as f-strings
-        /// instead, which should be more compact.
-        /// Also returns any unhandled concats.
-        fn concat_to_f_string(concats: &[&Literal]) -> Option<Vec<String>> {
-            let mut output = Vec::new();
-            let (mut prev_string, mut prev_term) = (String::new(), None);
-            for concat in concats {
-                if concat.args.len() != 3 {
-                    return None;
-                }
+    /// Takes string_concat literals.
+    ///
+    /// Relies on the ordering of f-strings to represent some of the string_concats as f-strings
+    /// instead, which should be more compact.
+    /// Also returns any unhandled concats.
+    fn concat_to_f_string(concats: &[&Literal]) -> Option<Vec<String>> {
+        let mut output = Vec::new();
+        let (mut prev_string, mut prev_term) = (String::new(), None);
+        for concat in concats {
+            if concat.args.len() != 3 {
+                return None;
+            }
 
-                if !concat.args[0].is_constant_or_compound_constant()
-                    && Some(&concat.args[0]) == prev_term
-                {
-                    prev_string += if concat.args[1].is_constant_or_compound_constant() {
+            if !concat.args[0].is_constant_or_compound_constant()
+                && Some(&concat.args[0]) == prev_term
+            {
+                prev_string += if concat.args[1].is_constant_or_compound_constant() {
+                    let as_string = concat.args[1].to_string();
+                    format!("{}", &as_string[1..as_string.len() - 1])
+                } else {
+                    format!("${{{}}}", concat.args[1])
+                }
+                .as_str();
+            } else {
+                if let Some(t) = prev_term {
+                    let new_out = format!("f\"{prev_string}\" = {}", t);
+                    output.push(new_out);
+                }
+                prev_string = format!(
+                    "{}{}",
+                    if concat.args[0].is_constant_or_compound_constant() {
+                        let as_string = concat.args[0].to_string();
+                        format!("{}", &as_string[1..as_string.len() - 1])
+                    } else {
+                        format!("${{{}}}", concat.args[0])
+                    },
+                    if concat.args[1].is_constant_or_compound_constant() {
                         let as_string = concat.args[1].to_string();
                         format!("{}", &as_string[1..as_string.len() - 1])
                     } else {
                         format!("${{{}}}", concat.args[1])
                     }
-                    .as_str();
-                } else {
-                    if let Some(t) = prev_term {
-                        let new_out = format!("f\"{prev_string}\" = {}", t);
-                        output.push(new_out);
-                    }
-                    prev_string = format!(
-                        "{}{}",
-                        if concat.args[0].is_constant_or_compound_constant() {
-                            let as_string = concat.args[0].to_string();
-                            format!("{}", &as_string[1..as_string.len() - 1])
-                        } else {
-                            format!("${{{}}}", concat.args[0])
-                        },
-                        if concat.args[1].is_constant_or_compound_constant() {
-                            let as_string = concat.args[1].to_string();
-                            format!("{}", &as_string[1..as_string.len() - 1])
-                        } else {
-                            format!("${{{}}}", concat.args[1])
-                        }
-                    )
-                }
-                prev_term = Some(&concat.args[2]);
+                )
             }
-            if let Some(t) = prev_term {
-                let new_out = format!("f\"{prev_string}\" = {}", t);
-                output.push(new_out);
-            }
-            Some(output)
+            prev_term = Some(&concat.args[2]);
         }
+        if let Some(t) = prev_term {
+            let new_out = format!("f\"{prev_string}\" = {}", t);
+            output.push(new_out);
+        }
+        Some(output)
+    }
 
+    /// Returns a string explaining the SLD tree, using indentation, etc.
+    pub fn explain(&self, rules: &[Clause]) -> StringItem {
         fn dfs(t: &Tree, rules: &[Clause], depth: usize, builder: &mut TreeBuilder) {
             if t.goal.is_empty() {
                 builder.add_empty_child(format!("{}", "Success".green()));
@@ -282,7 +308,7 @@ impl Tree {
                             .filter(|x| x.predicate.0 != "string_concat")
                             .map(|x| x.to_string())
                             .chain(
-                                concat_to_f_string(
+                                Tree::concat_to_f_string(
                                     &rules[*rid]
                                         .substitute(&substitution_map)
                                         .body
@@ -689,14 +715,12 @@ impl ResolutionError {
                 get_position_labels(&[literal.clone()]),
                 get_notes(&[literal.clone()]),
             ),
-            ResolutionError::InsufficientGroundness(literals) => (
-                get_position_labels(&literals),
-                get_notes(&literals),
-            ),
-            ResolutionError::MaximumDepthExceeded(literals, _) => (
-                get_position_labels(&literals),
-                get_notes(&literals),
-            ),
+            ResolutionError::InsufficientGroundness(literals) => {
+                (get_position_labels(&literals), get_notes(&literals))
+            }
+            ResolutionError::MaximumDepthExceeded(literals, _) => {
+                (get_position_labels(&literals), get_notes(&literals))
+            }
             ResolutionError::BuiltinFailure(literal, _) => (
                 get_position_labels(&[literal.clone()]),
                 get_notes(&[literal.clone()]),
@@ -705,10 +729,9 @@ impl ResolutionError {
                 get_position_labels(&[literal.clone()]),
                 get_notes(&[literal.clone()]),
             ),
-            ResolutionError::InconsistentGroundnessSignature(sigs) => (
-                Vec::new(),
-                sigs.iter().map(|sig| sig.to_string()).collect(),
-            ),
+            ResolutionError::InconsistentGroundnessSignature(sigs) => {
+                (Vec::new(), sigs.iter().map(|sig| sig.to_string()).collect())
+            }
             ResolutionError::NegationProof(lit) => (
                 get_position_labels(&[lit.clone()]),
                 get_notes(&[lit.clone()]),
