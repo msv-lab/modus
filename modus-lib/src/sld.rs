@@ -113,8 +113,14 @@ pub struct Tree {
 }
 
 impl Tree {
+    /// true if this is a successful SLD tree
     fn is_success(&self) -> bool {
-        self.goal.is_empty() || !self.success_resolvents.is_empty()
+        self.goal.is_empty() || (!self.success_resolvents.is_empty() && !self.contains_error_severity())
+    }
+
+    fn contains_error_severity(&self) -> bool {
+        self.error.as_ref().map(|e| e.severity()) == Some(Severity::Error)
+            || self.fail_resolvents.values().any(|(_, _, t)| t.contains_error_severity())
     }
 
     fn resolvents(
@@ -622,6 +628,18 @@ impl fmt::Display for ResolutionError {
 }
 
 impl ResolutionError {
+    fn severity(&self) -> Severity {
+        match self {
+            ResolutionError::UnknownPredicate(_) => Severity::Error,
+            ResolutionError::InsufficientGroundness(_) => Severity::Warning,
+            ResolutionError::MaximumDepthExceeded(_, _) => Severity::Warning,
+            ResolutionError::BuiltinFailure(_, _) => Severity::Warning,
+            ResolutionError::InsufficientRules(_) => Severity::Warning,
+            ResolutionError::InconsistentGroundnessSignature(_) => Severity::Error,
+            ResolutionError::NegationProof(_) => Severity::Warning,
+        }
+    }
+
     /// A list of strings providing relevant data about this error.
     /// If there is no useful list of data about this error, return None.
     /// E.g. `NegationProof` probably needs no more explanation than what's given
@@ -666,45 +684,38 @@ impl ResolutionError {
         }
 
         let message = self.to_string();
-        let (labels, notes, severity) = match self {
+        let (labels, notes) = match &self {
             ResolutionError::UnknownPredicate(literal) => (
                 get_position_labels(&[literal.clone()]),
-                get_notes(&[literal]),
-                Severity::Error,
+                get_notes(&[literal.clone()]),
             ),
             ResolutionError::InsufficientGroundness(literals) => (
                 get_position_labels(&literals),
                 get_notes(&literals),
-                Severity::Warning,
             ),
             ResolutionError::MaximumDepthExceeded(literals, _) => (
                 get_position_labels(&literals),
                 get_notes(&literals),
-                Severity::Warning,
             ),
             ResolutionError::BuiltinFailure(literal, _) => (
                 get_position_labels(&[literal.clone()]),
-                get_notes(&[literal]),
-                Severity::Warning,
+                get_notes(&[literal.clone()]),
             ),
             ResolutionError::InsufficientRules(literal) => (
                 get_position_labels(&[literal.clone()]),
-                get_notes(&[literal]),
-                Severity::Warning,
+                get_notes(&[literal.clone()]),
             ),
             ResolutionError::InconsistentGroundnessSignature(sigs) => (
                 Vec::new(),
                 sigs.iter().map(|sig| sig.to_string()).collect(),
-                Severity::Error,
             ),
             ResolutionError::NegationProof(lit) => (
                 get_position_labels(&[lit.clone()]),
-                get_notes(&[lit]),
-                Severity::Warning,
+                get_notes(&[lit.clone()]),
             ),
         };
 
-        Diagnostic::new(severity)
+        Diagnostic::new(self.severity())
             .with_message(message)
             .with_labels(labels)
             .with_notes(notes)
