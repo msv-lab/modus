@@ -321,6 +321,15 @@ impl Literal {
             ..self.clone()
         }
     }
+
+    /// Returns a copy of the literal with the terms 'normalized'.
+    /// Currently this means just getting the original terms for any renamed terms.
+    pub fn normalized_terms(self) -> Literal {
+        Literal {
+            args: self.args.iter().map(|t| t.get_original().clone()).collect(),
+            ..self
+        }
+    }
 }
 
 impl<T> Literal<T> {
