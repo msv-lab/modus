@@ -712,7 +712,7 @@ impl ResolutionError {
 
     /// Returns a normalized version of a resolution error --- should be better for hash equality.
     /// Without this, may get a lot of resolution errors, for example, that are identical except for a different
-    /// auxiliary variable index.
+    /// renamed variable index.
     fn normalize(self) -> ResolutionError {
         match self {
             ResolutionError::UnknownPredicate(l) => {
