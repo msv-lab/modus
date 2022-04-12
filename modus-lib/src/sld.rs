@@ -631,7 +631,7 @@ impl ResolutionError {
     fn severity(&self) -> Severity {
         match self {
             ResolutionError::UnknownPredicate(_) => Severity::Error,
-            ResolutionError::InsufficientGroundness(_) => Severity::Warning,
+            ResolutionError::InsufficientGroundness(_) => Severity::Error,
             ResolutionError::MaximumDepthExceeded(_, _) => Severity::Warning,
             ResolutionError::BuiltinFailure(_, _) => Severity::Warning,
             ResolutionError::InsufficientRules(_) => Severity::Warning,
