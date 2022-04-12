@@ -253,7 +253,8 @@ impl Tree {
                             + &xs.join(&("\n".to_owned() + &" ".repeat(depth * 3) + &"- "))
                     } else {
                         "".to_string()
-                    }.bright_red()
+                    }
+                    .bright_red()
                 ));
             } else {
                 let mut resolvent_pairs = t.resolvents().into_iter().collect::<Vec<_>>();
@@ -714,13 +715,28 @@ impl ResolutionError {
     /// auxiliary variable index.
     fn normalize(self) -> ResolutionError {
         match self {
-            ResolutionError::UnknownPredicate(l) => ResolutionError::UnknownPredicate(l.normalized_terms()),
-            ResolutionError::InsufficientGroundness(ls) => ResolutionError::InsufficientGroundness(ls.into_iter().map(|x| x.normalized_terms()).collect()),
-            ResolutionError::MaximumDepthExceeded(ls, s) => ResolutionError::MaximumDepthExceeded(ls.into_iter().map(|x| x.normalized_terms()).collect(), s),
-            ResolutionError::BuiltinFailure(l, s) => ResolutionError::BuiltinFailure(l.normalized_terms(), s),
-            ResolutionError::InsufficientRules(l) => ResolutionError::InsufficientRules(l.normalized_terms()),
-            ResolutionError::InconsistentGroundnessSignature(sigs) => ResolutionError::InconsistentGroundnessSignature(sigs.to_vec()),
-            ResolutionError::NegationProof(l) => ResolutionError::NegationProof(l.normalized_terms()),
+            ResolutionError::UnknownPredicate(l) => {
+                ResolutionError::UnknownPredicate(l.normalized_terms())
+            }
+            ResolutionError::InsufficientGroundness(ls) => ResolutionError::InsufficientGroundness(
+                ls.into_iter().map(|x| x.normalized_terms()).collect(),
+            ),
+            ResolutionError::MaximumDepthExceeded(ls, s) => ResolutionError::MaximumDepthExceeded(
+                ls.into_iter().map(|x| x.normalized_terms()).collect(),
+                s,
+            ),
+            ResolutionError::BuiltinFailure(l, s) => {
+                ResolutionError::BuiltinFailure(l.normalized_terms(), s)
+            }
+            ResolutionError::InsufficientRules(l) => {
+                ResolutionError::InsufficientRules(l.normalized_terms())
+            }
+            ResolutionError::InconsistentGroundnessSignature(sigs) => {
+                ResolutionError::InconsistentGroundnessSignature(sigs.to_vec())
+            }
+            ResolutionError::NegationProof(l) => {
+                ResolutionError::NegationProof(l.normalized_terms())
+            }
         }
     }
 }
