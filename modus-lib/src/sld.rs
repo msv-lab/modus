@@ -448,11 +448,8 @@ impl Proof {
             let mut prev_scope_start_index = 0;
             let mut prev_scope_end_index = 0;
             let mut dont_close: HashSet<usize> = HashSet::new();
-            let colors = LsColors::from_env().unwrap_or_default();
-            let dir_style = colors.style_for_indicator(lscolors::Indicator::Directory);
-            let normal_style = colors.style_for_indicator(lscolors::Indicator::Normal);
-            let dir_ansi = dir_style.map(Style::to_ansi_term_style).unwrap_or_default();
-            let normal_ansi = normal_style.map(Style::to_ansi_term_style).unwrap_or_default();
+            let dir_style = Proof::get_color("Directory");
+            let normal_style = Proof::get_color("Normal");
             for (i, child) in p.children.iter().enumerate() {
                 match &child.clause {
                     ClauseId::Rule(rid) => {
@@ -463,9 +460,9 @@ impl Proof {
                                 if pred_kind.get(&clauses[*rid].head.predicate)
                                     == Some(&analysis::Kind::Image)
                                 {
-                                    dir_ansi.paint(s)
+                                    dir_style.paint(s)
                                 } else {
-                                    normal_ansi.paint(s)
+                                    normal_style.paint(s)
                                 },
                             ));
                         }
@@ -481,7 +478,7 @@ impl Proof {
                         crate::analysis::Kind::Image => {
                             builder.add_empty_child(format!(
                                 "{}",
-                                dir_ansi.paint(b.substitute(&child.valuation).to_string())
+                                dir_style.paint(b.substitute(&child.valuation).to_string())
                             ));
                         }
                         crate::analysis::Kind::Layer => {
@@ -533,6 +530,17 @@ impl Proof {
         dfs(self, clauses, &mut builder, pred_kind, compact);
 
         builder.build()
+    }
+
+    fn get_color(color_of: &str) -> ansi_term::Style{
+        let colors = LsColors::from_env().unwrap_or_default();
+        let mut style: std::option::Option<&lscolors::Style>;
+        match color_of{
+            "Directory" => style = colors.style_for_indicator(lscolors::Indicator::Directory),
+            "Normal" => style = colors.style_for_indicator(lscolors::Indicator::Normal),
+            _ => panic!("The only used LSColours are 'Directory' and 'Normal'")
+        };
+        style.map(Style::to_ansi_term_style).unwrap_or_default()
     }
 
     pub fn pretty_print(
