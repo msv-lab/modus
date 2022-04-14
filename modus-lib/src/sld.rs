@@ -449,8 +449,8 @@ impl Proof {
             let mut prev_scope_start_index = 0;
             let mut prev_scope_end_index = 0;
             let mut dont_close: HashSet<usize> = HashSet::new();
-            let dir_style = Proof::get_color("Directory");
-            let normal_style = Proof::get_color("Normal");
+            let literal_style = Proof::get_color("di");
+            let normal_style = Proof::get_color("no");
             for (i, child) in p.children.iter().enumerate() {
                 match &child.clause {
                     ClauseId::Rule(rid) => {
@@ -461,7 +461,7 @@ impl Proof {
                                 if pred_kind.get(&clauses[*rid].head.predicate)
                                     == Some(&analysis::Kind::Image)
                                 {
-                                    dir_style.paint(s)
+                                    literal_style.paint(s)
                                 } else {
                                     normal_style.paint(s)
                                 },
@@ -479,7 +479,7 @@ impl Proof {
                         crate::analysis::Kind::Image => {
                             builder.add_empty_child(format!(
                                 "{}",
-                                dir_style.paint(b.substitute(&child.valuation).to_string())
+                                literal_style.paint(b.substitute(&child.valuation).to_string())
                             ));
                         }
                         crate::analysis::Kind::Layer => {
@@ -537,9 +537,30 @@ impl Proof {
         let colors = LsColors::from_env().unwrap_or_default();
         let mut style: std::option::Option<&lscolors::Style>;
         match color_of{
-            "Directory" => style = colors.style_for_indicator(lscolors::Indicator::Directory),
-            "Normal" => style = colors.style_for_indicator(lscolors::Indicator::Normal),
-            _ => panic!("The only used LSColours are 'Directory' and 'Normal'")
+            "Directory" | "di" => style = colors.style_for_indicator(lscolors::Indicator::Directory),
+            "Normal" | "no" => style = colors.style_for_indicator(lscolors::Indicator::Normal),
+            "RegularFile" | "fi" => style = colors.style_for_indicator(lscolors::Indicator::RegularFile),
+            "SymbolicLink" | "ln" => style = colors.style_for_indicator(lscolors::Indicator::SymbolicLink),
+            "FIFO" | "pi" => style = colors.style_for_indicator(lscolors::Indicator::FIFO),
+            "Door" | "do" => style = colors.style_for_indicator(lscolors::Indicator::Door),
+            "BlockDevice" | "bd" => style = colors.style_for_indicator(lscolors::Indicator::BlockDevice),
+            "CharacterDevice" | "cd" => style = colors.style_for_indicator(lscolors::Indicator::CharacterDevice),
+            "OrphanedSymbolicLink" | "or" => style = colors.style_for_indicator(lscolors::Indicator::OrphanedSymbolicLink),
+            "Setuid" | "su" => style = colors.style_for_indicator(lscolors::Indicator::Setuid),
+            "Setgid" | "sg" => style = colors.style_for_indicator(lscolors::Indicator::Setgid),
+            "Sticky" | "st" => style = colors.style_for_indicator(lscolors::Indicator::Sticky),
+            "OtherWritable" | "ow" => style = colors.style_for_indicator(lscolors::Indicator::OtherWritable),
+            "StickyAndOtherWritable" | "tw" => style = colors.style_for_indicator(lscolors::Indicator::StickyAndOtherWritable),
+            "Socket" | "ex" => style = colors.style_for_indicator(lscolors::Indicator::Socket),
+            "MissingFile" | "mi" => style = colors.style_for_indicator(lscolors::Indicator::MissingFile),
+            "Capabilities" | "ca" => style = colors.style_for_indicator(lscolors::Indicator::Capabilities),
+            "MultipleHardLinks" | "mh" => style = colors.style_for_indicator(lscolors::Indicator::MultipleHardLinks),
+            "LeftCode" | "lc" => style = colors.style_for_indicator(lscolors::Indicator::LeftCode),
+            "RightCode" | "rc" => style = colors.style_for_indicator(lscolors::Indicator::RightCode),
+            "EndCode" | "ec" => style = colors.style_for_indicator(lscolors::Indicator::EndCode),
+            "Reset" | "rs" => style = colors.style_for_indicator(lscolors::Indicator::Reset),
+            "ClearLine" | "cl" => style = colors.style_for_indicator(lscolors::Indicator::ClearLine),
+            _ => style = colors.style_for_indicator(lscolors::Indicator::Normal)
         };
         style.map(Style::to_ansi_term_style).unwrap_or_default()
     }
