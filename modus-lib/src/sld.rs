@@ -36,6 +36,7 @@ use crate::{
 };
 use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
 use colored::Colorize;
+use lscolors::{LsColors, Style};
 use itertools::Itertools;
 use logic::{Clause, IRTerm, Literal};
 use ptree::{item::StringItem, print_tree, TreeBuilder, TreeItem};
@@ -253,8 +254,7 @@ impl Tree {
                             + &xs.join(&("\n".to_owned() + &" ".repeat(depth * 3) + &"- "))
                     } else {
                         "".to_string()
-                    }
-                    .bright_red()
+                    }.bright_red()
                 ));
             } else {
                 let mut resolvent_pairs = t.resolvents().into_iter().collect::<Vec<_>>();
@@ -449,7 +449,8 @@ impl Proof {
             let mut prev_scope_start_index = 0;
             let mut prev_scope_end_index = 0;
             let mut dont_close: HashSet<usize> = HashSet::new();
-
+            let literal_style = Proof::get_color("ImagePred");
+            let normal_style = Proof::get_color("Normal");
             for (i, child) in p.children.iter().enumerate() {
                 match &child.clause {
                     ClauseId::Rule(rid) => {
@@ -460,9 +461,9 @@ impl Proof {
                                 if pred_kind.get(&clauses[*rid].head.predicate)
                                     == Some(&analysis::Kind::Image)
                                 {
-                                    s.cyan()
+                                    literal_style.paint(s)
                                 } else {
-                                    s.normal()
+                                    normal_style.paint(s)
                                 },
                             ));
                         }
@@ -478,7 +479,7 @@ impl Proof {
                         crate::analysis::Kind::Image => {
                             builder.add_empty_child(format!(
                                 "{}",
-                                b.substitute(&child.valuation).to_string().cyan()
+                                literal_style.paint(b.substitute(&child.valuation).to_string())
                             ));
                         }
                         crate::analysis::Kind::Layer => {
@@ -530,6 +531,17 @@ impl Proof {
         dfs(self, clauses, &mut builder, pred_kind, compact);
 
         builder.build()
+    }
+
+    fn get_color(color_of: &str) -> ansi_term::Style{
+        let colors = LsColors::from_env().unwrap_or_default();
+        let mut style: std::option::Option<&lscolors::Style>;
+        match color_of{
+            "ImagePred" => style = colors.style_for_indicator(lscolors::Indicator::Directory),
+            "Normal" => style = colors.style_for_indicator(lscolors::Indicator::Normal),
+            _ => style = colors.style_for_indicator(lscolors::Indicator::Normal)
+        };
+        style.map(Style::to_ansi_term_style).unwrap_or_default()
     }
 
     pub fn pretty_print(
@@ -601,8 +613,8 @@ impl fmt::Display for ResolutionError {
             ResolutionError::MaximumDepthExceeded(_, max_depth) => {
                 write!(f, "exceeded maximum depth of {}", max_depth)
             }
-            ResolutionError::BuiltinFailure(l, builtin_name) => {
-                write!(f, "builtin {builtin_name} failed to apply or unify: {l}")
+            ResolutionError::BuiltinFailure(_, builtin_name) => {
+                write!(f, "builtin {} failed to apply or unify", builtin_name)
             }
             ResolutionError::InsufficientRules(literal) => write!(
                 f,
@@ -709,36 +721,6 @@ impl ResolutionError {
             .with_labels(labels)
             .with_notes(notes)
     }
-
-    /// Returns a normalized version of a resolution error --- should be better for hash equality.
-    /// Without this, may get a lot of resolution errors, for example, that are identical except for a different
-    /// auxiliary variable index.
-    fn normalize(self) -> ResolutionError {
-        match self {
-            ResolutionError::UnknownPredicate(l) => {
-                ResolutionError::UnknownPredicate(l.normalized_terms())
-            }
-            ResolutionError::InsufficientGroundness(ls) => ResolutionError::InsufficientGroundness(
-                ls.into_iter().map(|x| x.normalized_terms()).collect(),
-            ),
-            ResolutionError::MaximumDepthExceeded(ls, s) => ResolutionError::MaximumDepthExceeded(
-                ls.into_iter().map(|x| x.normalized_terms()).collect(),
-                s,
-            ),
-            ResolutionError::BuiltinFailure(l, s) => {
-                ResolutionError::BuiltinFailure(l.normalized_terms(), s)
-            }
-            ResolutionError::InsufficientRules(l) => {
-                ResolutionError::InsufficientRules(l.normalized_terms())
-            }
-            ResolutionError::InconsistentGroundnessSignature(sigs) => {
-                ResolutionError::InconsistentGroundnessSignature(sigs.to_vec())
-            }
-            ResolutionError::NegationProof(l) => {
-                ResolutionError::NegationProof(l.normalized_terms())
-            }
-        }
-    }
 }
 
 /// Result of building the SLD tree.
@@ -758,8 +740,6 @@ impl From<SLDResult> for Result<Tree, Vec<Diagnostic<()>>> {
             Err(sld_result
                 .errors
                 .into_iter()
-                .map(ResolutionError::normalize)
-                .unique()
                 .map(ResolutionError::get_diagnostic)
                 .collect::<Vec<_>>())
         }
