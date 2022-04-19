@@ -139,12 +139,24 @@ impl Tree {
 
     /// Converts this tree to a directed graph.
     pub fn to_graph(&self, rules: &[Clause]) -> Graph {
+        /// Returns the first child node (possibly itself) that has greater than 1 resolvent, or the
+        /// first one that has an error.
+        /// Motivation: omits chains of uninteresting resolutions.
+        fn traverse_stack(t: &Tree) -> &Tree {
+            if t.error.is_some() || t.resolvents().len() != 1 {
+                t
+            } else {
+                traverse_stack(&t.resolvents().iter().next().unwrap().1.2)
+            }
+        }
+
         fn convert(
             t: &Tree,
             rules: &[Clause],
             nodes: &mut Vec<String>,
             edges: &mut Vec<(usize, usize, String)>,
         ) {
+            let t = traverse_stack(t);
             let curr_label = t
                 .goal
                 .iter()
@@ -181,7 +193,7 @@ impl Tree {
                     .error
                     .as_ref()
                     .expect("Failed path should store SLD error.");
-                let error_msg = err.to_string();
+                let error_msg = err.to_short_string();
                 nodes.push("FAIL".to_string());
                 edges.push((curr_index, curr_index + 1, error_msg));
             } else {
@@ -654,6 +666,37 @@ impl fmt::Display for ResolutionError {
 }
 
 impl ResolutionError {
+    fn to_short_string(&self) -> String {
+        match self {
+            ResolutionError::UnknownPredicate(literal) => {
+                if literal.predicate.is_operator() {
+                    format!("unknown operator: {}", literal.predicate)
+                } else {
+                    format!("unknown predicate: {}", literal.predicate)
+                }
+            }
+            ResolutionError::InsufficientGroundness(literals) => {
+                format!("insufficient groundness")
+            }
+            ResolutionError::MaximumDepthExceeded(_, max_depth) => {
+                format!("exceeded depth of {}", max_depth)
+            }
+            ResolutionError::BuiltinFailure(l, builtin_name) => {
+                format!("{builtin_name} failed")
+            }
+            ResolutionError::InsufficientRules(literal) => format!(
+                "failed to resolve: {}",
+                literal
+            ),
+            ResolutionError::InconsistentGroundnessSignature(_) => format!(
+                "clauses with inconsistent signatures",
+            ),
+            ResolutionError::NegationProof(lit) => {
+                format!("proof found for {}", lit.negated())
+            }
+        }
+    }
+
     fn severity(&self) -> Severity {
         match self {
             ResolutionError::UnknownPredicate(_) => Severity::Error,
@@ -938,6 +981,7 @@ pub fn sld(
 
         let mut success_resolvents = HashMap::new();
         let mut fail_resolvents = HashMap::new();
+        // FIXME: use alternative success
         if sld_res.tree.is_success() {
             if store_full_tree {
                 fail_resolvents.insert((lid, rid), (mgu, renaming, sld_res.tree));
