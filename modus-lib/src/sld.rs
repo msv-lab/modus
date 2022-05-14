@@ -113,8 +113,18 @@ pub struct Tree {
 }
 
 impl Tree {
+    /// true if this is a successful SLD tree
     fn is_success(&self) -> bool {
-        self.goal.is_empty() || !self.success_resolvents.is_empty()
+        self.goal.is_empty()
+            || (!self.success_resolvents.is_empty() && !self.contains_error_severity())
+    }
+
+    fn contains_error_severity(&self) -> bool {
+        self.error.as_ref().map(|e| e.severity()) == Some(Severity::Error)
+            || self
+                .fail_resolvents
+                .values()
+                .any(|(_, _, t)| t.contains_error_severity())
     }
 
     fn resolvents(
@@ -129,18 +139,52 @@ impl Tree {
 
     /// Converts this tree to a directed graph.
     pub fn to_graph(&self, rules: &[Clause]) -> Graph {
+        /// Returns the first child node (possibly itself) that has greater than 1 resolvent, or the
+        /// first one that has an error.
+        /// Motivation: omits chains of uninteresting resolutions.
+        fn traverse_stack(t: &Tree) -> &Tree {
+            if t.error.is_some() || t.resolvents().len() != 1 {
+                t
+            } else {
+                traverse_stack(&t.resolvents().iter().next().unwrap().1 .2)
+            }
+        }
+
         fn convert(
             t: &Tree,
             rules: &[Clause],
             nodes: &mut Vec<String>,
             edges: &mut Vec<(usize, usize, String)>,
         ) {
+            let t = traverse_stack(t);
             let curr_label = t
                 .goal
                 .iter()
-                .map(|l| l.literal.to_string())
+                .filter_map(|l| {
+                    if l.literal.predicate.0 != "string_concat" {
+                        Some(l.literal.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .chain(
+                    Tree::concat_to_f_string(
+                        &t.goal
+                            .iter()
+                            .filter_map(|l| {
+                                if l.literal.predicate.0 == "string_concat" {
+                                    Some(&l.literal)
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                    .unwrap(),
+                )
                 .collect::<Vec<_>>()
                 .join(",\n");
+
             nodes.push(curr_label);
             let curr_index = nodes.len() - 1;
 
@@ -149,7 +193,7 @@ impl Tree {
                     .error
                     .as_ref()
                     .expect("Failed path should store SLD error.");
-                let error_msg = err.to_string();
+                let error_msg = err.to_short_string();
                 nodes.push("FAIL".to_string());
                 edges.push((curr_index, curr_index + 1, error_msg));
             } else {
@@ -178,61 +222,61 @@ impl Tree {
         Graph { name, nodes, edges }
     }
 
-    /// Returns a string explaining the SLD tree, using indentation, etc.
-    pub fn explain(&self, rules: &[Clause]) -> StringItem {
-        /// Takes string_concat literals.
-        ///
-        /// Relies on the ordering of f-strings to represent some of the string_concats as f-strings
-        /// instead, which should be more compact.
-        /// Also returns any unhandled concats.
-        fn concat_to_f_string(concats: &[&Literal]) -> Option<Vec<String>> {
-            let mut output = Vec::new();
-            let (mut prev_string, mut prev_term) = (String::new(), None);
-            for concat in concats {
-                if concat.args.len() != 3 {
-                    return None;
-                }
+    /// Takes string_concat literals.
+    ///
+    /// Relies on the ordering of f-strings to represent some of the string_concats as f-strings
+    /// instead, which should be more compact.
+    /// Also returns any unhandled concats.
+    fn concat_to_f_string(concats: &[&Literal]) -> Option<Vec<String>> {
+        let mut output = Vec::new();
+        let (mut prev_string, mut prev_term) = (String::new(), None);
+        for concat in concats {
+            if concat.args.len() != 3 {
+                return None;
+            }
 
-                if !concat.args[0].is_constant_or_compound_constant()
-                    && Some(&concat.args[0]) == prev_term
-                {
-                    prev_string += if concat.args[1].is_constant_or_compound_constant() {
+            if !concat.args[0].is_constant_or_compound_constant()
+                && Some(&concat.args[0]) == prev_term
+            {
+                prev_string += if concat.args[1].is_constant_or_compound_constant() {
+                    let as_string = concat.args[1].to_string();
+                    format!("{}", &as_string[1..as_string.len() - 1])
+                } else {
+                    format!("${{{}}}", concat.args[1])
+                }
+                .as_str();
+            } else {
+                if let Some(t) = prev_term {
+                    let new_out = format!("f\"{prev_string}\" = {}", t);
+                    output.push(new_out);
+                }
+                prev_string = format!(
+                    "{}{}",
+                    if concat.args[0].is_constant_or_compound_constant() {
+                        let as_string = concat.args[0].to_string();
+                        format!("{}", &as_string[1..as_string.len() - 1])
+                    } else {
+                        format!("${{{}}}", concat.args[0])
+                    },
+                    if concat.args[1].is_constant_or_compound_constant() {
                         let as_string = concat.args[1].to_string();
                         format!("{}", &as_string[1..as_string.len() - 1])
                     } else {
                         format!("${{{}}}", concat.args[1])
                     }
-                    .as_str();
-                } else {
-                    if let Some(t) = prev_term {
-                        let new_out = format!("f\"{prev_string}\" = {}", t);
-                        output.push(new_out);
-                    }
-                    prev_string = format!(
-                        "{}{}",
-                        if concat.args[0].is_constant_or_compound_constant() {
-                            let as_string = concat.args[0].to_string();
-                            format!("{}", &as_string[1..as_string.len() - 1])
-                        } else {
-                            format!("${{{}}}", concat.args[0])
-                        },
-                        if concat.args[1].is_constant_or_compound_constant() {
-                            let as_string = concat.args[1].to_string();
-                            format!("{}", &as_string[1..as_string.len() - 1])
-                        } else {
-                            format!("${{{}}}", concat.args[1])
-                        }
-                    )
-                }
-                prev_term = Some(&concat.args[2]);
+                )
             }
-            if let Some(t) = prev_term {
-                let new_out = format!("f\"{prev_string}\" = {}", t);
-                output.push(new_out);
-            }
-            Some(output)
+            prev_term = Some(&concat.args[2]);
         }
+        if let Some(t) = prev_term {
+            let new_out = format!("f\"{prev_string}\" = {}", t);
+            output.push(new_out);
+        }
+        Some(output)
+    }
 
+    /// Returns a string explaining the SLD tree, using indentation, etc.
+    pub fn explain(&self, rules: &[Clause]) -> StringItem {
         fn dfs(t: &Tree, rules: &[Clause], depth: usize, builder: &mut TreeBuilder) {
             if t.goal.is_empty() {
                 builder.add_empty_child(format!("{}", "Success".green()));
@@ -276,7 +320,7 @@ impl Tree {
                             .filter(|x| x.predicate.0 != "string_concat")
                             .map(|x| x.to_string())
                             .chain(
-                                concat_to_f_string(
+                                Tree::concat_to_f_string(
                                     &rules[*rid]
                                         .substitute(&substitution_map)
                                         .body
@@ -622,6 +666,48 @@ impl fmt::Display for ResolutionError {
 }
 
 impl ResolutionError {
+    fn to_short_string(&self) -> String {
+        match self {
+            ResolutionError::UnknownPredicate(literal) => {
+                if literal.predicate.is_operator() {
+                    format!("unknown operator: {}", literal.predicate)
+                } else {
+                    format!("unknown predicate: {}", literal.predicate)
+                }
+            }
+            ResolutionError::InsufficientGroundness(literals) => {
+                format!("insufficient groundness")
+            }
+            ResolutionError::MaximumDepthExceeded(_, max_depth) => {
+                format!("exceeded depth of {}", max_depth)
+            }
+            ResolutionError::BuiltinFailure(l, builtin_name) => {
+                format!("{builtin_name} failed")
+            }
+            ResolutionError::InsufficientRules(literal) => {
+                format!("failed to resolve: {}", literal)
+            }
+            ResolutionError::InconsistentGroundnessSignature(_) => {
+                format!("clauses with inconsistent signatures",)
+            }
+            ResolutionError::NegationProof(lit) => {
+                format!("proof found for {}", lit.negated())
+            }
+        }
+    }
+
+    fn severity(&self) -> Severity {
+        match self {
+            ResolutionError::UnknownPredicate(_) => Severity::Error,
+            ResolutionError::InsufficientGroundness(_) => Severity::Error,
+            ResolutionError::MaximumDepthExceeded(_, _) => Severity::Warning,
+            ResolutionError::BuiltinFailure(_, _) => Severity::Warning,
+            ResolutionError::InsufficientRules(_) => Severity::Warning,
+            ResolutionError::InconsistentGroundnessSignature(_) => Severity::Error,
+            ResolutionError::NegationProof(_) => Severity::Warning,
+        }
+    }
+
     /// A list of strings providing relevant data about this error.
     /// If there is no useful list of data about this error, return None.
     /// E.g. `NegationProof` probably needs no more explanation than what's given
@@ -666,45 +752,35 @@ impl ResolutionError {
         }
 
         let message = self.to_string();
-        let (labels, notes, severity) = match self {
+        let (labels, notes) = match &self {
             ResolutionError::UnknownPredicate(literal) => (
                 get_position_labels(&[literal.clone()]),
-                get_notes(&[literal]),
-                Severity::Error,
+                get_notes(&[literal.clone()]),
             ),
-            ResolutionError::InsufficientGroundness(literals) => (
-                get_position_labels(&literals),
-                get_notes(&literals),
-                Severity::Warning,
-            ),
-            ResolutionError::MaximumDepthExceeded(literals, _) => (
-                get_position_labels(&literals),
-                get_notes(&literals),
-                Severity::Warning,
-            ),
+            ResolutionError::InsufficientGroundness(literals) => {
+                (get_position_labels(&literals), get_notes(&literals))
+            }
+            ResolutionError::MaximumDepthExceeded(literals, _) => {
+                (get_position_labels(&literals), get_notes(&literals))
+            }
             ResolutionError::BuiltinFailure(literal, _) => (
                 get_position_labels(&[literal.clone()]),
-                get_notes(&[literal]),
-                Severity::Warning,
+                get_notes(&[literal.clone()]),
             ),
             ResolutionError::InsufficientRules(literal) => (
                 get_position_labels(&[literal.clone()]),
-                get_notes(&[literal]),
-                Severity::Warning,
+                get_notes(&[literal.clone()]),
             ),
-            ResolutionError::InconsistentGroundnessSignature(sigs) => (
-                Vec::new(),
-                sigs.iter().map(|sig| sig.to_string()).collect(),
-                Severity::Error,
-            ),
+            ResolutionError::InconsistentGroundnessSignature(sigs) => {
+                (Vec::new(), sigs.iter().map(|sig| sig.to_string()).collect())
+            }
             ResolutionError::NegationProof(lit) => (
                 get_position_labels(&[lit.clone()]),
-                get_notes(&[lit]),
-                Severity::Warning,
+                get_notes(&[lit.clone()]),
             ),
         };
 
-        Diagnostic::new(severity)
+        Diagnostic::new(self.severity())
             .with_message(message)
             .with_labels(labels)
             .with_notes(notes)
@@ -712,7 +788,7 @@ impl ResolutionError {
 
     /// Returns a normalized version of a resolution error --- should be better for hash equality.
     /// Without this, may get a lot of resolution errors, for example, that are identical except for a different
-    /// auxiliary variable index.
+    /// renamed variable index.
     fn normalize(self) -> ResolutionError {
         match self {
             ResolutionError::UnknownPredicate(l) => {
@@ -904,19 +980,24 @@ pub fn sld(
 
         let mut success_resolvents = HashMap::new();
         let mut fail_resolvents = HashMap::new();
-        if sld_res.tree.is_success() {
+
+        // the negation proof should also fail if there is an error in the subtree
+        let subtree_error = sld_res.tree.contains_error_severity();
+        if sld_res.tree.is_success() || subtree_error {
             if store_full_tree {
                 fail_resolvents.insert((lid, rid), (mgu, renaming, sld_res.tree));
             }
 
             let err = ResolutionError::NegationProof(l.literal);
-            errs.insert(err.clone());
+            if !subtree_error {
+                errs.insert(err.clone());
+            }
             let tree = Tree {
                 goal: goal.to_owned(),
                 level,
                 success_resolvents,
                 fail_resolvents,
-                error: Some(err),
+                error: if subtree_error { None } else { Some(err) },
             };
 
             return SLDResult { tree, errors: errs };
