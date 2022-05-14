@@ -981,20 +981,24 @@ pub fn sld(
 
         let mut success_resolvents = HashMap::new();
         let mut fail_resolvents = HashMap::new();
-        // FIXME: use alternative success
-        if sld_res.tree.is_success() {
+
+        // the negation proof should also fail if there is an error in the subtree
+        let subtree_error = sld_res.tree.contains_error_severity();
+        if sld_res.tree.is_success() || subtree_error {
             if store_full_tree {
                 fail_resolvents.insert((lid, rid), (mgu, renaming, sld_res.tree));
             }
 
             let err = ResolutionError::NegationProof(l.literal);
-            errs.insert(err.clone());
+            if !subtree_error {
+                errs.insert(err.clone());
+            }
             let tree = Tree {
                 goal: goal.to_owned(),
                 level,
                 success_resolvents,
                 fail_resolvents,
-                error: Some(err),
+                error: if subtree_error { None } else { Some(err) },
             };
 
             return SLDResult { tree, errors: errs };

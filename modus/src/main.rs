@@ -544,18 +544,13 @@ fn main() {
                                         .expect("error when printing");
                                 }
                             }
-                            Err(e) => {
-                                for diag_error in e.iter().filter(|diag_error| {
-                                    diag_error.severity
-                                        <= codespan_reporting::diagnostic::Severity::Warning
-                                }) {
-                                    term::emit(&mut err_writer.lock(), &config, &file, &diag_error)
-                                        .expect("Error when printing to stderr.")
-                                }
-                                for diag_error in e.iter().filter(|diag_error| {
-                                    diag_error.severity
-                                        >= codespan_reporting::diagnostic::Severity::Error
-                                }) {
+                            Err(mut e) => {
+                                e.sort_by(|a, b| {
+                                    a.severity
+                                        .partial_cmp(&b.severity)
+                                        .unwrap_or(a.code.cmp(&b.code))
+                                });
+                                for diag_error in &e {
                                     term::emit(&mut err_writer.lock(), &config, &file, &diag_error)
                                         .expect("Error when printing to stderr.")
                                 }
