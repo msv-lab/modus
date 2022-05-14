@@ -146,7 +146,7 @@ impl Tree {
             if t.error.is_some() || t.resolvents().len() != 1 {
                 t
             } else {
-                traverse_stack(&t.resolvents().iter().next().unwrap().1.2)
+                traverse_stack(&t.resolvents().iter().next().unwrap().1 .2)
             }
         }
 
@@ -684,13 +684,12 @@ impl ResolutionError {
             ResolutionError::BuiltinFailure(l, builtin_name) => {
                 format!("{builtin_name} failed")
             }
-            ResolutionError::InsufficientRules(literal) => format!(
-                "failed to resolve: {}",
-                literal
-            ),
-            ResolutionError::InconsistentGroundnessSignature(_) => format!(
-                "clauses with inconsistent signatures",
-            ),
+            ResolutionError::InsufficientRules(literal) => {
+                format!("failed to resolve: {}", literal)
+            }
+            ResolutionError::InconsistentGroundnessSignature(_) => {
+                format!("clauses with inconsistent signatures",)
+            }
             ResolutionError::NegationProof(lit) => {
                 format!("proof found for {}", lit.negated())
             }
